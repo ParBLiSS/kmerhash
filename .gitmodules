@@ -1,0 +1,3 @@
+[submodule "ext/kmerind"]
+	path = ext/kmerind
+	url = https://github.com/ParBLiSS/kmerind.git
