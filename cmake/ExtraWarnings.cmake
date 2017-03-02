@@ -1,0 +1,16 @@
+
+
+if(COMPILER_WARNINGS_ENABLE_EXTRA)
+    add_definitions(${EXTRA_WARNING_FLAGS})
+endif()
+
+
+if(COMPILER_WARNINGS_ENABLE_CONVERSIONS)
+    add_definitions(${TYPE_CONVERSION_WARNING_FLAGS})
+    
+endif()
+
+if(COMPILER_WARNINGS_ENABLE_SUGGESTIONS)
+    add_definitions(${SUGGESTION_WARNING_FLAGS})
+endif()
+
