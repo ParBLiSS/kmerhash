@@ -1,4 +1,20 @@
 /*
+ * Copyright 2017 Georgia Institute of Technology
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
  * hashtable_OA_LP_doubling.hpp
  *
  *  Created on: Feb 27, 2017
@@ -8,17 +24,18 @@
 #ifndef KMERHASH_HASHTABLE_OA_LP_DOUBLING_HPP_
 #define KMERHASH_HASHTABLE_OA_LP_DOUBLING_HPP_
 
-#include <vector>
-#include <type_traits>
+#include <vector>   // for vector.
+#include <type_traits> // for is_constructible
+#include <iterator>  // for iterator traits
+#include <algorithm> // for transform
 
-#include "filter_iterator.hpp"
-#include "transform_iterator.hpp"
+#include "aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
 
 /*
  * get the next power of 2 for unsigned integer type.  based on http://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
  */
 template <typename T>
-inline constexpr T next_power_of_2(T x) {
+inline T next_power_of_2(T x) {
 	static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value, "ERROR: can only find power of 2 for unsigned integers.");
 
 	--x;
@@ -39,6 +56,68 @@ inline constexpr T next_power_of_2(T x) {
 	return x;
 }
 
+
+//template <typename T, typename ::std::enable_if<
+//	::std::is_integral<T>::value && !::std::is_signed<T>::value &&
+//	 (sizeof(T) == 1), int>::type = 1>
+//inline constexpr T next_power_of_2(T x) {
+//
+//	--x;
+//		x |= x >> 4;
+//		x |= x >> 2;
+//		x |= x >> 1;
+//	++x;
+//	return x;
+//}
+//
+//
+//template <typename T, typename ::std::enable_if<
+//	::std::is_integral<T>::value && !::std::is_signed<T>::value &&
+//	 (sizeof(T) == 2), int>::type = 1>
+//inline constexpr T next_power_of_2(T x) {
+//
+//	--x;
+//		x |= x >> 8;
+//		x |= x >> 4;
+//		x |= x >> 2;
+//		x |= x >> 1;
+//	++x;
+//	return x;
+//}
+//
+//template <typename T, typename ::std::enable_if<
+//	::std::is_integral<T>::value && !::std::is_signed<T>::value &&
+//	 (sizeof(T) == 4), int>::type = 1>
+//inline constexpr T next_power_of_2(T x) {
+//
+//	--x;
+//	    x |= x >> 16;
+//		x |= x >> 8;
+//		x |= x >> 4;
+//		x |= x >> 2;
+//		x |= x >> 1;
+//	++x;
+//	return x;
+//}
+//
+//template <typename T, typename ::std::enable_if<
+//	::std::is_integral<T>::value && !::std::is_signed<T>::value &&
+//	 (sizeof(T) == 8), int>::type = 1 >
+//inline constexpr T next_power_of_2(T x) {
+//
+//	--x;
+//	    x |= x >> 32;
+//  	    x |= x >> 16;
+//		x |= x >> 8;
+//		x |= x >> 4;
+//		x |= x >> 2;
+//		x |= x >> 1;
+//	++x;
+//	return x;
+//}
+
+
+namespace fsc {
 
 /**
  * @brief Open Addressing hashmap that uses linear addressing, with doubling for hashing, and with specialization for k-mers.
@@ -102,12 +181,21 @@ inline constexpr T next_power_of_2(T x) {
  *
  *  FIX:
  *  [x] remove max_probe - treat as if circular array.
- *  [ ] separate info from rest of struct, so as to remove use of transform_iterator, thus allowing us to change values through iterator.
+ *  [x] separate info from rest of struct, so as to remove use of transform_iterator, thus allowing us to change values through iterator. requires a new aux_filter_iterator.
  *  [ ] batch mode operations to allow more opportunities for optimization including SIMD
  *  [ ] predicated version of operations
  *  [ ] macros for repeated code.
+ *  [x] testing with k-mers
+ *  [ ] debug high reprobe count for insert, find, count, and update.
+ *  [ ] debug high reprobe count for erase.
+ *  [ ] robin hood hashing with backtracking.
  *
  *  first do the stupid simple implementation.
+ *
+ *  oa = open addressing
+ *  lp = linear probing
+ *  do = doubling
+ *  tuple = array of tuples (instead of tuple of arrays)
  */
 template <typename Key, typename T, typename Hash = ::std::hash<Key>,
 		typename Equal = ::std::equal_to<Key>, typename Allocator = ::std::allocator<std::pair<const Key, T> > >
@@ -117,58 +205,51 @@ public:
 
     using key_type              = Key;
     using mapped_type           = T;
-    using value_type            = ::std::pair<const Key, T>;
+    using value_type            = ::std::pair<Key, T>;
     using hasher                = Hash;
     using key_equal             = Equal;
 
 protected:
-    struct internal_value_type {
-    	key_type k;
-    	mapped_type v;
+    struct info_type {
+    	info_type(unsigned char val) : info(val) {}
+
     	unsigned char info;
 
+    	static constexpr unsigned char empty = 0x40;
+    	static constexpr unsigned char deleted = 0x80;
 
-    	inline bool is_empty() {
-    		return info == 0x80;
+
+    	inline bool is_empty() const {
+    		return info == empty;  // empty 0x40
     	}
-    	inline bool is_deleted() {
-    		return info == 0x40;
+    	inline bool is_deleted() const {
+    		return info == deleted;  // deleted. 0x80
     	}
-    	inline bool is_normal() {  // upper bits == 0
-    		return info < 0x40;
-    	}
-    	inline void set_normal() {
-    		info &= 0x3F;  // clear the bits;
-    	}
+    	inline bool is_normal() const {  // upper bits == 0
+    		return info < empty;  // lower 6 bits are set.
+      	}
     	inline void set_deleted() {
-    		info = 0x40;
+    		info = deleted;  // set the top bit.
     	}
     	inline void set_empty() {
-    		info = 0x80;  // nothing here.
+    		info = empty;  // nothing here.
+    	}
+    	inline void set_normal() {
+    		info &= 0x3F;  // clear the upper bits;
     	}
 
-    	inline key_type getKey() { return k; }
-    	inline mapped_type getVal() { return v; }
-    	inline value_type getKV() { return std::make_pair<const key_type, mapped_type>(k, v); }
+
 
     };
 
-    struct to_value_type {
-    	value_type operator()(internal_value_type const & x) {
-    		return x.getKV();
-    	}
-    };
 
-
-    using container_type		= ::std::vector<internal_value_type, Allocator>;
+    using container_type		= ::std::vector<value_type, Allocator>;
+    using info_container_type	= ::std::vector<info_type, Allocator>;
 
     // filter
     struct empty_deleted_filter {
-    	bool operator()(internal_value_type const & x) { return x.is_normal(); };
+    	bool operator()(info_type const & x) { return x.is_normal(); };
     };
-
-    using filter_iter = ::bliss::iterator::filter_iterator<empty_deleted_filter, typename container_type::iterator>;
-    using filter_const_iter = ::bliss::iterator::filter_iterator<empty_deleted_filter, typename container_type::const_iterator>;
 
 public:
 
@@ -177,23 +258,15 @@ public:
     using const_reference	    = typename container_type::const_reference;
     using pointer				= typename container_type::pointer;
     using const_pointer		    = typename container_type::const_pointer;
-    using iterator              = ::bliss::iterator::transform_iterator<filter_iter, to_value_type>;
-    using const_iterator        = ::bliss::iterator::transform_iterator<filter_const_iter, to_value_type>;
+    using iterator              = ::bliss::iterator::aux_filter_iterator<typename container_type::iterator, typename info_container_type::iterator, empty_deleted_filter>;
+    using const_iterator        = ::bliss::iterator::aux_filter_iterator<typename container_type::const_iterator, typename info_container_type::const_iterator, empty_deleted_filter>;
     using size_type             = typename container_type::size_type;
     using difference_type       = typename container_type::difference_type;
 
 
 protected:
 
-
-    empty_deleted_filter filter;
-    hasher hash;
-    key_equal eq;
-    to_value_type internal_to_external;
-
-    container_type container;
-
-    size_t size;
+    size_t lsize;
     mutable size_t buckets;
     mutable size_t min_load;
     mutable size_t max_load;
@@ -201,19 +274,63 @@ protected:
     mutable float max_load_factor;
 
 
+    empty_deleted_filter filter;
+    hasher hash;
+    key_equal eq;
+
+    container_type container;
+    info_container_type info_container;
+
+    // some stats.
+    size_t upsize_count;
+    size_t downsize_count;
+    size_t reprobes;   // for use as temp variable
+    size_t max_reprobes;
+
 public:
 
-
-	explicit hashmap_oa_lp_do_tuple(size_t const & _capacity = 128, float const & _min_load_factor = 0.2, float const & _max_load_factor = 0.6) : size(0) {
+    /**
+     * _capacity is the number of usable entries, not the capacity of the underlying container.
+     */
+	explicit hashmap_oa_lp_do_tuple(size_t const & _capacity = 128,
+			float const & _min_load_factor = 0.2,
+			float const & _max_load_factor = 0.6) :
+			lsize(0), buckets(next_power_of_2(static_cast<size_t>(static_cast<float>(_capacity) / _max_load_factor ))),
+			container(buckets), info_container(buckets, info_type(info_type::empty)),
+			upsize_count(0), downsize_count(0)
+			{
 		// get the nearest power of 2 above specified capacity.
-		buckets = next_power_of_2(_capacity);
+		// buckets = next_power_of_2(_capacity);
 
-		container.resize(buckets);
+//		container.resize(buckets);
+//		info_container.resize(buckets, 0x40);
 		// set the min load and max load thresholds.  there should be a good separation so that when resizing, we don't encounter a resize immediately.
 		set_min_load_factor(_min_load_factor);
 		set_max_load_factor(_max_load_factor);
 	};
 
+	/**
+	 * initialize and insert, allocate about 1/4 of input, and resize at the end to bound the usage.
+	 */
+	template <typename Iter, typename = typename std::enable_if<
+			::std::is_constructible<value_type, typename ::std::iterator_traits<Iter>::value_type>::value  ,int>::type >
+	hashmap_oa_lp_do_tuple(Iter begin, Iter end, float const & _min_load_factor = 0.2, float const & _max_load_factor = 0.6) :
+		hashmap_oa_lp_do_tuple(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
+
+		for (auto it = begin; it != end; ++it) {
+			insert(value_type(*it));  //local insertion.  this requires copy construction...
+		}
+	}
+
+	~hashmap_oa_lp_do_tuple() {
+		::std::cout << "SUMMARY:" << std::endl;
+		::std::cout << "  upsize\t= " << upsize_count << std::endl;
+		::std::cout << "  downsize\t= " << downsize_count << std::endl;
+	}
+
+	/**
+	 * @brief set the load factors.
+	 */
 	inline void set_min_load_factor(float const & _min_load_factor) {
 		min_load_factor = _min_load_factor;
 		min_load = static_cast<size_t>(static_cast<float>(container.size()) * min_load_factor);
@@ -225,9 +342,11 @@ public:
 		max_load = static_cast<size_t>(static_cast<float>(container.size()) * max_load_factor);
 	}
 
-
+	/**
+	 * @brief get the load factors.
+	 */
 	inline float get_load_factor() {
-		return static_cast<float>(size) / static_cast<float>(container.size());
+		return static_cast<float>(lsize) / static_cast<float>(container.size());
 	}
 
 	inline float get_min_load_factor() {
@@ -240,28 +359,61 @@ public:
 
 
 
-
+	/**
+	 * @brief iterators
+	 */
 	iterator begin() {
-		return iterator(filter_iter(filter, container.begin(), container.end()), internal_to_external);
+		return iterator(container.begin(), info_container.begin(), info_container.end(), filter);
 	}
 
 	iterator end() {
-		return iterator(filter_iter(filter, container.end()), internal_to_external);
+		return iterator(container.end(), info_container.end(), filter);
 	}
 
-	const_iterator cbegin() {
-		return const_iterator(filter_const_iter(filter, container.cbegin(), container.cend()), internal_to_external);
+	const_iterator cbegin() const {
+		return const_iterator(container.cbegin(), info_container.cbegin(), info_container.cend(), filter);
 	}
 
-	const_iterator cend() {
-		return const_iterator(filter_const_iter(filter, container.cend()), internal_to_external);
+	const_iterator cend() const {
+		return const_iterator(container.cend(), info_container.cend(), filter);
 	}
 
+
+	std::vector<std::pair<key_type, mapped_type> > to_vector() const {
+		std::vector<std::pair<key_type, mapped_type> > output(lsize);
+
+		std::copy(this->cbegin(), this->cend(), output.begin());
+
+		return output;
+	}
+
+	std::vector<key_type > keys() const {
+		std::vector<key_type > output(lsize);
+
+		std::transform(this->cbegin(), this->cend(), output.begin(),
+				[](value_type const & x){ return x.first; });
+
+		return output;
+	}
+
+
+	size_t size() const {
+		return this->lsize;
+	}
+
+	/**
+	 * @brief  mark all entries as clear.
+	 */
+	void clear() {
+		this->lsize = 0;
+		this->info_container.clear();
+		this->info_container.resize(buckets, info_type(info_type::empty));
+	}
 
 	/**
 	 * @brief reserve space for specified entries.
 	 */
-	void reserve(size_type n ) {
+	void reserve(size_type n) {
 		if (n > this->max_load) {   // if requested more than current max load, then we need to resize up.
 			rehash(next_power_of_2(n));   // rehash to the new size.    current bucket count should be less than next_power_of_2(n).
 		}  // do not resize down.  do so only when erase.
@@ -276,41 +428,74 @@ public:
 		assert(((n-1) & n) == 0);
 
 		if (n > buckets) {
+			++upsize_count;
+		}
+		else if (n < buckets) {
+			++downsize_count;
+		}
+
+		if (n != buckets) {
+
 			buckets = n;
 			container_type tmp(buckets);
+			info_container_type tmp_info(buckets, info_type(info_type::empty));
 			container.swap(tmp);
+			info_container.swap(tmp_info);
 
 			min_load = static_cast<size_t>(static_cast<float>(container.size()) * min_load_factor);
 			max_load = static_cast<size_t>(static_cast<float>(container.size()) * max_load_factor);
 
-			insert(tmp.begin(), tmp.end());
+			copy(tmp.begin(), tmp.end(), tmp_info.begin());
 		}
 	}
 
 
 
 protected:
-	void insert(typename container_type::iterator begin, typename container_type::iterator end) {
-		for (auto it = begin; it != end; ++it) {
-			if ((*it).is_normal()) {
-				insert(::std::move(*it));
+	/**
+	 * @brief inserts a range into the current hash table.
+	 */
+	void copy(typename container_type::iterator begin, typename container_type::iterator end, typename info_container_type::iterator info_begin) {
+
+		size_t count = 0;
+
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+
+		auto it = begin;
+		auto iit = info_begin;
+		for (; it != end; ++it, ++iit) {
+			if ((*iit).is_normal()) {
+				count += copy_one(::std::move(*it), ::std::move(*iit));
 			}
 		}
+
+		std::cout << "REHASH copy:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
+					"\tvalid=" << count << "\ttotal" << std::distance(begin, end) <<
+					"\tbuckets=" << buckets <<std::endl;
+
+		this->reprobes = 0;
+		this->max_reprobes = 0;
 	}
 
 
 	/**
 	 * @brief insert at the specified position.  does NOT check if already exists.  for internal use during rehash only.
+	 * @details passed in info should have "normal" flag.
+	 * @return reprobe count
 	 */
-	size_type insert(internal_value_type&& internal_value) {
-		size_type pos = hash(internal_value.k) % buckets;
+	size_type copy_one(value_type&& value, info_type&& info) {
+		size_type pos = hash(value.first) % buckets;
 		size_type i = pos;
 
-		while ((i < buckets) && container[i].is_normal()) ++i;  // find a place to insert.
+		while ((i < buckets) && info_container[i].is_normal()) ++i;  // find a place to insert.
+		size_t reprobe = i - pos;
+
 		if (i == buckets) {
 			// did not find one, so search from beginning
 			i = 0;
-			while ((i < pos) && container[i].is_normal()) ++i;  // find a place to insert.
+			while ((i < pos) && info_container[i].is_normal()) ++i;  // find a place to insert.
+			reprobe += i;
 
 			if (i == pos) // nothing was found.  this should not happen
 				throw std::logic_error("ERROR: did not find any place to insert.  should not have happend");
@@ -318,24 +503,29 @@ protected:
 			// else 0 <= i < pos
 		} // else  pos <= i < buckets.
 
-		// insert at i.
-		container[i] = internal_value;
-		container[i].info = 0;
-		container[i].set_normal();
+		this->reprobes += reprobe;
+		this->max_reprobes = std::max(this->max_reprobes, reprobe);
 
-		return i;
+		// insert at i.
+		container[i] = value;
+		info_container[i].info = 0;
+		info_container[i].set_normal();
+
+		return 1;
 	}
 
 public:
 
 // HERE:  TODO: change insert to remove reprobe distance and associated distance.
 	/**
-	 * @brief insert a single key, value pair.
+	 * @brief insert a single key-value pair into container.
 	 */
 	std::pair<iterator, bool> insert(key_type const & key, mapped_type const & val) {
 
+		size_type reprobe = 0;
+
 		// first check if we need to resize.
-		if (size >= max_load) rehash(buckets << 1);
+		if (lsize >= max_load) rehash(buckets << 1);
 
 		// first get the bucket id
 		size_type pos = hash(key) % buckets;
@@ -343,48 +533,104 @@ public:
 		size_type insert_pos = buckets;
 
 		for (i = pos; i < buckets; ++i) {
-			if (container[i].is_empty()) {
+			if (info_container[i].is_empty()) {
 				insert_pos = i;
 				break;
 			}
 
-			if (container[i].is_deleted() && (insert_pos == buckets))
+			if (info_container[i].is_deleted() && (insert_pos == buckets)) {
+//				std::cout << " check deleted pos = " << pos << " buckets = " << buckets << " i = " << i << " insert_pot " << insert_pos << std::endl;
+
 				insert_pos = i;
-			else if (container[i].is_normal() && (equal(key, container[i].k)))
+
+			} else if (info_container[i].is_normal() && (eq(key, container[i].first))) {
+
+				this->reprobes += i - pos;
+				this->max_reprobes = std::max(this->max_reprobes, (i-pos));
 				// found a match
-				return std::make_pair(iterator(filter_iterator(filter, container.begin() + i, container.end()), internal_to_external), false);
+				return std::make_pair(iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter), false);
+			}
 		}
+//		std::cout << " first part insertion pos = " << pos << " buckets = " << buckets << " i = " << i << " insert_pot " << insert_pos << std::endl;
+		this->reprobes += i-pos;
+		reprobe = i-pos;
+
 		if (i == buckets) {
 			// now repeat for first part
 			for (i = 0; i < pos; ++i) {
-				if (container[i].is_empty()) {
+				if (info_container[i].is_empty()) {
 					insert_pos = i;
 					break;
 				}
 
-				if (container[i].is_deleted() && (insert_pos == buckets))
+				if (info_container[i].is_deleted() && (insert_pos == buckets))
 					insert_pos = i;
-				else if (container[i].is_normal() && (equal(key, container[i].k)))
+				else if (info_container[i].is_normal() && (eq(key, container[i].first))) {
+					this->reprobes += i;
+					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
 					// found a match
-					return std::make_pair(iterator(filter_iterator(filter, container.begin() + i, container.end()), internal_to_external), false);
+					return std::make_pair(iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter), false);
+
+				}
 			}
+
+			this->reprobes += i;
+			reprobe += i;
 		}
+
+		this->max_reprobes = std::max(this->max_reprobes, reprobe);
 
 		// finally check if we need to insert.
 		if (insert_pos == buckets) {  // went through the whole container.  must be completely full.
-			throw std::logic_error("ERROR: did not find a slot to insert into.  container must be full.  should not happen.")l
+			throw std::logic_error("ERROR: did not find a slot to insert into.  container must be full.  should not happen.");
 		}
 
-		container[insert_pos].k = key;
-		container[insert_pos].v = val;
-		container[insert_pos].info = 0;
-		container[insert_pos].set_normal();
-		++size;
+		container[insert_pos].first = key;
+		container[insert_pos].second = val;
+		info_container[insert_pos].info = 0;
+		info_container[insert_pos].set_normal();
+		++lsize;
 
-		return std::make_pair(iterator(filter_iterator(filter, container.begin() + insert_pos, container.end()), internal_to_external), true);
+		return std::make_pair(iterator(container.begin() + insert_pos, info_container.begin()+ insert_pos, info_container.end(), filter), true);
 
 	}
 
+	std::pair<iterator, bool> insert(value_type const & vv) {
+		return insert(vv.first, vv.second);
+	}
+
+	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
+		typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
+	void insert(Iter begin, Iter end) {
+		size_t input_size = ::std::distance(begin, end);
+
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+
+		size_t count = 0;
+		iterator dummy;
+		bool success;
+
+		for (auto it = begin; it != end; ++it) {
+			std::tie(dummy, success) = insert(value_type(*it));  //local insertion.  this requires copy construction...
+
+			if (success) ++count;
+		}
+
+
+		std::cout << "INSERT batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
+					"\tvalid=" << count << "\ttotal" << input_size <<
+					"\tbuckets=" << buckets <<std::endl;
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+
+		reserve(lsize);  // resize down as needed
+	}
+
+
+	/**
+	 * @brief count the presence of a key
+	 */
 	size_type count( key_type const & k ) const {
 
 		// first get the bucket id
@@ -393,10 +639,10 @@ public:
 		size_t i;
 		for (i = pos; i < buckets; ++i) {
 			// first from here to end.
-			if (container[i].is_empty())  // done
+			if (info_container[i].is_empty())  // done
 				break;
 
-			if (container[i].is_normal() && (equal(k, container[i].k)))
+			if (info_container[i].is_normal() && (eq(k, container[i].first)))
 				return 1;
 		}  // ends when i == buckets or empty node.
 		if (i == buckets) {
@@ -404,10 +650,10 @@ public:
 
 			for (i = 0; i < pos; ++i) {
 				// first from here to end.
-				if (container[i].is_empty())  // done
+				if (info_container[i].is_empty())  // done
 					break;
 
-				if (container[i].is_normal() && (equal(k, container[i].k)))
+				if (info_container[i].is_normal() && (eq(k, container[i].first)))
 					return 1;
 			}  // ends when i == buckets or empty node.
 		}
@@ -415,6 +661,9 @@ public:
 		return 0;
 	}
 
+	/**
+	 * @brief find the iterator for a key
+	 */
 	iterator find(key_type const & k) {
 
 		// first get the bucket id
@@ -423,29 +672,32 @@ public:
 		size_t i;
 		for (i = pos; i < buckets; ++i) {
 			// first from here to end.
-			if (container[i].is_empty())  // done
+			if (info_container[i].is_empty())  // done
 				break;
 
-			if (container[i].is_normal() && (equal(k, container[i].k)))
-				return iterator(filter_iterator(filter, container.begin() + i, container.end()), internal_to_external);;
+			if (info_container[i].is_normal() && (eq(k, container[i].first)))
+				return iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter);
 		}  // ends when i == buckets or empty node.
 		if (i == buckets) {
 			// search the rest of list.
 
 			for (i = 0; i < pos; ++i) {
 				// first from here to end.
-				if (container[i].is_empty())  // done
+				if (info_container[i].is_empty())  // done
 					break;
 
-				if (container[i].is_normal() && (equal(k, container[i].k)))
-					return iterator(filter_iterator(filter, container.begin() + i, container.end()), internal_to_external);;
+				if (info_container[i].is_normal() && (eq(k, container[i].first)))
+					return iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter);
 			}  // ends when i == buckets or empty node.
 		}
-		// if we are here, then we did not find it.  return 0.
-		return iterator(filter_iterator(filter, container.end()), internal_to_external);  // end iterator.;
+		// if we are here, then we did not find it.  return  end iterator.
+		return iterator(container.end(), info_container.end(), filter);
 
 	}
 
+	/**
+	 * @brief find the iterator for a key
+	 */
 	const_iterator find(key_type const & k) const {
 
 		// first get the bucket id
@@ -454,77 +706,182 @@ public:
 		size_t i;
 		for (i = pos; i < buckets; ++i) {
 			// first from here to end.
-			if (container[i].is_empty())  // done
+			if (info_container[i].is_empty())  // done
 				break;
 
-			if (container[i].is_normal() && (equal(k, container[i].k)))
-				return const_iterator(filter_iterator(filter, container.cbegin() + i, container.cend()), internal_to_external);;
+			if (info_container[i].is_normal() && (eq(k, container[i].first)))
+				return const_iterator(container.cbegin() + i, info_container.cbegin() + i, info_container.cend(), filter);
 		}  // ends when i == buckets or empty node.
 		if (i == buckets) {
 			// search the rest of list.
 
 			for (i = 0; i < pos; ++i) {
 				// first from here to end.
-				if (container[i].is_empty())  // done
+				if (info_container[i].is_empty())  // done
 					break;
 
-				if (container[i].is_normal() && (equal(k, container[i].k)))
-					return const_iterator(filter_iterator(filter, container.cbegin() + i, container.cend()), internal_to_external);;
+				if (info_container[i].is_normal() && (eq(k, container[i].first)))
+					return const_iterator(container.cbegin() + i, info_container.cbegin() + i, info_container.cend(), filter);
 			}  // ends when i == buckets or empty node.
 		}
 		// if we are here, then we did not find it.  return 0.
-		return const_iterator(filter_iterator(filter, container.cend()), internal_to_external);  // end iterator.;
+		return const_iterator(container.cend(), info_container.cend(), filter);
+
 	}
 
-	void update() {
-		// TODO: can't do right now, since we have a transform iterator so value cannot be updated.
+	/**
+	 * @brief.  updates current value.  behaves like insert, but overwrites the existing.
+	 */
+	iterator update(key_type const & k, mapped_type const & val) {
+		// find and update.  if not present, insert.
+		std::pair<iterator, bool> result = insert(k, val);
+
+		if (! result.second) {  // not inserted and no exception, so an equal entry has been found.
+			result.first->second = val;   // so update.
+
+		} // else inserted. so updated.
+
+		return result.first;
 	}
 
-	size_type erase(key_type const & k) {
+
+	/**
+	 * @brief erases a key.
+	 */
+	size_type erase_no_resize(key_type const & k) {
 
 		// first get the bucket id
 		size_t pos = hash(k) % buckets;
 
+		size_t reprobe = 0;
+
 		size_t i;
 		for (i = pos; i < buckets; ++i) {
 			// first from here to end.
-			if (container[i].is_empty())  // done
+			if (info_container[i].is_empty()) // done
 				break;
 
-			if (container[i].is_normal() && (equal(k, container[i].k))) {
-				container[i].set_deleted();
+			if (info_container[i].is_normal() && (eq(k, container[i].first))) {
 
-				--size;
+				info_container[i].set_deleted();
 
-				if (size < min_load) rehash(buckets >> 1);
+				--lsize;
+				this->reprobes += i - pos;
+				this->max_reprobes = std::max(this->max_reprobes, (i - pos));
 
 				return 1;
 			}
 		}  // ends when i == buckets or empty node.
+//		std::cout << "first: pos = " << pos << "\ti = " << i << std::endl;
+		this->reprobes += i-pos;
+		reprobe = i-pos;
+
+
+
 		if (i == buckets) {
 			// search the rest of list.
 
 			for (i = 0; i < pos; ++i) {
 				// first from here to end.
-				if (container[i].is_empty())  // done
+				if (info_container[i].is_empty())  // done
 					break;
 
-				if (container[i].is_normal() && (equal(k, container[i].k))) {
-					container[i].set_deleted();
+				if (info_container[i].is_normal() && (eq(k, container[i].first))) {
 
-					--size;
+					info_container[i].set_deleted();
 
-					if (size < min_load) rehash(buckets >> 1);
+					--lsize;
+
+					this->reprobes += i;
+					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
+
 					return 1;
 				}
 			}  // ends when i == buckets or empty node.
+			std::cout << "second: pos = " << pos << "\ti = " << i << std::endl;
+
+			this->reprobes += i;
+			reprobe += i;
 		}
+		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+
 		// if we are here, then we did not find it.  return 0.
 		return 0;
 
 	}
 
+	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
+		typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
+	size_type erase_no_resize(Iter begin, Iter end) {
+		size_type erased = 0;
+
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+
+
+		for (auto it = begin; it != end; ++it) {
+			erased += erase_no_resize((*it).first);
+		}
+
+		std::cout << "ERASE batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
+					"\tvalid=" << erased << "\ttotal" << ::std::distance(begin, end) <<
+					"\tbuckets=" << buckets <<std::endl;
+
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+
+		return erased;
+	}
+
+	template <typename Iter, typename std::enable_if<std::is_constructible<key_type,
+		typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
+	size_type erase_no_resize(Iter begin, Iter end) {
+		size_type erased = 0;
+
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+
+
+		for (auto it = begin; it != end; ++it) {
+			erased += erase_no_resize(*it);
+		}
+
+		std::cout << "ERASE batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
+					"\tvalid=" << erased << "\ttotal" << ::std::distance(begin, end) <<
+					"\tbuckets=" << buckets <<std::endl;
+
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+
+		return erased;
+	}
+
+	/**
+	 * @brief erases a key.
+	 */
+	size_type erase(key_type const & k) {
+
+		size_type res = erase_no_resize(k);
+
+		if (lsize < min_load) rehash(buckets >> 1);
+
+		return res;
+	}
+
+	template <typename Iter>
+	size_type erase(Iter begin, Iter end) {
+
+		size_type erased = erase_no_resize(begin, end);
+
+		//std::cout << "erase resize: curr size is " << lsize << " target max_load is " << (static_cast<float>(lsize) / max_load_factor) << " buckets is " <<
+		//		next_power_of_2(static_cast<size_t>(static_cast<float>(lsize) / max_load_factor)) << std::endl;
+		if (lsize < min_load) rehash(next_power_of_2(static_cast<size_t>(static_cast<float>(lsize) / max_load_factor)));
+
+		return erased;
+	}
+
+
 };
 
-
+}  // namespace fsc
 #endif /* KMERHASH_HASHTABLE_OA_LP_DOUBLING_HPP_ */
