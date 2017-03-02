@@ -20,6 +20,7 @@
 #include "containers/densehash_map.hpp"
 
 #include "kmerhash/hashtable_OA_LP_doubling.hpp"
+#include "kmerhash/hashtable_OA_RH_doubling.hpp"
 
 #include "common/kmer.hpp"
 #include "common/kmer_transform.hpp"
@@ -669,67 +670,67 @@ void benchmark_densehash_full_multimap(size_t const count,  size_t const repeat_
 
 
 
-//template <typename Kmer, typename Value>
-//void benchmark_flat_hash_map(size_t const count,  size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
-//  BL_BENCH_INIT(map);
-//
-//  std::vector<Kmer> query;
-//
-//  BL_BENCH_START(map);
-//  // no transform involved.
-//  ::ska::flat_hash_map<Kmer, Value,
-//	::bliss::kmer::hash::farm<Kmer, false> > map(count * 2 / repeat_rate);
-//  BL_BENCH_END(map, "reserve", count);
-//
-//  {
-//    BL_BENCH_START(map);
-//    std::vector<::std::pair<Kmer, Value> > input(count);
-//    BL_BENCH_END(map, "reserve input", count);
-//
-//    BL_BENCH_START(map);
-//    generate_input(input, count, repeat_rate);
-//    query.resize(count / query_frac);
-//    std::transform(input.begin(), input.begin() + input.size() / query_frac, query.begin(),
-//                   [](::std::pair<Kmer, Value> const & x){
-//      return x.first;
-//    });
-//    BL_BENCH_END(map, "generate input", input.size());
-//
-//    BL_BENCH_START(map);
-//    map.insert(input.begin(), input.end());
-//    BL_BENCH_END(map, "insert", map.size());
-//  }
-//
-//  BL_BENCH_START(map);
-//  size_t result = 0;
-//  size_t i = 0;
-//  size_t max = count / query_frac;
-//  for (; i < max; ++i) {
-//    auto iter = map.find(query[i]);
-//    result ^= (*iter).second;
-//  }
-//  BL_BENCH_END(map, "find", result);
-//
-//  BL_BENCH_START(map);
-//  result = 0;
-//  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-//    result += map.count(query[i]);
-//  }
-//  BL_BENCH_END(map, "count", result);
-//
-//  BL_BENCH_START(map);
-////  result = map.erase(query.begin(), query.end());
-//
-//  result = 0;
-//  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-//    result += map.erase(query[i]);
-//  }
-////  map.resize(0);
-//  BL_BENCH_END(map, "erase", result);
-//
-//
-//  BL_BENCH_REPORT_MPI_NAMED(map, "flat_hash_map", comm);
-//}
+template <typename Kmer, typename Value>
+void benchmark_flat_hash_map(size_t const count,  size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
+  BL_BENCH_INIT(map);
+
+  std::vector<Kmer> query;
+
+  BL_BENCH_START(map);
+  // no transform involved.
+  ::ska::flat_hash_map<Kmer, Value,
+	::bliss::kmer::hash::farm<Kmer, false> > map(count * 2 / repeat_rate);
+  BL_BENCH_END(map, "reserve", count);
+
+  {
+    BL_BENCH_START(map);
+    std::vector<::std::pair<Kmer, Value> > input(count);
+    BL_BENCH_END(map, "reserve input", count);
+
+    BL_BENCH_START(map);
+    generate_input(input, count, repeat_rate);
+    query.resize(count / query_frac);
+    std::transform(input.begin(), input.begin() + input.size() / query_frac, query.begin(),
+                   [](::std::pair<Kmer, Value> const & x){
+      return x.first;
+    });
+    BL_BENCH_END(map, "generate input", input.size());
+
+    BL_BENCH_START(map);
+    map.insert(input.begin(), input.end());
+    BL_BENCH_END(map, "insert", map.size());
+  }
+
+  BL_BENCH_START(map);
+  size_t result = 0;
+  size_t i = 0;
+  size_t max = count / query_frac;
+  for (; i < max; ++i) {
+    auto iter = map.find(query[i]);
+    result ^= (*iter).second;
+  }
+  BL_BENCH_END(map, "find", result);
+
+  BL_BENCH_START(map);
+  result = 0;
+  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
+    result += map.count(query[i]);
+  }
+  BL_BENCH_END(map, "count", result);
+
+  BL_BENCH_START(map);
+//  result = map.erase(query.begin(), query.end());
+
+  result = 0;
+  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
+    result += map.erase(query[i]);
+  }
+//  map.resize(0);
+  BL_BENCH_END(map, "erase", result);
+
+
+  BL_BENCH_REPORT_MPI_NAMED(map, "flat_hash_map", comm);
+}
 
 
 
@@ -846,10 +847,13 @@ void benchmark_hashmap_oa_lp_do_tuple(size_t const count,  size_t const repeat_r
   BL_BENCH_END(map, "find", result);
 
   BL_BENCH_START(map);
-  result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    result += map.count(query[i]);
-  }
+  auto counts = map.count(query.begin(), query.end());
+  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+
+  // result = 0
+//  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
+//    result += map.count(query[i]);
+//  }
   BL_BENCH_END(map, "count", result);
 
   BL_BENCH_START(map);
@@ -866,6 +870,71 @@ void benchmark_hashmap_oa_lp_do_tuple(size_t const count,  size_t const repeat_r
 }
 
 
+
+
+template <typename Kmer, typename Value>
+void benchmark_hashmap_oa_rh_do_tuple(size_t const count,  size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
+  BL_BENCH_INIT(map);
+
+  std::vector<Kmer> query;
+
+  BL_BENCH_START(map);
+  // no transform involved.
+  ::fsc::hashmap_oa_rh_do_tuple<Kmer, Value,
+	::bliss::kmer::hash::farm<Kmer, false> > map(count * 2 / repeat_rate);
+  BL_BENCH_END(map, "reserve", count);
+
+  {
+    BL_BENCH_START(map);
+    std::vector<::std::pair<Kmer, Value> > input(count);
+    BL_BENCH_END(map, "reserve input", count);
+
+    BL_BENCH_START(map);
+    generate_input(input, count, repeat_rate);
+    query.resize(count / query_frac);
+    std::transform(input.begin(), input.begin() + input.size() / query_frac, query.begin(),
+                   [](::std::pair<Kmer, Value> const & x){
+      return x.first;
+    });
+    BL_BENCH_END(map, "generate input", input.size());
+
+    BL_BENCH_START(map);
+    map.insert(input.begin(), input.end());
+    BL_BENCH_END(map, "insert", map.size());
+  }
+
+  BL_BENCH_START(map);
+  size_t result = 0;
+  size_t i = 0;
+  size_t max = count / query_frac;
+  for (; i < max; ++i) {
+    auto iter = map.find(query[i]);
+    result ^= (*iter).second;
+  }
+  BL_BENCH_END(map, "find", result);
+
+  BL_BENCH_START(map);
+  auto counts = map.count(query.begin(), query.end());
+  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+
+  // result = 0
+//  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
+//    result += map.count(query[i]);
+//  }
+  BL_BENCH_END(map, "count", result);
+
+  BL_BENCH_START(map);
+  result = map.erase(query.begin(), query.end());
+
+//  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
+//    result += map.erase(query[i]);
+//  }
+//  map.resize(0);
+  BL_BENCH_END(map, "erase", result);
+
+
+  BL_BENCH_REPORT_MPI_NAMED(map, "hashmap_oa_hr_do_tuple", comm);
+}
 
 
 template <typename DataType>
@@ -1384,6 +1453,7 @@ int main(int argc, char** argv) {
   BL_BENCH_COLLECTIVE_END(test, "densehash_map_warmup", count, comm);
 
   //=========== tommy
+#if 0
   BL_BENCH_START(test);
   benchmark_tommyhashdyn<Kmer, size_t>(count, repeat_rate, query_frac, comm);
   BL_BENCH_COLLECTIVE_END(test, "tommyhashdyn", count, comm);
@@ -1395,6 +1465,7 @@ int main(int argc, char** argv) {
   BL_BENCH_START(test);
   benchmark_tommytrie<Kmer, size_t>(count, repeat_rate, query_frac, comm);
   BL_BENCH_COLLECTIVE_END(test, "tommytrie", count, comm);
+#endif
   //------------ end tommy
 
 
@@ -1421,9 +1492,9 @@ int main(int argc, char** argv) {
   BL_BENCH_START(test);
   benchmark_densehash_full_map<FullKmer, size_t, false>(count, repeat_rate, query_frac, comm);
   BL_BENCH_COLLECTIVE_END(test, "densehash_full_map", count, comm);
+// ------------------- end dense hash map wrapped.
 
-  //================ my new hashmap
-
+  // =============== google dense hash map
   BL_BENCH_START(test);
   benchmark_google_densehash_map<Kmer, size_t>(count, repeat_rate, query_frac, comm);
   BL_BENCH_COLLECTIVE_END(test, "benchmark_google_densehash_map", count, comm);
@@ -1435,10 +1506,9 @@ int main(int argc, char** argv) {
   BL_BENCH_START(test);
   benchmark_google_densehash_map<FullKmer, size_t>(count, repeat_rate, query_frac, comm);
   BL_BENCH_COLLECTIVE_END(test, "benchmark_google_densehash_map_Full", count, comm);
-  // --------------- my new hashmap.
+  // --------------- end google
 
-  // =============== google dense hash map
-
+  //================ my new hashmap
   BL_BENCH_START(test);
   benchmark_hashmap_oa_lp_do_tuple<Kmer, size_t>(count, repeat_rate, query_frac, comm);
   BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_lp_do_tuple", count, comm);
@@ -1450,21 +1520,35 @@ int main(int argc, char** argv) {
   BL_BENCH_START(test);
   benchmark_hashmap_oa_lp_do_tuple<FullKmer, size_t>(count, repeat_rate, query_frac, comm);
   BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_lp_do_tuple_Full", count, comm);
+  // --------------- my new hashmap.
 
-  // --------------- end google
+  //================ my new hashmap Robin hood
+  BL_BENCH_START(test);
+  benchmark_hashmap_oa_rh_do_tuple<Kmer, size_t>(count, repeat_rate, query_frac, comm);
+  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_tuple", count, comm);
+
+  BL_BENCH_START(test);
+  benchmark_hashmap_oa_rh_do_tuple<DNA5Kmer, size_t>(count, repeat_rate, query_frac, comm);
+  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_tuple_DNA5", count, comm);
+
+  BL_BENCH_START(test);
+  benchmark_hashmap_oa_rh_do_tuple<FullKmer, size_t>(count, repeat_rate, query_frac, comm);
+  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_tuple_Full", count, comm);
+  // --------------- my new hashmap.
 
 
 //  // ============ flat_hash_map
+//  // doesn't compile.  it's using initializer lists extensively, and the templated_iterator is having trouble constructing from initializer list.
 //  BL_BENCH_START(test);
-//  benchmark_flat_hash_map<Kmer, size_t>(count, query_frac, comm);
+//  benchmark_flat_hash_map<Kmer, size_t>(count, repeat_rate, query_frac, comm);
 //  BL_BENCH_COLLECTIVE_END(test, "flat_hash_map", count, comm);
 //
 //  BL_BENCH_START(test);
-//  benchmark_flat_hash_map<DNA5Kmer, size_t>(count, query_frac, comm);
+//  benchmark_flat_hash_map<DNA5Kmer, size_t>(count, repeat_rate, query_frac, comm);
 //  BL_BENCH_COLLECTIVE_END(test, "flat_hash_map_DNA5", count, comm);
 //
 //  BL_BENCH_START(test);
-//  benchmark_flat_hash_map<FullKmer, size_t>(count, query_frac, comm);
+//  benchmark_flat_hash_map<FullKmer, size_t>(count, repeat_rate, query_frac, comm);
 //  BL_BENCH_COLLECTIVE_END(test, "flat_hash_map_Full", count, comm);
 //
 //  // -------------flat hash map end
