@@ -106,9 +106,10 @@ namespace fsc {
  *  [ ] macros for repeated code.
  *  [x] testing with k-mers
  *  [x] measure reprobe count for insert
- *  [ ] measure reprobe count for find and update.
+ *  [x] measure reprobe count for find and update.
  *  [x] measure reprobe count for count and erase.
  *  [x] robin hood hashing with back shifting durign deletion.
+ *  [ ] modification to use memmove during insertion.
  *
  *  Robin Hood Hashing logic follows
  *  	http://www.sebastiansylvan.com/post/robin-hood-hashing-should-be-your-default-hash-table-implementation/
@@ -241,10 +242,12 @@ public:
 	}
 
 	~hashmap_oa_rh_do_tuple() {
+#if defined(REPROBE_STAT)
 		::std::cout << "SUMMARY:" << std::endl;
 		::std::cout << "  upsize\t= " << upsize_count << std::endl;
 		::std::cout << "  downsize\t= " << downsize_count << std::endl;
-	}
+#endif
+		}
 
 	/**
 	 * @brief set the load factors.
@@ -345,12 +348,14 @@ public:
 		// check it's power of 2
 		assert(((n-1) & n) == 0);
 
+#if defined(REPROBE_STAT)
 		if (n > buckets) {
 			++upsize_count;
 		}
 		else if (n < buckets) {
 			++downsize_count;
 		}
+#endif
 
 		if (n != buckets) {
 
@@ -378,9 +383,10 @@ protected:
 
 		size_t count = 0;
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		iterator dummy;
 		bool success;
 
@@ -394,12 +400,14 @@ protected:
 			}
 		}
 
+#if defined(REPROBE_STAT)
 		std::cout << "REHASH copy:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << count << "\ttotal=" << std::distance(begin, end) << "\tlsize=" << lsize <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+#endif
 	}
 
 
@@ -487,10 +495,11 @@ public:
 		}
 		assert(j < buckets);
 
+#if defined(REPROBE_STAT)
 		reprobe &= info_type::dist_mask;
 		this->reprobes += reprobe;
 		this->max_reprobes = std::max(this->max_reprobes, reprobe);
-
+#endif
 		return std::make_pair(iterator(container.begin() + insert_pos, info_container.begin()+ insert_pos, info_container.end(), filter), success);
 
 	}
@@ -503,11 +512,11 @@ public:
 	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
 		typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
 	void insert(Iter begin, Iter end) {
-		size_t input_size = ::std::distance(begin, end);
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		size_t count = 0;
 		iterator dummy;
 		bool success;
@@ -521,12 +530,13 @@ public:
 		}
 		std::cout << "lsize " << lsize << std::endl;
 
+#if defined(REPROBE_STAT)
 		std::cout << "INSERT batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
-					"\tvalid=" << count << "\ttotal=" << input_size <<
+					"\tvalid=" << count << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		reserve(lsize);  // resize down as needed
 	}
 
@@ -565,9 +575,11 @@ protected:
 		}
 		assert(j < buckets);
 
+#if defined(REPROBE_STAT)
 		reprobe &= info_type::dist_mask;
 		this->reprobes += reprobe;
 		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+#endif
 
 		return result;
 	}
@@ -590,21 +602,23 @@ public:
 		::std::vector<size_type> counts;
 		counts.reserve(std::distance(begin, end));
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 
 		for (auto it = begin; it != end; ++it) {
 			counts.emplace_back(count((*it).first));
 		}
 
+#if defined(REPROBE_STAT)
 		std::cout << "COUNT batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << counts.size() << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		return counts;
 	}
 
@@ -615,21 +629,23 @@ public:
 		::std::vector<size_type> counts;
 		counts.reserve(std::distance(begin, end));
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 
 		for (auto it = begin; it != end; ++it) {
 			counts.emplace_back(count(*it));
 		}
 
+#if defined(REPROBE_STAT)
 		std::cout << "COUNT batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << counts.size() << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		return counts;
 	}
 
@@ -728,21 +744,23 @@ public:
 	size_type erase_no_resize(Iter begin, Iter end) {
 		size_type erased = 0;
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 
 		for (auto it = begin; it != end; ++it) {
 			erased += erase_no_resize((*it).first);
 		}
 
+#if defined(REPROBE_STAT)
 		std::cout << "ERASE batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << erased << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		return erased;
 	}
 
@@ -751,21 +769,23 @@ public:
 	size_type erase_no_resize(Iter begin, Iter end) {
 		size_type erased = 0;
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 
 		for (auto it = begin; it != end; ++it) {
 			erased += erase_no_resize(*it);
 		}
 
+#if defined(REPROBE_STAT)
 		std::cout << "ERASE batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << erased << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		return erased;
 	}
 

@@ -104,11 +104,11 @@ TYPED_TEST_P(Hashtable_OARH_DoublingTest, insert_partial)
 
       same = ::std::equal(test_vals.begin(), test_vals.end(), gold_vals.begin());
 
-      if (!same) {
-        for (size_t i = 0; i < gold_vals.size(); ++i) {
-          printf("%ld->%ld\t%ld->%ld\n", test_vals[i].first, test_vals[i].second, gold_vals[i].first, gold_vals[i].second);
-        }
-      }
+//      if (!same) {
+//        for (size_t i = 0; i < gold_vals.size(); ++i) {
+//          printf("%ld->%ld\t%ld->%ld\n", test_vals[i].first, test_vals[i].second, gold_vals[i].first, gold_vals[i].second);
+//        }
+//      }
 
       EXPECT_TRUE(same);
 }

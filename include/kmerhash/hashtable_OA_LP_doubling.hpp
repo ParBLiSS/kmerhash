@@ -240,9 +240,11 @@ public:
 	}
 
 	~hashmap_oa_lp_do_tuple() {
+#if defined(REPROBE_STAT)
 		::std::cout << "SUMMARY:" << std::endl;
 		::std::cout << "  upsize\t= " << upsize_count << std::endl;
 		::std::cout << "  downsize\t= " << downsize_count << std::endl;
+#endif
 	}
 
 	/**
@@ -344,13 +346,15 @@ public:
 		// check it's power of 2
 		assert(((n-1) & n) == 0);
 
+
+#if defined(REPROBE_STAT)
 		if (n > buckets) {
 			++upsize_count;
 		}
 		else if (n < buckets) {
 			++downsize_count;
 		}
-
+#endif
 		if (n != buckets) {
 
 			buckets = n;
@@ -376,9 +380,10 @@ protected:
 
 		size_t count = 0;
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		auto it = begin;
 		auto iit = info_begin;
 		for (; it != end; ++it, ++iit) {
@@ -387,12 +392,14 @@ protected:
 			}
 		}
 
+#if defined(REPROBE_STAT)
 		std::cout << "REHASH copy:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << count << "\ttotal=" << std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+#endif
 	}
 
 
@@ -406,23 +413,26 @@ protected:
 		size_type i = pos;
 
 		while ((i < buckets) && info_container[i].is_normal()) ++i;  // find a place to insert.
+#if defined(REPROBE_STAT)
 		size_t reprobe = i - pos;
-
+#endif
 		if (i == buckets) {
 			// did not find one, so search from beginning
 			i = 0;
 			while ((i < pos) && info_container[i].is_normal()) ++i;  // find a place to insert.
+#if defined(REPROBE_STAT)
 			reprobe += i;
-
+#endif
 			if (i == pos) // nothing was found.  this should not happen
 				throw std::logic_error("ERROR: did not find any place to insert.  should not have happend");
 
 			// else 0 <= i < pos
 		} // else  pos <= i < buckets.
 
+#if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
 		this->max_reprobes = std::max(this->max_reprobes, reprobe);
-
+#endif
 		// insert at i.
 		container[i] = value;
 		info_container[i].info = 0;   // higest 2 bits are already set.
@@ -438,7 +448,9 @@ public:
 	 */
 	std::pair<iterator, bool> insert(key_type const & key, mapped_type const & val) {
 
+#if defined(REPROBE_STAT)
 		size_type reprobe = 0;
+#endif
 
 		// first check if we need to resize.
 		if (lsize >= max_load) rehash(buckets << 1);
@@ -461,14 +473,18 @@ public:
 
 			} else if (info_container[i].is_normal() && (eq(key, container[i].first))) {
 
+#if defined(REPROBE_STAT)
 				this->reprobes += i - pos;
 				this->max_reprobes = std::max(this->max_reprobes, (i-pos));
+#endif
 				// found a match
 				return std::make_pair(iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter), false);
 			}
 		}
 //		std::cout << " first part insertion pos = " << pos << " buckets = " << buckets << " i = " << i << " insert_pot " << insert_pos << std::endl;
+#if defined(REPROBE_STAT)
 		reprobe = i-pos;
+#endif
 
 		if (i == buckets) {
 			// now repeat for first part
@@ -481,19 +497,24 @@ public:
 				if (info_container[i].is_deleted() && (insert_pos == buckets))
 					insert_pos = i;
 				else if (info_container[i].is_normal() && (eq(key, container[i].first))) {
+#if defined(REPROBE_STAT)
 					this->reprobes += reprobe + i;
 					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
+#endif
 					// found a match
 					return std::make_pair(iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter), false);
 
 				}
 			}
 
+#if defined(REPROBE_STAT)
 			reprobe += i;
+#endif
 		}
+#if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
 		this->max_reprobes = std::max(this->max_reprobes, reprobe);
-
+#endif
 		// finally check if we need to insert.
 		if (insert_pos == buckets) {  // went through the whole container.  must be completely full.
 			throw std::logic_error("ERROR: did not find a slot to insert into.  container must be full.  should not happen.");
@@ -515,10 +536,11 @@ public:
 	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
 		typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
 	void insert(Iter begin, Iter end) {
-		size_t input_size = ::std::distance(begin, end);
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+#endif
 
 		size_t count = 0;
 		iterator dummy;
@@ -531,12 +553,13 @@ public:
 		}
 
 
+#if defined(REPROBE_STAT)
 		std::cout << "INSERT batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
-					"\tvalid=" << count << "\ttotal=" << input_size <<
+					"\tvalid=" << count << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		reserve(lsize);  // resize down as needed
 	}
 
@@ -549,8 +572,9 @@ public:
 		// first get the bucket id
 		size_t pos = hash(k) % buckets;
 
+#if defined(REPROBE_STAT)
 		size_t reprobe = 0;
-
+#endif
 		size_t i;
 		for (i = pos; i < buckets; ++i) {
 			// first from here to end.
@@ -558,14 +582,16 @@ public:
 				break;
 
 			if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
 				this->reprobes += i - pos;
 				this->max_reprobes = std::max(this->max_reprobes, (i-pos));
-
+#endif
 				return 1;
 			}
 		}  // ends when i == buckets or empty node.
+#if defined(REPROBE_STAT)
 		reprobe = i - pos;
-
+#endif
 
 		if (i == buckets) {
 			// search the rest of list.
@@ -576,16 +602,21 @@ public:
 					break;
 
 				if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
 					this->reprobes += reprobe + i;
 					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
-
+#endif
 					return 1;
 				}
 			}  // ends when i == buckets or empty node.
+#if defined(REPROBE_STAT)
 			reprobe += i;
+#endif
 		}
+#if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
 		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+#endif
 		// if we are here, then we did not find it.  return 0.
 		return 0;
 	}
@@ -597,21 +628,23 @@ public:
 		::std::vector<size_type> counts;
 		counts.reserve(std::distance(begin, end));
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 
 		for (auto it = begin; it != end; ++it) {
 			counts.emplace_back(count((*it).first));
 		}
 
+#if defined(REPROBE_STAT)
 		std::cout << "COUNT batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << counts.size() << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		return counts;
 	}
 
@@ -622,21 +655,23 @@ public:
 		::std::vector<size_type> counts;
 		counts.reserve(std::distance(begin, end));
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 
 		for (auto it = begin; it != end; ++it) {
 			counts.emplace_back(count(*it));
 		}
 
+#if defined(REPROBE_STAT)
 		std::cout << "COUNT batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << counts.size() << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		return counts;
 	}
 
@@ -648,8 +683,9 @@ public:
 		// first get the bucket id
 		size_t pos = hash(k) % buckets;
 
+#if defined(REPROBE_STAT)
 		size_t reprobe = 0;
-
+#endif
 		size_t i;
 		for (i = pos; i < buckets; ++i) {
 			// first from here to end.
@@ -657,14 +693,16 @@ public:
 				break;
 
 			if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
 				this->reprobes += i - pos;
 				this->max_reprobes = std::max(this->max_reprobes, (i-pos));
-
+#endif
 				return iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter);
 			}
 		}  // ends when i == buckets or empty node.
+#if defined(REPROBE_STAT)
 		reprobe = i-pos;
-
+#endif
 		if (i == buckets) {
 			// search the rest of list.
 
@@ -674,18 +712,22 @@ public:
 					break;
 
 				if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
 					this->reprobes += reprobe + i;
 					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
-
+#endif
 					return iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter);
 				}
 			}  // ends when i == buckets or empty node.
 
+#if defined(REPROBE_STAT)
 			reprobe += i;
+#endif
 		}
+#if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
 		this->max_reprobes = std::max(this->max_reprobes, reprobe);
-
+#endif
 		// if we are here, then we did not find it.  return  end iterator.
 		return iterator(container.end(), info_container.end(), filter);
 
@@ -699,7 +741,9 @@ public:
 		// first get the bucket id
 		size_t pos = hash(k) % buckets;
 
+#if defined(REPROBE_STAT)
 		size_t reprobe = 0;
+#endif
 
 		size_t i;
 		for (i = pos; i < buckets; ++i) {
@@ -708,14 +752,16 @@ public:
 				break;
 
 			if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
 				this->reprobes += i - pos;
 				this->max_reprobes = std::max(this->max_reprobes, (i-pos));
-
+#endif
 				return const_iterator(container.cbegin() + i, info_container.cbegin() + i, info_container.cend(), filter);
 			}
 		}  // ends when i == buckets or empty node.
+#if defined(REPROBE_STAT)
 		reprobe = i-pos;
-
+#endif
 		if (i == buckets) {
 			// search the rest of list.
 
@@ -725,18 +771,22 @@ public:
 					break;
 
 				if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
 					this->reprobes += reprobe + i;
 					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
-
+#endif
 
 					return const_iterator(container.cbegin() + i, info_container.cbegin() + i, info_container.cend(), filter);
 				}
 			}  // ends when i == buckets or empty node.
+#if defined(REPROBE_STAT)
 			reprobe += i;
-		}
+#endif
+			}
+#if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
 		this->max_reprobes = std::max(this->max_reprobes, reprobe);
-
+#endif
 
 		// if we are here, then we did not find it.  return 0.
 		return const_iterator(container.cend(), info_container.cend(), filter);
@@ -767,8 +817,9 @@ public:
 		// first get the bucket id
 		size_t pos = hash(k) % buckets;
 
+#if defined(REPROBE_STAT)
 		size_t reprobe = 0;
-
+#endif
 		size_t i;
 		for (i = pos; i < buckets; ++i) {
 			// first from here to end.
@@ -780,15 +831,17 @@ public:
 				info_container[i].set_deleted();
 
 				--lsize;
+#if defined(REPROBE_STAT)
 				this->reprobes += i - pos;
 				this->max_reprobes = std::max(this->max_reprobes, (i - pos));
-
+#endif
 				return 1;
 			}
 		}  // ends when i == buckets or empty node.
 //		std::cout << "first: pos = " << pos << "\ti = " << i << std::endl;
+#if defined(REPROBE_STAT)
 		reprobe = i-pos;
-
+#endif
 		if (i == buckets) {
 			// search the rest of list.
 
@@ -803,20 +856,24 @@ public:
 
 					--lsize;
 
+#if defined(REPROBE_STAT)
 					this->reprobes += reprobe + i;
 					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
-
+#endif
 					return 1;
 				}
 			}  // ends when i == buckets or empty node.
-			std::cout << "second: pos = " << pos << "\ti = " << i << std::endl;
+//			std::cout << "second: pos = " << pos << "\ti = " << i << std::endl;
 
+#if defined(REPROBE_STAT)
 			reprobe += i;
+#endif
 		}
 
+#if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
 		this->max_reprobes = std::max(this->max_reprobes, reprobe);
-
+#endif
 		// if we are here, then we did not find it.  return 0.
 		return 0;
 
@@ -827,21 +884,22 @@ public:
 	size_type erase_no_resize(Iter begin, Iter end) {
 		size_type erased = 0;
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 
 		for (auto it = begin; it != end; ++it) {
 			erased += erase_no_resize((*it).first);
 		}
 
+#if defined(REPROBE_STAT)
 		std::cout << "ERASE batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << erased << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
-
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		return erased;
 	}
 
@@ -850,21 +908,23 @@ public:
 	size_type erase_no_resize(Iter begin, Iter end) {
 		size_type erased = 0;
 
+#if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 
 		for (auto it = begin; it != end; ++it) {
 			erased += erase_no_resize(*it);
 		}
 
+#if defined(REPROBE_STAT)
 		std::cout << "ERASE batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << erased << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-
+#endif
 		return erased;
 	}
 
