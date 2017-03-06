@@ -109,7 +109,6 @@ namespace fsc {
  *  [x] measure reprobe count for find and update.
  *  [x] measure reprobe count for count and erase.
  *  [x] robin hood hashing with back shifting durign deletion.
- *  [ ] modification to use memmove during insertion.
  *
  *  Robin Hood Hashing logic follows
  *  	http://www.sebastiansylvan.com/post/robin-hood-hashing-should-be-your-default-hash-table-implementation/
@@ -417,7 +416,7 @@ public:
 	/**
 	 * @brief insert a single key-value pair into container.
 	 */
-	std::pair<iterator, bool> insert(key_type && key, mapped_type && val) {
+	std::pair<iterator, bool> insert(value_type && vv) {
 
 		unsigned char reprobe = info_type::normal;
 
@@ -426,7 +425,7 @@ public:
 		if (lsize >= max_load) rehash(buckets << 1);
 
 		// first get the bucket id
-		size_type i = hash(key) & mask;  // target bucket id.
+		size_type i = hash(vv.first) & mask;  // target bucket id.
 
 		size_type insert_pos = std::numeric_limits<size_type>::max();
 		bool success = false;
@@ -461,22 +460,20 @@ public:
 				// then decide what to do given the swapped out distance.
 				if (reprobe == info_type::empty) {  // previously it was empty,
 					// then we can simply set.
-					container[i].first = std::move(key);
-					container[i].second = std::move(val);
+					container[i] = std::move(vv);
 
 					break;
 
 				} else {
 					// there was a real entry, so need to swap
-					::std::swap(container[i].first, key);
-					::std::swap(container[i].second, val);
+					::std::swap(container[i], vv);
 
 					// and continue
 				}
 			} else if (reprobe == info_container[i].info) {
 
 				// same distance, then possibly same value.  let's check.
-				if (eq(container[i].first, key)) {
+				if (eq(container[i].first, vv.first)) {
 					// same, then we found it and need to return.
 					insert_pos = i;
 					success = false;
@@ -504,8 +501,8 @@ public:
 
 	}
 
-	std::pair<iterator, bool> insert(value_type && vv) {
-		auto result = insert(std::move(vv.first), std::move(vv.second));
+	std::pair<iterator, bool> insert(key_type && key, mapped_type && val) {
+		auto result = insert(std::make_pair(key, val));
 		return result;
 	}
 
@@ -716,8 +713,7 @@ public:
 				// not empty (0) and not with distance 0 (0x80).
 				// don't swap.  just assign.
 				info_container[target].info = info_container[src].info - 1;  // shift back needs to reduce dist by 1.
-				container[target].first = std::move(container[src].first);
-				container[target].second = std::move(container[src].second);
+				container[target] = std::move(container[src]);
 			} else {
 				// reached empty or distance 0 entry, so stop.
 			    // mark target as empty.
