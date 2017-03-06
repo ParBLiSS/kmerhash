@@ -269,12 +269,12 @@ class Hashmap_OA_RH_Doubling_KmerTest : public ::testing::Test
                      CANONICAL_ITER(this->temp.end(), ::bliss::kmer::transform::lex_less<Kmer>()));
         test.insert(entries.begin(), entries.end());
         gold.insert(entries.begin(), entries.end());
-        printf("canonical insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
+//        printf("canonical insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
       } else {
         entries.insert(entries.end(), this->temp.begin(), this->temp.end());
         test.insert(entries.begin(), entries.end());
         gold.insert(entries.begin(), entries.end());
-        printf("raw insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
+//        printf("raw insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
       }
 
       // check unique items in list.

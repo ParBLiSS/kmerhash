@@ -525,10 +525,11 @@ public:
 				++count;
 			}
 		}
-		std::cout << "lsize " << lsize << std::endl;
 
 #if defined(REPROBE_STAT)
-		std::cout << "INSERT batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+    std::cout << "lsize " << lsize << std::endl;
+
+    std::cout << "INSERT batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << count << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 		this->reprobes = 0;

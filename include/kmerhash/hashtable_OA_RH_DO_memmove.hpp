@@ -34,8 +34,6 @@
 #include "aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
 #include "math_utils.hpp"
 
-#define REPROBE_STAT
-
 namespace fsc {
 
 /**
