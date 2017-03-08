@@ -20,7 +20,7 @@ if (IS_DIRECTORY ${PROJECT_SOURCE_DIR}/test/unit)
 
     kmerhash_add_test(kmerhash_oaLPdo FALSE unit/test_hashtable_oalp_doubling.cpp)
     kmerhash_add_test(kmerhash_oaRHdo FALSE unit/test_hashtable_oarh_doubling.cpp)
-    kmerhash_add_test(kmerhash_oaRHdoMemmove FALSE unit/test_hashtable_oarh_do_memmove.cpp)
+    kmerhash_add_test(kmerhash_oaRHdoPrefix FALSE unit/test_hashtable_oarh_do_prefix.cpp)
     kmerhash_add_test(kmerhash_aux_filter_iter FALSE unit/test_aux_filter_iterator.cpp)
 
     # get all mpi test files from ./test

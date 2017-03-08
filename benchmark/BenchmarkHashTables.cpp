@@ -3,6 +3,7 @@
 #include <random>
 #include <cstdint>
 
+#if 0
 #include <tommyds/tommyalloc.h>
 #include <tommyds/tommyalloc.c>
 #include <tommyds/tommyhashdyn.h>
@@ -14,6 +15,7 @@
 
 #include "flat_hash_map/flat_hash_map.hpp"
 
+#endif
 
 #include "containers/unordered_vecmap.hpp"
 //#include "containers/hashed_vecmap.hpp"
@@ -22,6 +24,7 @@
 #include "kmerhash/hashtable_OA_LP_doubling.hpp"
 #include "kmerhash/hashtable_OA_RH_doubling.hpp"
 #include "kmerhash/hashtable_OA_RH_DO_memmove.hpp"
+#include "kmerhash/hashtable_OA_RH_DO_prefix.hpp"
 
 #include "common/kmer.hpp"
 #include "common/kmer_transform.hpp"
@@ -669,7 +672,7 @@ void benchmark_densehash_full_multimap(size_t const count,  size_t const repeat_
   BL_BENCH_REPORT_MPI_NAMED(map, "densehash_full_multimap", comm);
 }
 
-
+#if 0
 
 template <typename Kmer, typename Value>
 void benchmark_flat_hash_map(size_t const count,  size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
@@ -732,7 +735,7 @@ void benchmark_flat_hash_map(size_t const count,  size_t const repeat_rate, size
 
   BL_BENCH_REPORT_MPI_NAMED(map, "flat_hash_map", comm);
 }
-
+#endif
 
 
 template <typename Kmer, typename Value>
@@ -1006,13 +1009,76 @@ void benchmark_hashmap_oa_rh_do_memmove(size_t const count,  size_t const repeat
 
 
 
+template <typename Kmer, typename Value>
+void benchmark_hashmap_oa_rh_do_prefix(size_t const count,  size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
+  BL_BENCH_INIT(map);
+
+  std::vector<Kmer> query;
+
+  BL_BENCH_START(map);
+  // no transform involved.
+  ::fsc::hashmap_oa_rh_do_prefix<Kmer, Value,
+  ::bliss::kmer::hash::farm<Kmer, false> > map(count * 2 / repeat_rate);
+  BL_BENCH_END(map, "reserve", count);
+
+  {
+    BL_BENCH_START(map);
+    std::vector<::std::pair<Kmer, Value> > input(count);
+    BL_BENCH_END(map, "reserve input", count);
+
+    BL_BENCH_START(map);
+    generate_input(input, count, repeat_rate);
+    query.resize(count / query_frac);
+    std::transform(input.begin(), input.begin() + input.size() / query_frac, query.begin(),
+                   [](::std::pair<Kmer, Value> const & x){
+      return x.first;
+    });
+    BL_BENCH_END(map, "generate input", input.size());
+
+    BL_BENCH_START(map);
+    map.insert(input.begin(), input.end());
+    BL_BENCH_END(map, "insert", map.size());
+  }
+
+  BL_BENCH_START(map);
+  size_t result = 0;
+  size_t i = 0;
+  size_t max = count / query_frac;
+  for (; i < max; ++i) {
+    auto iter = map.find(query[i]);
+    result ^= (*iter).second;
+  }
+  BL_BENCH_END(map, "find", result);
+
+  BL_BENCH_START(map);
+  auto counts = map.count(query.begin(), query.end());
+  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+
+  // result = 0
+//  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
+//    result += map.count(query[i]);
+//  }
+  BL_BENCH_END(map, "count", result);
+
+  BL_BENCH_START(map);
+  result = map.erase(query.begin(), query.end());
+
+//  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
+//    result += map.erase(query[i]);
+//  }
+//  map.resize(0);
+  BL_BENCH_END(map, "erase", result);
+
+
+  BL_BENCH_REPORT_MPI_NAMED(map, "hashmap_oa_hr_do_prefix", comm);
+}
 
 
 
 
 
 
-
+#if 0
 template <typename DataType>
 struct tommy_obj {
     tommy_node node;
@@ -1332,7 +1398,7 @@ void benchmark_tommytrie(size_t const count,  size_t const repeat_rate, size_t c
 
   BL_BENCH_REPORT_MPI_NAMED(map, "tommytrie", comm);
 }
-
+#endif
 
 //========== has problems with casting to and from void*
 // invalid conversion from ‘void*’ to ‘Word_t* {aka long unsigned int*}’ [-fpermissive]
@@ -1611,21 +1677,34 @@ int main(int argc, char** argv) {
   benchmark_hashmap_oa_rh_do_tuple<FullKmer, size_t>(count, repeat_rate, query_frac, comm);
   BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_tuple_Full", count, comm);
   // --------------- my new hashmap.
+//
+//  //================ my new hashmap PREFIX
+//  BL_BENCH_START(test);
+//  benchmark_hashmap_oa_rh_do_memmove<Kmer, size_t>(count, repeat_rate, query_frac, comm);
+//  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_memmove", count, comm);
+//
+//  BL_BENCH_START(test);
+//  benchmark_hashmap_oa_rh_do_memmove<DNA5Kmer, size_t>(count, repeat_rate, query_frac, comm);
+//  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_memmove_DNA5", count, comm);
+//
+//  BL_BENCH_START(test);
+//  benchmark_hashmap_oa_rh_do_memmove<FullKmer, size_t>(count, repeat_rate, query_frac, comm);
+//  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_memmove_Full", count, comm);
+//  // --------------- my new hashmap PREFIX.
 
-  //================ my new hashmap PREFIX
+  //================ my new hashmap PREFIX2
   BL_BENCH_START(test);
-  benchmark_hashmap_oa_rh_do_memmove<Kmer, size_t>(count, repeat_rate, query_frac, comm);
-  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_memmove", count, comm);
+  benchmark_hashmap_oa_rh_do_prefix<Kmer, size_t>(count, repeat_rate, query_frac, comm);
+  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_prefix", count, comm);
 
   BL_BENCH_START(test);
-  benchmark_hashmap_oa_rh_do_memmove<DNA5Kmer, size_t>(count, repeat_rate, query_frac, comm);
-  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_memmove_DNA5", count, comm);
+  benchmark_hashmap_oa_rh_do_prefix<DNA5Kmer, size_t>(count, repeat_rate, query_frac, comm);
+  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_prefix_DNA5", count, comm);
 
   BL_BENCH_START(test);
-  benchmark_hashmap_oa_rh_do_memmove<FullKmer, size_t>(count, repeat_rate, query_frac, comm);
-  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_memmove_Full", count, comm);
-  // --------------- my new hashmap PREFIX.
-
+  benchmark_hashmap_oa_rh_do_prefix<FullKmer, size_t>(count, repeat_rate, query_frac, comm);
+  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_prefix_Full", count, comm);
+  // --------------- my new hashmap PREFIX2.
 
 
 //  // ============ flat_hash_map
