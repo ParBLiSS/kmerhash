@@ -265,7 +265,7 @@ public:
 	explicit hashmap_oa_rh_do_prefix(size_t const & _capacity = 128,
 			float const & _min_load_factor = 0.4,
 			float const & _max_load_factor = 0.9) :
-			lsize(0), buckets(next_power_of_2(static_cast<size_t>(static_cast<float>(_capacity) / _max_load_factor ))), mask(buckets - 1),
+			lsize(0), buckets(next_power_of_2(_capacity)), mask(buckets - 1),
 			container(buckets), info_container(buckets, info_type(info_type::empty)),
 			upsize_count(0), downsize_count(0)
 			{
@@ -307,20 +307,20 @@ public:
 	 */
 	inline void set_min_load_factor(float const & _min_load_factor) {
 		min_load_factor = _min_load_factor;
-		min_load = static_cast<size_t>(static_cast<float>(container.size()) * min_load_factor);
+		min_load = static_cast<size_t>(static_cast<float>(buckets) * min_load_factor);
 
 	}
 
 	inline void set_max_load_factor(float const & _max_load_factor) {
 		max_load_factor = _max_load_factor;
-		max_load = static_cast<size_t>(static_cast<float>(container.size()) * max_load_factor);
+		max_load = static_cast<size_t>(static_cast<float>(buckets) * max_load_factor);
 	}
 
 	/**
 	 * @brief get the load factors.
 	 */
 	inline float get_load_factor() {
-		return static_cast<float>(lsize) / static_cast<float>(container.size());
+		return static_cast<float>(lsize) / static_cast<float>(buckets);
 	}
 
 	inline float get_min_load_factor() {
@@ -396,26 +396,26 @@ public:
 	 */
 	void clear() {
 		this->lsize = 0;
-		this->info_container.clear();
-		this->info_container.resize(buckets, info_type(info_type::empty));
+    std::fill(this->info_container.begin(), this->info_container.end(), info_type(info_type::empty));
 	}
 
 	/**
 	 * @brief reserve space for specified entries.
 	 */
-	void reserve(size_type n) {
-		if (n > this->max_load) {   // if requested more than current max load, then we need to resize up.
-			rehash(next_power_of_2(static_cast<size_t>(static_cast<float>(n) / max_load_factor)));   // rehash to the new size.    current bucket count should be less than next_power_of_2(n).
-		}  // do not resize down.  do so only when erase.
-	}
+  void reserve(size_type n) {
+    if (n > this->max_load) {   // if requested more than current max load, then we need to resize up.
+      rehash(static_cast<size_t>(static_cast<float>(n) / this->max_load_factor));
+      // rehash to the new size.    current bucket count should be less than next_power_of_2(n).
+    }  // do not resize down.  do so only when erase.
+  }
 
-	/**
-	 * @brief reserve space for specified buckets.
-	 * @details	note that buckets > entries.
-	 */
-	void rehash(size_type const & n) {
-		// check it's power of 2
-		assert(((n-1) & n) == 0);
+  /**
+   * @brief reserve space for specified buckets.
+   * @details note that buckets > entries.
+   */
+  void rehash(size_type const & b) {
+    // check it's power of 2
+    size_t n = next_power_of_2(b);
 
 #if defined(REPROBE_STAT)
 		if (n > buckets) {
@@ -437,8 +437,8 @@ public:
 			container.swap(tmp);
 			info_container.swap(tmp_info);
 
-			min_load = static_cast<size_t>(static_cast<float>(container.size()) * min_load_factor);
-			max_load = static_cast<size_t>(static_cast<float>(container.size()) * max_load_factor);
+			min_load = static_cast<size_t>(static_cast<float>(buckets) * min_load_factor);
+			max_load = static_cast<size_t>(static_cast<float>(buckets) * max_load_factor);
 
 
 			copy(tmp, tmp_info);
@@ -1141,7 +1141,7 @@ public:
 			
 			std::cout << "lsize " << lsize << " min_load " << min_load << " new size " << 
 				next_power_of_2(static_cast<size_t>(static_cast<float>(lsize) / max_load_factor)) << std::endl;
-			rehash(next_power_of_2(static_cast<size_t>(static_cast<float>(lsize) / max_load_factor)));
+			rehash(static_cast<size_t>(static_cast<float>(lsize) / max_load_factor));
 		}
 		return erased;
 	}

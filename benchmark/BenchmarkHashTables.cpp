@@ -23,6 +23,7 @@
 
 #include "kmerhash/hashtable_OA_LP_doubling.hpp"
 #include "kmerhash/hashtable_OA_RH_doubling.hpp"
+#include "kmerhash/hashtable_OA_RH_DO_noncircular.hpp"
 #include "kmerhash/hashtable_OA_RH_DO_memmove.hpp"
 #include "kmerhash/hashtable_OA_RH_DO_prefix.hpp"
 
@@ -940,6 +941,73 @@ void benchmark_hashmap_oa_rh_do_tuple(size_t const count,  size_t const repeat_r
   BL_BENCH_REPORT_MPI_NAMED(map, "hashmap_oa_hr_do_tuple", comm);
 }
 
+
+template <typename Kmer, typename Value>
+void benchmark_hashmap_oa_rh_do_noncircular(size_t const count,  size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
+  BL_BENCH_INIT(map);
+
+  std::vector<Kmer> query;
+
+  BL_BENCH_START(map);
+  // no transform involved.
+  ::fsc::hashmap_oa_rh_do_noncircular<Kmer, Value,
+  ::bliss::kmer::hash::farm<Kmer, false> > map(count * 2 / repeat_rate);
+  BL_BENCH_END(map, "reserve", count);
+
+  {
+    BL_BENCH_START(map);
+    std::vector<::std::pair<Kmer, Value> > input(count);
+    BL_BENCH_END(map, "reserve input", count);
+
+    BL_BENCH_START(map);
+    generate_input(input, count, repeat_rate);
+    query.resize(count / query_frac);
+    std::transform(input.begin(), input.begin() + input.size() / query_frac, query.begin(),
+                   [](::std::pair<Kmer, Value> const & x){
+      return x.first;
+    });
+    BL_BENCH_END(map, "generate input", input.size());
+
+    BL_BENCH_START(map);
+    map.insert(input.begin(), input.end());
+    BL_BENCH_END(map, "insert", map.size());
+  }
+
+  BL_BENCH_START(map);
+  size_t result = 0;
+  size_t i = 0;
+  size_t max = count / query_frac;
+  for (; i < max; ++i) {
+    auto iter = map.find(query[i]);
+    result ^= (*iter).second;
+  }
+  BL_BENCH_END(map, "find", result);
+
+  BL_BENCH_START(map);
+  auto counts = map.count(query.begin(), query.end());
+  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+
+  // result = 0
+//  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
+//    result += map.count(query[i]);
+//  }
+  BL_BENCH_END(map, "count", result);
+
+  BL_BENCH_START(map);
+  result = map.erase(query.begin(), query.end());
+
+//  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
+//    result += map.erase(query[i]);
+//  }
+//  map.resize(0);
+  BL_BENCH_END(map, "erase", result);
+
+
+  BL_BENCH_REPORT_MPI_NAMED(map, "hashmap_oa_hr_do_noncirc", comm);
+}
+
+
+
 template <typename Kmer, typename Value>
 void benchmark_hashmap_oa_rh_do_memmove(size_t const count,  size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
   BL_BENCH_INIT(map);
@@ -1691,6 +1759,22 @@ int main(int argc, char** argv) {
 //  benchmark_hashmap_oa_rh_do_memmove<FullKmer, size_t>(count, repeat_rate, query_frac, comm);
 //  BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_memmove_Full", count, comm);
 //  // --------------- my new hashmap PREFIX.
+
+
+    //================ my new hashmap PREFIX
+    BL_BENCH_START(test);
+    benchmark_hashmap_oa_rh_do_noncircular<Kmer, size_t>(count, repeat_rate, query_frac, comm);
+    BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_noncirc", count, comm);
+
+    BL_BENCH_START(test);
+    benchmark_hashmap_oa_rh_do_noncircular<DNA5Kmer, size_t>(count, repeat_rate, query_frac, comm);
+    BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_noncirc_DNA5", count, comm);
+
+    BL_BENCH_START(test);
+    benchmark_hashmap_oa_rh_do_noncircular<FullKmer, size_t>(count, repeat_rate, query_frac, comm);
+    BL_BENCH_COLLECTIVE_END(test, "hashmap_oa_rh_do_noncirc_Full", count, comm);
+    // --------------- my new hashmap PREFIX.
+
 
   //================ my new hashmap PREFIX2
   BL_BENCH_START(test);

@@ -15,7 +15,7 @@
  */
 
 /*
- * hashtable_OA_RH_doubling.hpp
+ * hashtable_OA_RH_DO_noncircular.hpp
  *
  *  Created on: Feb 27, 2017
  *      Author: tpan
@@ -23,8 +23,8 @@
  *  for robin hood hashing
  */
 
-#ifndef KMERHASH_HASHTABLE_OA_RH_DOUBLING_HPP_
-#define KMERHASH_HASHTABLE_OA_RH_DOUBLING_HPP_
+#ifndef KMERHASH_HASHTABLE_OA_RH_DO_NONCIRCULAR_HPP_
+#define KMERHASH_HASHTABLE_OA_RH_DO_NONCIRCULAR_HPP_
 
 #include <vector>   // for vector.
 #include <type_traits> // for is_constructible
@@ -34,6 +34,11 @@
 #include "aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
 #include "math_utils.hpp"
 
+//#if defined(FSC_CIRCULAR_ARRAY)
+//#define advance(x, d, m) (x+d) & m
+//#else
+//#define advance(x, d, m) (x+d)
+//#endif
 
 
 namespace fsc {
@@ -154,7 +159,7 @@ namespace fsc {
  */
 template <typename Key, typename T, typename Hash = ::std::hash<Key>,
 		typename Equal = ::std::equal_to<Key>, typename Allocator = ::std::allocator<std::pair<const Key, T> > >
-class hashmap_oa_rh_do_tuple {
+class hashmap_oa_rh_do_noncircular {
 
 public:
 
@@ -215,12 +220,12 @@ public:
 protected:
 
     size_t lsize;
-    mutable size_t buckets;
+    mutable size_t buckets;  // always add info_type::normal number of entries, then we don't need to circularize.  buckets exclude this part.
     mutable size_t mask;
     mutable size_t min_load;
     mutable size_t max_load;
     mutable float min_load_factor;
-    mutable float max_load_factor;
+    mutable float max_load_factor;   // load factors are computed using buckets, not with the extra
 
 
     empty_deleted_filter filter;
@@ -241,11 +246,11 @@ public:
     /**
      * _capacity is the number of usable entries, not the capacity of the underlying container.
      */
-	explicit hashmap_oa_rh_do_tuple(size_t const & _capacity = 128,
+	explicit hashmap_oa_rh_do_noncircular(size_t const & _capacity = 128,
 			float const & _min_load_factor = 0.4,
 			float const & _max_load_factor = 0.9) :
-			lsize(0), buckets(next_power_of_2(_capacity) ), mask(buckets - 1),
-			container(buckets), info_container(buckets, info_type(info_type::empty)),
+			lsize(0), buckets(next_power_of_2(_capacity)), mask(buckets - 1),
+			container(buckets + info_type::normal), info_container(buckets + info_type::normal, info_type(info_type::empty)),
 			upsize_count(0), downsize_count(0)
 			{
 		// get the nearest power of 2 above specified capacity.
@@ -263,17 +268,15 @@ public:
 	 */
 	template <typename Iter, typename = typename std::enable_if<
 			::std::is_constructible<value_type, typename ::std::iterator_traits<Iter>::value_type>::value  ,int>::type >
-	hashmap_oa_rh_do_tuple(Iter begin, Iter end,
+	hashmap_oa_rh_do_noncircular(Iter begin, Iter end,
 			float const & _min_load_factor = 0.4,
 			float const & _max_load_factor = 0.9) :
-		hashmap_oa_rh_do_tuple(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
+		hashmap_oa_rh_do_noncircular(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
 
-		for (auto it = begin; it != end; ++it) {
-			insert(value_type(*it));  //local insertion.  this requires copy construction...
-		}
+		insert(begin, end);
 	}
 
-	~hashmap_oa_rh_do_tuple() {
+	~hashmap_oa_rh_do_noncircular() {
 #if defined(REPROBE_STAT)
 		::std::cout << "SUMMARY:" << std::endl;
 		::std::cout << "  upsize\t= " << upsize_count << std::endl;
@@ -359,26 +362,26 @@ public:
 	 */
 	void clear() {
 		this->lsize = 0;
-    std::fill(this->info_container.begin(), this->info_container.end(), info_type(info_type::empty));
+		std::fill(this->info_container.begin(), this->info_container.end(), info_type(info_type::empty));
 	}
 
 	/**
 	 * @brief reserve space for specified entries.
 	 */
-  void reserve(size_type n) {
-    if (n > this->max_load) {   // if requested more than current max load, then we need to resize up.
-      rehash(static_cast<size_t>(static_cast<float>(n) / this->max_load_factor));
-      // rehash to the new size.    current bucket count should be less than next_power_of_2(n).
-    }  // do not resize down.  do so only when erase.
-  }
+	void reserve(size_type n) {
+		if (n > this->max_load) {   // if requested more than current max load, then we need to resize up.
+			rehash(static_cast<size_t>(static_cast<float>(n) / this->max_load_factor));
+			// rehash to the new size.    current bucket count should be less than next_power_of_2(n).
+		}  // do not resize down.  do so only when erase.
+	}
 
-  /**
-   * @brief reserve space for specified buckets.
-   * @details note that buckets > entries.
-   */
-  void rehash(size_type const & b) {
-    // check it's power of 2
-    size_t n = next_power_of_2(b);
+	/**
+	 * @brief reserve space for specified buckets.
+	 * @details	note that buckets > entries.
+	 */
+	void rehash(size_type const & b) {
+		// check it's power of 2
+	  size_t n = next_power_of_2(b);
 
 #if defined(REPROBE_STAT)
 		if (n > buckets) {
@@ -393,13 +396,14 @@ public:
 
 			buckets = n;
 			mask = buckets - 1;
-			container_type tmp(buckets);
-			info_container_type tmp_info(buckets, info_type(info_type::empty));
+			container_type tmp(buckets + info_type::normal);
+			info_container_type tmp_info(buckets  + info_type::normal, info_type(info_type::empty));
 			container.swap(tmp);
 			info_container.swap(tmp_info);
 
-      min_load = static_cast<size_t>(static_cast<float>(buckets) * min_load_factor);
-      max_load = static_cast<size_t>(static_cast<float>(buckets) * max_load_factor);
+			min_load = static_cast<size_t>(static_cast<float>(buckets) * min_load_factor);
+			max_load = static_cast<size_t>(static_cast<float>(buckets) * max_load_factor);
+
 			copy(tmp.begin(), tmp.end(), tmp_info.begin());
 		}
 	}
@@ -471,7 +475,7 @@ public:
 		bool success = false;
 		size_type j = 0;
 
-		for (; j < buckets; ++j) {  // limit to 1 complete loop
+		for (; j < container.size(); ++j) {  // limit to 1 complete loop
 
 			// implementing back shifting, so don't worry about deleted entries.
 
@@ -530,9 +534,9 @@ public:
 			++reprobe;
 
 			// circular array.
-			i = (i+1) & mask;   // for bucket == 2^x, this acts like modulus.
+			i = (i+1); // & mask;   // for bucket == 2^x, this acts like modulus.
 		}
-		assert(j < buckets);
+		assert(j < container.size());
 
 #if defined(REPROBE_STAT)
 		reprobe &= info_type::dist_mask;
@@ -595,7 +599,7 @@ protected:
 		size_type result = std::numeric_limits<size_type>::max();
 
 		size_t j;
-		for (j = 0; j < buckets; ++j) {
+		for (j = 0; j < container.size(); ++j) {
 			if (reprobe > info_container[i].info) {
 				// either empty, OR query's distance is larger than the current entries, which indicates
 				// this would have been swapped during insertion, and can also indicate that the current
@@ -611,9 +615,9 @@ protected:
 			} // else still traversing a previous bucket.
 
 			++reprobe;
-			i = (i+1) & mask;   // again power of 2 modulus.
+			i = (i+1); // & mask;   // again power of 2 modulus.
 		}
-		assert(j < buckets);
+		assert(j < container.size());
 
 #if defined(REPROBE_STAT)
 		reprobe &= info_type::dist_mask;
@@ -631,7 +635,7 @@ public:
 	 */
 	size_type count( key_type const & k ) const {
 
-		return (find_pos(k) < buckets) ? 1 : 0;
+		return (find_pos(k) < container.size()) ? 1 : 0;
 
 	}
 
@@ -696,7 +700,7 @@ public:
 
 		size_type idx = find_pos(k);
 
-		if (idx < buckets)
+		if (idx < container.size())
 			return iterator(container.begin() + idx, info_container.begin()+ idx, info_container.end(), filter);
 		else
 			return iterator(container.end(), info_container.end(), filter);
@@ -710,7 +714,7 @@ public:
 
 		size_type idx = find_pos(k);
 
-		if (idx < buckets)
+		if (idx < container.size())
 			return const_iterator(container.cbegin() + idx, info_container.cbegin()+ idx, info_container.cend(), filter);
 		else
 			return const_iterator(container.cend(), info_container.cend(), filter);
@@ -733,7 +737,6 @@ public:
 	}
 
 
-
 	/**
 	 * @brief erases a key.  performs backward shift.
 	 * @details note that entries for the same bucket are always consecutive, so we don't have to shift, but rather, move elements at boundaries only.
@@ -746,7 +749,7 @@ public:
 
 		size_type found = find_pos(k);
 
-		if (found >= buckets) {  // did not find.
+		if (found >= container.size()) {  // did not find.
 			return 0;
 		}
 
@@ -754,7 +757,7 @@ public:
 
     // for iterating to find boundaries
 		size_type curr = found;
-		size_type next = (found + 1) & mask;
+		size_type next = (found + 1); // & mask;
 
 		//    unsigned char curr_info = info_container[curr].info;
 		unsigned char next_info = info_container[next].info;
@@ -767,7 +770,7 @@ public:
 
 		size_type target = found;
 
-		for (size_t j = 0; j < buckets - 1; ++j) {
+		for (size_t j = 0; j < container.size() - 1; ++j) {
 			// terminate when next entry is empty or has distance 0.
 			if (next_info <= info_type::normal) break;
 
@@ -785,7 +788,7 @@ public:
 
 			// advance
 			curr = next;
-			next = (next+1) & mask;
+			next = (next+1); // & mask;
 
 			next_info = info_container[next].info;
 
@@ -875,4 +878,4 @@ public:
 };
 
 }  // namespace fsc
-#endif /* KMERHASH_HASHTABLE_OA_RH_DOUBLING_HPP_ */
+#endif /* KMERHASH_HASHTABLE_OA_RH_DO_NONCIRCULAR_HPP_ */
