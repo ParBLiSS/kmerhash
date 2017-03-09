@@ -108,11 +108,44 @@ namespace fsc {
  *  [x] measure reprobe count for insert
  *  [x] measure reprobe count for find and update.
  *  [x] measure reprobe count for count and erase.
- *  [x] robin hood hashing with back shifting durign deletion.
+ *  [x] robin hood hashing with back shifting during deletion.
+ *  [ ] memmove?  probably not.  current approach swaps only when dist increases, not when they are the same, which is what most of a bucket would contain, so total mem access would be low.
  *
  *  Robin Hood Hashing logic follows
  *  	http://www.sebastiansylvan.com/post/robin-hood-hashing-should-be-your-default-hash-table-implementation/
  *
+ *  use an auxillary array.
+ *  where as RH standard aux array element represents the distance from source for the corresponding element in container.
+ *      idx   ----a---b------------
+ *    aux   ===|-|=|-|=|4|3|=====   _4_ is recorded at position hash(X) + _4_ of aux array.
+ *    data  -----------|X|Y|-----,  X is inserted into bucket hash(X) = a.  in container position hash(X) + _4_.
+ *
+ *    empty positions are set to 0x80, and same for all info entries.
+ *
+ *  this aux array instead has each element represent the offset for the first entry of this bucket.
+ *      idx   ----a---b------------
+ *    aux   ===|4|=|3|=|-|-|=====   _4_ is recorded at position hash(X) of aux array.
+ *    data  -----------|X|Y|-----,  X is inserted into bucket hash(X), in container position hash(X) + _4_.
+ *
+ *    empty positions are set with high bit 1, but can has distance larger than 0.
+ *
+ *  in traditional, we linear scan info_container from position hash(Y) and must go to hash(Y) + 4 linearly.
+ *    each aux entry is essentailyl independent of others.
+ *    have to check and compare each data entry.
+ *
+ *  in this class, we just need to look at position hash(Y) and hash(Y) + 1 to know where to start and end in the container
+ *    for find/count/update, those 2 are the only ones we need.
+ *    for insert, we need to find the end of the range to modify, even after the insertion point.
+ *      first search for end of range from current bucket (linear scan)
+ *      then move from insertion point to end of range to right by 1.
+ *      then insert at insertion point
+ *      finally update the aux array from hash(Y) +1, to end of bucket range (ends on empty or dist = 0), by adding 1...
+ *    for deletion, we need to again find the end of the range to modify, from the point of the deletion
+ *      search for end of range from current bucket
+ *      then move from deletion point to end of range to left by 1
+ *      finally update the aux array from hash(Y) +1 to end of bucket range(ends on dist == 0), by subtracting 1...
+ *    for rehash, from the first non-empty, to the next empty
+ *      call insert on the entire range.
  *
  *  oa = open addressing
  *  rh = robin hood
@@ -380,22 +413,26 @@ protected:
 	 */
 	void copy(typename container_type::iterator begin, typename container_type::iterator end, typename info_container_type::iterator info_begin) {
 
-		size_t count = 0;
 
 #if defined(REPROBE_STAT)
+    size_t count = 0;
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+    iterator dummy;
+    bool success;
 #endif
-		iterator dummy;
-		bool success;
 
 		lsize = 0;  // insert increments the lsize.  this ensures that it is correct.
 		auto it = begin;
 		auto iit = info_begin;
 		for (; it != end; ++it, ++iit) {
 			if ((*iit).is_normal()) {
+#if defined(REPROBE_STAT)
 				std::tie(dummy, success) = insert(::std::move(*it));
 				if (success) ++count;
+#else
+				insert(::std::move(*it));
+#endif
 			}
 		}
 
@@ -413,8 +450,12 @@ protected:
 
 public:
 
+
+
 	/**
 	 * @brief insert a single key-value pair into container.
+	 *
+	 * note that swap only occurs at bucket boundaries.
 	 */
 	std::pair<iterator, bool> insert(value_type && vv) {
 
@@ -471,9 +512,12 @@ public:
 					// and continue
 				}
 			} else if (reprobe == info_container[i].info) {
+			  // check for equality, only if haven't inserted (if don't check success, there could be a lot of equality checks.
+
+//			  if (success)  std::cout << ".";
 
 				// same distance, then possibly same value.  let's check.
-				if (eq(container[i].first, vv.first)) {
+				if (!success && eq(container[i].first, vv.first)) {  // note that a previously swapped vv would not match again and can be skipped.
 					// same, then we found it and need to return.
 					insert_pos = i;
 					success = false;
@@ -482,7 +526,6 @@ public:
 
 			}  // note that it's not possible for a match to occur with shorter current reprobe distance -
 				// that would mean same element is hashed to multiple buckets.
-
 
 			// increment probe distance
 			++reprobe;
@@ -543,7 +586,7 @@ protected:
 	/**
 	 * return the bucket id where the current key is found.  if not found, max is returned.
 	 */
-	size_type find_bucket(key_type const & k) const {
+	size_type find_pos(key_type const & k) const {
 
 		unsigned char reprobe = info_type::normal;
 
@@ -566,7 +609,7 @@ protected:
 					result = i;
 					break;
 				}
-			}
+			} // else still traversing a previous bucket.
 
 			++reprobe;
 			i = (i+1) & mask;   // again power of 2 modulus.
@@ -589,7 +632,7 @@ public:
 	 */
 	size_type count( key_type const & k ) const {
 
-		return (find_bucket(k) < buckets) ? 1 : 0;
+		return (find_pos(k) < buckets) ? 1 : 0;
 
 	}
 
@@ -652,7 +695,7 @@ public:
 	 */
 	iterator find(key_type const & k) {
 
-		size_type idx = find_bucket(k);
+		size_type idx = find_pos(k);
 
 		if (idx < buckets)
 			return iterator(container.begin() + idx, info_container.begin()+ idx, info_container.end(), filter);
@@ -666,7 +709,7 @@ public:
 	 */
 	const_iterator find(key_type const & k) const {
 
-		size_type idx = find_bucket(k);
+		size_type idx = find_pos(k);
 
 		if (idx < buckets)
 			return const_iterator(container.cbegin() + idx, info_container.cbegin()+ idx, info_container.cend(), filter);
@@ -691,49 +734,68 @@ public:
 	}
 
 
+
 	/**
 	 * @brief erases a key.  performs backward shift.
+	 * @details note that entries for the same bucket are always consecutive, so we don't have to shift, but rather, move elements at boundaries only.
+	 *    boundaries are characterized by non-decreasing info dist, or by empty.
+	 *
 	 */
 	size_type erase_no_resize(key_type const & k) {
 
-		size_type found = find_bucket(k);
+
+
+		size_type found = find_pos(k);
 
 		if (found >= buckets) {  // did not find.
 			return 0;
 		}
 
+    --lsize;   // reduce the size by 1.
+
+    // for iterating to find boundaries
+		size_type curr = found;
+		size_type next = (found + 1) & mask;
+
+		//    unsigned char curr_info = info_container[curr].info;
+		unsigned char next_info = info_container[next].info;
+
+		// a little more short circuiting.
+		if (next_info <= info_type::normal) {
+			info_container[curr].info = info_type::empty;
+			return 1;
+		}
+
 		size_type target = found;
-		size_type src = (found + 1) & mask;
-		--lsize;   // reduce the size by 1.
 
-		// found.  now begin to shift backward until empty or reprobe distance == 0 (0x80)
-		size_t j = 0;
-		for (; j < buckets - 1; ++j) {
+		for (size_t j = 0; j < buckets - 1; ++j) {
+			// terminate when next entry is empty or has distance 0.
+			if (next_info <= info_type::normal) break;
 
-			if (info_container[src].info > info_type::normal) {
-				// not empty (0) and not with distance 0 (0x80).
-				// don't swap.  just assign.
-				info_container[target].info = info_container[src].info - 1;  // shift back needs to reduce dist by 1.
-				container[target] = std::move(container[src]);
-			} else {
-				// reached empty or distance 0 entry, so stop.
-			    // mark target as empty.
-				info_container[target].info = info_type::empty;
+			// do something at bucket boundaries
+			if (next_info <= info_container[curr].info) {
+				// change the curr info
+				info_container[curr].info = next_info - 1;				
 
-				break;
+				// and move the current value entry.
+				container[target] = std::move(container[curr]);
+
+				// store the curr position as the next target of move.
+				target = curr;
 			}
-			target = src;
-			src = (src+1) & mask;
+
+			// advance
+			curr = next;
+			next = (next+1) & mask;
+
+			next_info = info_container[next].info;
+
 		}
-		if (j >= buckets - 1) {
-			std::cout << " oops " << std::endl;
-		}
-		assert( j < buckets - 1);  // this should really be superfluous.
+		info_container[curr].info = info_type::empty;  // set last to empty.
+		container[target] = std::move(container[curr]);
 
 
-		// if we are here, then we did not find it.  return 0.
 		return 1;
-
 	}
 
 	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,

@@ -1567,7 +1567,7 @@ void benchmark_tommytrie(size_t const count,  size_t const repeat_rate, size_t c
 
 int main(int argc, char** argv) {
 
-  size_t count = 10000000;
+  size_t count = 100000000;
 //  size_t count = 100;
   size_t query_frac = 10;
   size_t repeat_rate = 10;
