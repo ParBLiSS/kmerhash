@@ -397,6 +397,7 @@ public:
 			info_container_type tmp_info(buckets, info_type(info_type::empty));
 			container.swap(tmp);
 			info_container.swap(tmp_info);
+	    lsize = 0;  // insert increments the lsize.  this ensures that it is correct.
 
       min_load = static_cast<size_t>(static_cast<float>(buckets) * min_load_factor);
       max_load = static_cast<size_t>(static_cast<float>(buckets) * max_load_factor);
@@ -421,7 +422,6 @@ protected:
     bool success;
 #endif
 
-		lsize = 0;  // insert increments the lsize.  this ensures that it is correct.
 		auto it = begin;
 		auto iit = info_begin;
 		for (; it != end; ++it, ++iit) {
@@ -535,9 +535,8 @@ public:
 		assert(j < buckets);
 
 #if defined(REPROBE_STAT)
-		reprobe &= info_type::dist_mask;
-		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->reprobes += j;
+		this->max_reprobes = std::max(this->max_reprobes, j);
 #endif
 		return std::make_pair(iterator(container.begin() + insert_pos, info_container.begin()+ insert_pos, info_container.end(), filter), success);
 

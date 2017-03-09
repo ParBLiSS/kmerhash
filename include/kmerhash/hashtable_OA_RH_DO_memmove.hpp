@@ -436,6 +436,10 @@ public:
 			info_container_type tmp_info(buckets, info_type(info_type::empty));
 			container.swap(tmp);
 			info_container.swap(tmp_info);
+	    if (lsize == 0) return;   // nothing to copy.
+
+	    lsize = 0;  // reset lsize since we will be inserting.
+
 
 			min_load = static_cast<size_t>(static_cast<float>(buckets) * min_load_factor);
 			max_load = static_cast<size_t>(static_cast<float>(buckets) * max_load_factor);
@@ -695,12 +699,6 @@ protected:
 		this->reprobes = 0;
 		this->max_reprobes = 0;
 #endif
-
-		if (lsize == 0) return;   // nothing to copy.
-
-
-
-		lsize = 0;  // reset lsize since we will be inserting.
 
 		// insert using the iterators.
 		insert(const_iterator(tmp.cbegin(), info_tmp.cbegin(), info_tmp.cend(), filter),
