@@ -25,7 +25,9 @@ The repository is organized as follows:
 
 
 ### Dependencies ###
-This project depends on "kmerind", and indirectly on Kmerind's dependencies including google sparse hash map, google farm hash, murmur hash, mxx, google test, and tclap.  It also requires a c++11 compliant compiler (4.8.4 or later) and cmake ver 2.8 or later.
+For the moment, this project depends on "kmerind", and indirectly on Kmerind's dependencies including google sparse hash map, google farm hash, murmur hash, mxx, google test, and tclap.  These dependencies are likely to be refactored later.
+
+The project requires a c++11 compliant compiler (4.8.4 or later) and cmake ver 2.8 or later.
 
 To initialize the git submodules, invoke the following:
 
