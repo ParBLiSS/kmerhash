@@ -8,7 +8,7 @@ This repository contains implementation of hash tables that are aimed to better 
 The implemention is c++ 11 compliant and header only.
 
 
-## Repository Structure ##
+### Repository Structure ###
 
 
 The repository is organized as follows:
@@ -24,7 +24,7 @@ The repository is organized as follows:
 * "ext" contains dependencies as git submodules. 
 
 
-## Dependencies ##
+### Dependencies ###
 This project depends on "kmerind", and indirectly on Kmerind's dependencies including google sparse hash map, google farm hash, murmur hash, mxx, google test, and tclap.  It also requires a c++11 compliant compiler (4.8.4 or later) and cmake ver 2.8 or later.
 
 To initialize the git submodules, invoke the following:
@@ -42,7 +42,7 @@ git submodule update
 ```
 
 
-## Configuration ##
+### Configuration ###
 
 To compile, first create a build directory, preferably outside of the source directory.
 
@@ -66,7 +66,7 @@ make
 
 ```
 
-## How to run tests ##
+### How to run tests ###
 
 The unit test are located in the "test" subdirectory inside the build directory.  To run individual tests, the executable can be invoked directly.  To run all tests, use
 
@@ -77,7 +77,7 @@ make test
 
 ```
 
-## How to run benchmarks ##
+### How to run benchmarks ###
 
 There is currently only 1 benchmark and it is hard coded to insert 100M elements with average 5x repeats, and query with 10M elements.  The following tests are run in sequence:  insert, find, count, erase, count.
 
