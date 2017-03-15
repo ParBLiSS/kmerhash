@@ -26,7 +26,7 @@
 #define AUX_FILTER_ITERATOR_HPP_
 
 #include <iterator>
-#include "function_traits.hpp"
+#include "kmerhash/function_traits.hpp"
 #include <iostream>
 
 namespace bliss

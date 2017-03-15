@@ -17,7 +17,7 @@
 
 // include google test
 #include <gtest/gtest.h>
-#include "kmerhash/hashtable_OA_RH_DO_noncircular.hpp"
+#include "kmerhash/experimental/hashmap_robinhood_doubling_noncircular.hpp"
 
 #include <string>
 #include <unordered_map>
@@ -85,7 +85,7 @@ TYPED_TEST_P(Hashtable_OARH_DO_NoncircTest, insert_partial)
 {
   bool same = false;
 
-  using MAP = ::fsc::hashmap_oa_rh_do_noncircular<TypeParam, TypeParam>;
+  using MAP = ::fsc::hashmap_robinhood_doubling_noncircular<TypeParam, TypeParam>;
 
 
    MAP test;
@@ -176,7 +176,7 @@ TYPED_TEST_P(Hashtable_OARH_DO_NoncircTest, insert_partial)
 
 TYPED_TEST_P(Hashtable_OARH_DO_NoncircTest, count_partial)
 {
-	  using MAP = ::fsc::hashmap_oa_rh_do_noncircular<TypeParam, TypeParam>;
+	  using MAP = ::fsc::hashmap_robinhood_doubling_noncircular<TypeParam, TypeParam>;
 
 
 	   MAP test(this->temp.begin(), this->temp.end());
@@ -331,7 +331,7 @@ class Hashmap_OA_RH_DO_Noncirc_KmerTest : public ::testing::Test
 
     template <typename Kmer = T, bool canonical,
 			typename Hash, typename Equal>
-    ::fsc::hashmap_oa_rh_do_noncircular<Kmer, uint32_t, Hash, Equal>
+    ::fsc::hashmap_robinhood_doubling_noncircular<Kmer, uint32_t, Hash, Equal>
     make_kmer_map() {
 //    	::bliss::kmer::hash::sparsehash::special_keys<Kmer, canonical> specials;
 //    	if (canonical) std::cout << "CANONICAL ";
@@ -361,7 +361,7 @@ class Hashmap_OA_RH_DO_Noncirc_KmerTest : public ::testing::Test
 //			std::cout << std::endl;
 //    	}
 
-		return ::fsc::hashmap_oa_rh_do_noncircular<Kmer, uint32_t, Hash, Equal >();
+		return ::fsc::hashmap_robinhood_doubling_noncircular<Kmer, uint32_t, Hash, Equal >();
     }
 
 

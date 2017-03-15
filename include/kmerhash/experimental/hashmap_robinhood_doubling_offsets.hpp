@@ -23,146 +23,86 @@
  *  for robin hood hashing
  */
 
-#ifndef KMERHASH_HASHTABLE_OA_RH_DO_PREFIX_HPP_
-#define KMERHASH_HASHTABLE_OA_RH_DO_PREFIX_HPP_
+#ifndef KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS_HPP_
+#define KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS_HPP_
 
 #include <vector>   // for vector.
 #include <type_traits> // for is_constructible
 #include <iterator>  // for iterator traits
 #include <algorithm> // for transform
 
-#include "aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
-#include "math_utils.hpp"
+#include "kmerhash/aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
+#include "kmerhash/math_utils.hpp"
 
 namespace fsc {
 
 /**
- * @brief Open Addressing hashmap that uses linear addressing, with doubling for hashing, and with specialization for k-mers.
+ * @brief Open Addressing hashmap that uses Robin Hood hashing, with doubling for resizing, circular internal array.  modified from standard robin hood hashmap to use bucket offsets, in attempt to improve speed.
  * @details  at the moment, nothing special for k-mers yet.
  * 		This class has the following implementation characteristics
  * 			vector of structs
- * 			open addressing with linear probing
+ * 			open addressing with robin hood hashing.
  * 			doubling for reallocation
+ * 			circular internal array
+ *
+ *  like standard robin hood hashmap implementation in "hashmap_robinhood_doubling.hpp", we use an auxillary array.  however, the array is interpreted differently.
+ *  whereas standard imple stores the distance of the current array position from the bucket that the key is "hashed to",
+ *  the "offsets" implementation stores at each position the starting offset of entries for the current bucket, and the empty/occupied bit indicates
+ *  whether the current bucket has content or not (to distinguish between an empty bucket from an occupied bucket with offset 0.).
+ *
+ *  this is possible as robin hood hashing places entries for a bucket consecutively
+ *
+ *  benefits:
+ *  1. no need to scan in order to find start of a bucket.
+ *  2. end of a bucket is determined by the next bucket's offset.
+ *
+ *  Auxillary array interpretation:
+ *
+ *  where as RH standard aux array element represents the distance from source for the corresponding element in container.
+ *    idx   ----a---b------------
+ *    aux   ===|=|=|=|=|4|3|=====   _4_ is recorded at position hash(X) + _4_ of aux array.
+ *    data  -----------|X|Y|-----,  X is inserted into bucket hash(X) = a.  in container position hash(X) + _4_.
+ *
+ *    empty positions are set to 0x80, and same for all info entries.
+ *
+ *  this aux array instead has each element represent the offset for the first entry of this bucket.
+ *    idx   ----a---b------------
+ *    aux   ===|4|=|3|=|=|=|=====   _4_ is recorded at position hash(X) of aux array.
+ *    data  -----------|X|Y|-----,  X is inserted into bucket hash(X), in container position hash(X) + _4_.
+ *
+ *    empty positions are set with high bit 1, but can has distance larger than 0.
+ *
+ *  in standard, we linear scan info_container from position hash(Y) and must go to hash(Y) + 4 linearly.
+ *    each aux entry is essentailyl independent of others.
+ *    have to check and compare each data entry.
+ *
+ *  in this class, we just need to look at position hash(Y) and hash(Y) + 1 to know where to start and end in the container
+ *    for find/count/update, those 2 are the only ones we need.
+ *    for insert, we need to find the end of the range to modify, even after the insertion point.
+ *      first search for end of range from current bucket (linear scan)
+ *      then move from insertion point to end of range to right by 1.
+ *      then insert at insertion point
+ *      finally update the aux array from hash(Y) +1, to end of bucket range (ends on empty or dist = 0), by adding 1...
+ *    for deletion, we need to again find the end of the range to modify, from the point of the deletion
+ *      search for end of range from current bucket
+ *      then move from deletion point to end of range to left by 1
+ *      finally update the aux array from hash(Y) +1 to end of bucket range(ends on dist == 0), by subtracting 1...
+ *    for rehash, from the first non-empty, to the next empty
+ *      call insert on the entire range.
  *
  *
- *
- *
- *
- * 			using vector internally.
- * 			tracking empty and deleted via special bit instead of using empty and deleted keys (potentially has to compare whole key)
- * 				use bit array instead of storing flags with value type
- * 				Q: should the key and value be stored in separate arrays?  count, exist, and erase may be faster (no need to touch value array).
- *
- *			MPI friendliness - would never send the vector directly - need to permute, which requires extra space and time, and only send value when insert (and possibly update),
- *				neither are technically sending the vector really.
- *
- *				so assume we always are copying then sending, which means we can probably construct as needed.
- *
- *		WANT a simple array of key, value pair.  then have auxillary arrays to support scanning through, ordering, and reordering.
- *			memorizing hashes can be done as well in aux array....
- *
- *
- * 			somethings to put in the aux array:  empty bit.  deleted bit.  probe distance.
- * 				memorizing the hash requires more space, else would need to compute hash anyways.
- *
- * 			TODO: bijective hash could be useful....
- *
- *  requirements
- *		support iterate
- *		no special keys
- *		incremental allocation (perhaps not doubling right now...
- *
- *
- *
- *
- *
- *  array of tuples vs tuple of arrays
- *  start with array of tuples
- *  then do tuple of arrays
- *
- *  hashset may be useful for organizing the query input.
- *  how to order the hash table accesses so that there is maximal cache reuse?  order things by hash?
- *
- *  using a C array may be better - better memory allocation control.
- *
- *
- *
- *  linear probing - if reached end, then wrap around?  or just allocate some extra, but still hash to first 2^x positions.
- *
- *  when rehashing under doubling/halving, since always power of 2 in capacity, can just merge the higher half to the lower half by index.
- *  batch process during insertion?
- *
- *  TODO: when using power-of-2 sizes, using low-to-high hash value bits means that when we grow, a bucket is split between buckets i and i+2^x.
- *  		if we use high-to-low bits, then resize up split into adjacent buckets.
- *  		it is possible that some buckets may not need to move.	 It is possible to grow incrementally potentially.
- *
- *  FIX:
- *  [x] remove max_probe - treat as if circular array.
- *  [x] separate info from rest of struct, so as to remove use of transform_iterator, thus allowing us to change values through iterator. requires a new aux_filter_iterator.
+ *  TODO:
  *  [ ] batch mode operations to allow more opportunities for optimization including SIMD
  *  [ ] predicated version of operations
  *  [ ] macros for repeated code.
- *  [x] testing with k-mers
- *  [x] measure reprobe count for insert
- *  [x] measure reprobe count for find and update.
- *  [x] measure reprobe count for count and erase.
- *  [x] robin hood hashing with back shifting durign deletion.
- *  [ ] modification to use memmove during insertion and deletion - does not seem to make much difference for erase, so perhaps not for insert.
- *  [ ] add a new array, where entries are value of the reprobe distances of the first bucket entry in the array.  (guarantee that all elements in bucket are consecutive from the robin hood hashing).
- *        use this (+ neighbor's value) for direct access to the bucket without needing to scan up to the bucket.
- *        very likely don't need the original array after that...
- *  [ ] prefix scan version. - kind of - may require sorting or shuffling to build.  still need some way to scan fast.
- *  separate array version is probably not useful.
- *    checking for key equality is the only reason for doing that
- *    at the cost of constructing pairs all the time, and having iterators that are zip iterators so harder to "update" values.
- *
- *  Robin Hood Hashing logic follows
- *  	http://www.sebastiansylvan.com/post/robin-hood-hashing-should-be-your-default-hash-table-implementation/
- *
- *
- *  oa = open addressing
- *  rh = robin hood
- *  do = doubling
- *  memmove = use memmove wherever possible instead of individually move the entries.
- *
- *
- *  use an auxillary array.
- *  where as RH standard aux array element represents the distance from source for the corresponding element in container.
- *      idx   ----a---b------------
- *  	aux   ===|=|=|=|=|4|3|=====   _4_ is recorded at position hash(X) + _4_ of aux array.
- *  	data  -----------|X|Y|-----,  X is inserted into bucket hash(X) = a.  in container position hash(X) + _4_.
- *
- *  	empty positions are set to 0x80, and same for all info entries.
- *
- *  this aux array instead has each element represent the offset for the first entry of this bucket.
- *      idx   ----a---b------------
- *  	aux   ===|4|=|3|=|=|=|=====   _4_ is recorded at position hash(X) of aux array.
- *  	data  -----------|X|Y|-----,  X is inserted into bucket hash(X), in container position hash(X) + _4_.
- *
- *		empty positions are set with high bit 1, but can has distance larger than 0.
- *
- *  in traditional, we linear scan info_container from position hash(Y) and must go to hash(Y) + 4 linearly.
- *  	each aux entry is essentailyl independent of others.
- *  	have to check and compare each data entry.
- *
- *  in this class, we just need to look at position hash(Y) and hash(Y) + 1 to know where to start and end in the container
- *  	for find/count/update, those 2 are the only ones we need.
- *  	for insert, we need to find the end of the range to modify, even after the insertion point.
- *  		first search for end of range from current bucket (linear scan)
- *  		then move from insertion point to end of range to right by 1.
- *  		then insert at insertion point
- *  		finally update the aux array from hash(Y) +1, to end of bucket range (ends on empty or dist = 0), by adding 1...
- * 		for deletion, we need to again find the end of the range to modify, from the point of the deletion
- * 			search for end of range from current bucket
- * 			then move from deletion point to end of range to left by 1
- * 			finally update the aux array from hash(Y) +1 to end of bucket range(ends on dist == 0), by subtracting 1...
- * 		for rehash, from the first non-empty, to the next empty
- * 			call insert on the entire range.
+ *  [x] use bucket offsets instead of distance to bucket.
+ *  [ ] faster insertion in batch
+ *  [ ] faster find?
  *
  */
 template <typename Key, typename T, typename Hash = ::std::hash<Key>,
 		typename Equal = ::std::equal_to<Key>, typename Allocator = ::std::allocator<std::pair<const Key, T> > >
-class hashmap_oa_rh_do_prefix {
+class hashmap_robinhood_doubling_offsets {
 
 public:
 
@@ -262,7 +202,7 @@ public:
     /**
      * _capacity is the number of usable entries, not the capacity of the underlying container.
      */
-	explicit hashmap_oa_rh_do_prefix(size_t const & _capacity = 128,
+	explicit hashmap_robinhood_doubling_offsets(size_t const & _capacity = 128,
 			float const & _min_load_factor = 0.4,
 			float const & _max_load_factor = 0.9) :
 			lsize(0), buckets(next_power_of_2(_capacity)), mask(buckets - 1),
@@ -284,17 +224,17 @@ public:
 	 */
 	template <typename Iter, typename = typename std::enable_if<
 			::std::is_constructible<value_type, typename ::std::iterator_traits<Iter>::value_type>::value  ,int>::type >
-	hashmap_oa_rh_do_prefix(Iter begin, Iter end,
+	hashmap_robinhood_doubling_offsets(Iter begin, Iter end,
 			float const & _min_load_factor = 0.4,
 			float const & _max_load_factor = 0.9) :
-		hashmap_oa_rh_do_prefix(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
+		hashmap_robinhood_doubling_offsets(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
 
 		for (auto it = begin; it != end; ++it) {
 			insert(value_type(*it));  //local insertion.  this requires copy construction...
 		}
 	}
 
-	~hashmap_oa_rh_do_prefix() {
+	~hashmap_robinhood_doubling_offsets() {
 #if defined(REPROBE_STAT)
 		::std::cout << "SUMMARY:" << std::endl;
 		::std::cout << "  upsize\t= " << upsize_count << std::endl;
@@ -977,7 +917,7 @@ public:
 
 
 	/**
-	 * @brief erases a key.  performs backward shift.
+	 * @brief erases a key.  performs backward shift.  swap at bucket boundaries only.
 	 */
 	size_type erase_no_resize(key_type const & k) {
 		size_t bid;
@@ -1150,4 +1090,4 @@ public:
 #undef REPROBE_STAT
 
 }  // namespace fsc
-#endif /* KMERHASH_HASHTABLE_OA_RH_DO_PREFIX_HPP_ */
+#endif /* KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS_HPP_ */

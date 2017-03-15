@@ -15,44 +15,43 @@
  */
 
 /*
- * hashtable_OA_RH_doubling.hpp
+ * hashtable_OA_LP_doubling.hpp
  *
  *  Created on: Feb 27, 2017
  *      Author: tpan
- *
- *  for robin hood hashing
  */
 
-#ifndef KMERHASH_HASHTABLE_OA_RH_DOUBLING_HPP_
-#define KMERHASH_HASHTABLE_OA_RH_DOUBLING_HPP_
+#ifndef KMERHASH_HASHMAP_LINEARPROBE_DOUBLING_HPP_
+#define KMERHASH_HASHMAP_LINEARPROBE_DOUBLING_HPP_
 
 #include <vector>   // for vector.
 #include <type_traits> // for is_constructible
 #include <iterator>  // for iterator traits
 #include <algorithm> // for transform
 
-#include "aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
-#include "math_utils.hpp"
+#include "kmerhash/aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
+#include "kmerhash/math_utils.hpp"
 
 
 
 namespace fsc {
 
 /**
- * @brief Open Addressing hashmap that uses linear addressing, with doubling for hashing, and with specialization for k-mers.
- * @details  at the moment, nothing special for k-mers yet.
+ * @brief Open Addressing hashmap that uses linear addressing, with doubling for allocation, and with specialization for k-mers.
+ * @details
+ *    at the moment, nothing special for k-mers yet.
  * 		This class has the following implementation characteristics
  * 			vector of structs
  * 			open addressing with linear probing
  * 			doubling for reallocation
+ *      array of tuples
+ *      circular array for storage.
  *
  *
- *
- *
- *
+ *   Implementation Details
  * 			using vector internally.
  * 			tracking empty and deleted via special bit instead of using empty and deleted keys (potentially has to compare whole key)
- * 				use bit array instead of storing flags with value type
+ * 				use byte array instead of storing flags with value type
  * 				Q: should the key and value be stored in separate arrays?  count, exist, and erase may be faster (no need to touch value array).
  *
  *			MPI friendliness - would never send the vector directly - need to permute, which requires extra space and time, and only send value when insert (and possibly update),
@@ -63,98 +62,40 @@ namespace fsc {
  *		WANT a simple array of key, value pair.  then have auxillary arrays to support scanning through, ordering, and reordering.
  *			memorizing hashes can be done as well in aux array....
  *
- *
  * 			somethings to put in the aux array:  empty bit.  deleted bit.  probe distance.
  * 				memorizing the hash requires more space, else would need to compute hash anyways.
  *
- * 			TODO: bijective hash could be useful....
- *
  *  requirements
- *		support iterate
- *		no special keys
- *		incremental allocation (perhaps not doubling right now...
+ *		[x] support iterate
+ *		[x] no special keys
+ *		[ ] incremental allocation (perhaps not doubling right now...
  *
  *
- *
- *
- *
- *  array of tuples vs tuple of arrays
- *  start with array of tuples
- *  then do tuple of arrays
- *
- *  hashset may be useful for organizing the query input.
  *  how to order the hash table accesses so that there is maximal cache reuse?  order things by hash?
  *
- *  using a C array may be better - better memory allocation control.
  *
+ *  MAYBE:
+ *      hashset may be useful for organizing the query input.
+ *      when using power-of-2 sizes, using low-to-high hash value bits means that when we grow, a bucket is split between buckets i and i+2^x.
+ *      when rehashing under doubling/halving, since always power of 2 in capacity, can just merge the higher half to the lower half by index.
+ *  		  if we use high-to-low bits, then resize up split into adjacent buckets.
+ *  	  	it is possible that some buckets may not need to move.	 It is possible to grow incrementally potentially.
+ *      using a C array may be better - better memory allocation control.
  *
- *
- *  linear probing - if reached end, then wrap around?  or just allocate some extra, but still hash to first 2^x positions.
- *
- *  when rehashing under doubling/halving, since always power of 2 in capacity, can just merge the higher half to the lower half by index.
- *  batch process during insertion?
- *
- *  TODO: when using power-of-2 sizes, using low-to-high hash value bits means that when we grow, a bucket is split between buckets i and i+2^x.
- *  		if we use high-to-low bits, then resize up split into adjacent buckets.
- *  		it is possible that some buckets may not need to move.	 It is possible to grow incrementally potentially.
- *
- *  FIX:
+ *  TODO:
  *  [x] remove max_probe - treat as if circular array.
  *  [x] separate info from rest of struct, so as to remove use of transform_iterator, thus allowing us to change values through iterator. requires a new aux_filter_iterator.
  *  [ ] batch mode operations to allow more opportunities for optimization including SIMD
  *  [ ] predicated version of operations
  *  [ ] macros for repeated code.
  *  [x] testing with k-mers
- *  [x] measure reprobe count for insert
- *  [x] measure reprobe count for find and update.
- *  [x] measure reprobe count for count and erase.
- *  [x] robin hood hashing with back shifting during deletion.
- *  [ ] memmove?  probably not.  current approach swaps only when dist increases, not when they are the same, which is what most of a bucket would contain, so total mem access would be low.
  *
- *  Robin Hood Hashing logic follows
- *  	http://www.sebastiansylvan.com/post/robin-hood-hashing-should-be-your-default-hash-table-implementation/
+ *  first do the stupid simple implementation.
  *
- *  use an auxillary array.
- *  where as RH standard aux array element represents the distance from source for the corresponding element in container.
- *      idx   ----a---b------------
- *    aux   ===|-|=|-|=|4|3|=====   _4_ is recorded at position hash(X) + _4_ of aux array.
- *    data  -----------|X|Y|-----,  X is inserted into bucket hash(X) = a.  in container position hash(X) + _4_.
- *
- *    empty positions are set to 0x80, and same for all info entries.
- *
- *  this aux array instead has each element represent the offset for the first entry of this bucket.
- *      idx   ----a---b------------
- *    aux   ===|4|=|3|=|-|-|=====   _4_ is recorded at position hash(X) of aux array.
- *    data  -----------|X|Y|-----,  X is inserted into bucket hash(X), in container position hash(X) + _4_.
- *
- *    empty positions are set with high bit 1, but can has distance larger than 0.
- *
- *  in traditional, we linear scan info_container from position hash(Y) and must go to hash(Y) + 4 linearly.
- *    each aux entry is essentailyl independent of others.
- *    have to check and compare each data entry.
- *
- *  in this class, we just need to look at position hash(Y) and hash(Y) + 1 to know where to start and end in the container
- *    for find/count/update, those 2 are the only ones we need.
- *    for insert, we need to find the end of the range to modify, even after the insertion point.
- *      first search for end of range from current bucket (linear scan)
- *      then move from insertion point to end of range to right by 1.
- *      then insert at insertion point
- *      finally update the aux array from hash(Y) +1, to end of bucket range (ends on empty or dist = 0), by adding 1...
- *    for deletion, we need to again find the end of the range to modify, from the point of the deletion
- *      search for end of range from current bucket
- *      then move from deletion point to end of range to left by 1
- *      finally update the aux array from hash(Y) +1 to end of bucket range(ends on dist == 0), by subtracting 1...
- *    for rehash, from the first non-empty, to the next empty
- *      call insert on the entire range.
- *
- *  oa = open addressing
- *  rh = robin hood
- *  do = doubling
- *  tuple = array of tuples (instead of tuple of arrays)
  */
 template <typename Key, typename T, typename Hash = ::std::hash<Key>,
 		typename Equal = ::std::equal_to<Key>, typename Allocator = ::std::allocator<std::pair<const Key, T> > >
-class hashmap_oa_rh_do_tuple {
+class hashmap_linearprobe_doubling {
 
 public:
 
@@ -170,23 +111,30 @@ protected:
 
     	unsigned char info;
 
-    	static constexpr unsigned char empty = 0x00;
-    	static constexpr unsigned char dist_mask = 0x7F;
-    	static constexpr unsigned char normal = 0x80;   // this is used to initialize the reprobe distances.
+    	static constexpr unsigned char empty = 0x40;
+    	static constexpr unsigned char deleted = 0x80;
 
 
     	inline bool is_empty() const {
     		return info == empty;  // empty 0x40
     	}
-    	inline bool is_normal() const {
-    		return info >= normal;  // normal. both top bits are set. 0xC0
+    	inline bool is_deleted() const {
+    		return info == deleted;  // deleted. 0x80
     	}
-    	inline void set_normal() {
-    		info |= normal;  // set the top bits.
+    	inline bool is_normal() const {  // upper bits == 0
+    		return info < empty;  // lower 6 bits are set.
+      	}
+    	inline void set_deleted() {
+    		info = deleted;  // set the top bit.
     	}
     	inline void set_empty() {
     		info = empty;  // nothing here.
     	}
+    	inline void set_normal() {
+    		info &= 0x3F;  // clear the upper bits;
+    	}
+
+
 
     };
 
@@ -216,7 +164,6 @@ protected:
 
     size_t lsize;
     mutable size_t buckets;
-    mutable size_t mask;
     mutable size_t min_load;
     mutable size_t max_load;
     mutable float min_load_factor;
@@ -234,17 +181,17 @@ protected:
     size_t upsize_count;
     size_t downsize_count;
     mutable size_t reprobes;   // for use as temp variable
-    mutable unsigned char max_reprobes;
+    mutable size_t max_reprobes;
 
 public:
 
     /**
      * _capacity is the number of usable entries, not the capacity of the underlying container.
      */
-	explicit hashmap_oa_rh_do_tuple(size_t const & _capacity = 128,
-			float const & _min_load_factor = 0.4,
-			float const & _max_load_factor = 0.9) :
-			lsize(0), buckets(next_power_of_2(_capacity) ), mask(buckets - 1),
+	explicit hashmap_linearprobe_doubling(size_t const & _capacity = 128,
+			float const & _min_load_factor = 0.2,
+			float const & _max_load_factor = 0.6) :
+			lsize(0), buckets(next_power_of_2(_capacity)),
 			container(buckets), info_container(buckets, info_type(info_type::empty)),
 			upsize_count(0), downsize_count(0)
 			{
@@ -263,23 +210,21 @@ public:
 	 */
 	template <typename Iter, typename = typename std::enable_if<
 			::std::is_constructible<value_type, typename ::std::iterator_traits<Iter>::value_type>::value  ,int>::type >
-	hashmap_oa_rh_do_tuple(Iter begin, Iter end,
-			float const & _min_load_factor = 0.4,
-			float const & _max_load_factor = 0.9) :
-		hashmap_oa_rh_do_tuple(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
+	hashmap_linearprobe_doubling(Iter begin, Iter end, float const & _min_load_factor = 0.2, float const & _max_load_factor = 0.6) :
+		hashmap_linearprobe_doubling(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
 
 		for (auto it = begin; it != end; ++it) {
 			insert(value_type(*it));  //local insertion.  this requires copy construction...
 		}
 	}
 
-	~hashmap_oa_rh_do_tuple() {
+	~hashmap_linearprobe_doubling() {
 #if defined(REPROBE_STAT)
 		::std::cout << "SUMMARY:" << std::endl;
 		::std::cout << "  upsize\t= " << upsize_count << std::endl;
 		::std::cout << "  downsize\t= " << downsize_count << std::endl;
 #endif
-		}
+	}
 
 	/**
 	 * @brief set the load factors.
@@ -388,19 +333,17 @@ public:
 			++downsize_count;
 		}
 #endif
-
 		if (n != buckets) {
 
 			buckets = n;
-			mask = buckets - 1;
 			container_type tmp(buckets);
 			info_container_type tmp_info(buckets, info_type(info_type::empty));
 			container.swap(tmp);
 			info_container.swap(tmp_info);
-	    lsize = 0;  // insert increments the lsize.  this ensures that it is correct.
 
-      min_load = static_cast<size_t>(static_cast<float>(buckets) * min_load_factor);
-      max_load = static_cast<size_t>(static_cast<float>(buckets) * max_load_factor);
+			min_load = static_cast<size_t>(static_cast<float>(buckets) * min_load_factor);
+			max_load = static_cast<size_t>(static_cast<float>(buckets) * max_load_factor);
+
 			copy(tmp.begin(), tmp.end(), tmp_info.begin());
 		}
 	}
@@ -413,31 +356,23 @@ protected:
 	 */
 	void copy(typename container_type::iterator begin, typename container_type::iterator end, typename info_container_type::iterator info_begin) {
 
+		size_t count = 0;
 
 #if defined(REPROBE_STAT)
-    size_t count = 0;
 		this->reprobes = 0;
 		this->max_reprobes = 0;
-    iterator dummy;
-    bool success;
 #endif
-
 		auto it = begin;
 		auto iit = info_begin;
 		for (; it != end; ++it, ++iit) {
 			if ((*iit).is_normal()) {
-#if defined(REPROBE_STAT)
-				std::tie(dummy, success) = insert(::std::move(*it));
-				if (success) ++count;
-#else
-				insert(::std::move(*it));
-#endif
+				count += copy_one(::std::move(*it), ::std::move(*iit));
 			}
 		}
 
 #if defined(REPROBE_STAT)
-		std::cout << "REHASH copy:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
-					"\tvalid=" << count << "\ttotal=" << std::distance(begin, end) << "\tlsize=" << lsize <<
+		std::cout << "REHASH copy:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
+					"\tvalid=" << count << "\ttotal=" << std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
@@ -446,105 +381,134 @@ protected:
 	}
 
 
+	/**
+	 * @brief insert at the specified position.  does NOT check if already exists.  for internal use during rehash only.
+	 * @details passed in info should have "normal" flag.
+	 * @return reprobe count
+	 */
+	size_type copy_one(value_type&& value, info_type&& info) {
+		size_type pos = hash(value.first) % buckets;
+		size_type i = pos;
+
+		while ((i < buckets) && info_container[i].is_normal()) ++i;  // find a place to insert.
+#if defined(REPROBE_STAT)
+		size_t reprobe = i - pos;
+#endif
+		if (i == buckets) {
+			// did not find one, so search from beginning
+			i = 0;
+			while ((i < pos) && info_container[i].is_normal()) ++i;  // find a place to insert.
+#if defined(REPROBE_STAT)
+			reprobe += i;
+#endif
+			if (i == pos) // nothing was found.  this should not happen
+				throw std::logic_error("ERROR: did not find any place to insert.  should not have happend");
+
+			// else 0 <= i < pos
+		} // else  pos <= i < buckets.
+
+#if defined(REPROBE_STAT)
+		this->reprobes += reprobe;
+		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+#endif
+		// insert at i.
+		container[i] = value;
+		info_container[i].info = 0;   // higest 2 bits are already set.
+
+		return 1;
+	}
 
 public:
 
-
-
+// HERE:  TODO: change insert to remove reprobe distance and associated distance.
 	/**
 	 * @brief insert a single key-value pair into container.
-	 *
-	 * note that swap only occurs at bucket boundaries.
 	 */
-	std::pair<iterator, bool> insert(value_type && vv) {
+	std::pair<iterator, bool> insert(key_type const & key, mapped_type const & val) {
 
-		unsigned char reprobe = info_type::normal;
-
+#if defined(REPROBE_STAT)
+		size_type reprobe = 0;
+#endif
 
 		// first check if we need to resize.
 		if (lsize >= max_load) rehash(buckets << 1);
 
 		// first get the bucket id
-		size_type i = hash(vv.first) & mask;  // target bucket id.
+		size_type pos = hash(key) % buckets;
+		size_type i;
+		size_type insert_pos = buckets;
 
-		size_type insert_pos = std::numeric_limits<size_type>::max();
-		bool success = false;
-		size_type j = 0;
+		for (i = pos; i < buckets; ++i) {
+			if (info_container[i].is_empty()) {
+				insert_pos = i;
+				break;
+			}
 
-		for (; j < buckets; ++j) {  // limit to 1 complete loop
+			if (info_container[i].is_deleted() && (insert_pos == buckets)) {
+//				std::cout << " check deleted pos = " << pos << " buckets = " << buckets << " i = " << i << " insert_pot " << insert_pos << std::endl;
 
-			// implementing back shifting, so don't worry about deleted entries.
+				insert_pos = i;
 
-			// insert if empty, or if reprobe distance is larger than current position's.  do this via swap.
-			// continue to probe if we swapped out a normal entry.
-			// this logic relies on choice of bits for empty entries.
-
-			// we want the reprobe distance to be larger than empty, so we need to make
-			// normal to have high bits 1 and empty 0.
-
-			// save the insertion position (or equal position) for the first insert or match, but be aware that after the swap
-			//  there will be other inserts or swaps. BUT NOT OTHER MATCH since this is a MAP.
-
-			// if current distance is larger than target's distance, (including empty cell), then swap.
-			assert(reprobe >= info_type::normal);  // if distance is over 128, then wrap around would get us less than normal.
-
-			if (reprobe > info_container[i].info) {
-				::std::swap(info_container[i].info, reprobe);
-
-				if (insert_pos == std::numeric_limits<size_type>::max()) {
-					insert_pos = i;  // set insert_pos to first positin of insertion.
-					success = true;
-					++lsize;
-				}  // subsequent "shifts" do not change insert_pos or success.
-
-				// then decide what to do given the swapped out distance.
-				if (reprobe == info_type::empty) {  // previously it was empty,
-					// then we can simply set.
-					container[i] = std::move(vv);
-
-					break;
-
-				} else {
-					// there was a real entry, so need to swap
-					::std::swap(container[i], vv);
-
-					// and continue
-				}
-			} else if (reprobe == info_container[i].info) {
-			  // check for equality, only if haven't inserted (if don't check success, there could be a lot of equality checks.
-
-//			  if (success)  std::cout << ".";
-
-				// same distance, then possibly same value.  let's check.
-				if (!success && eq(container[i].first, vv.first)) {  // note that a previously swapped vv would not match again and can be skipped.
-					// same, then we found it and need to return.
-					insert_pos = i;
-					success = false;
-					break;
-				}  // note that the loop terminates within here so don't need to worry about another insertion point.
-
-			}  // note that it's not possible for a match to occur with shorter current reprobe distance -
-				// that would mean same element is hashed to multiple buckets.
-
-			// increment probe distance
-			++reprobe;
-
-			// circular array.
-			i = (i+1) & mask;   // for bucket == 2^x, this acts like modulus.
-		}
-		assert(j < buckets);
+			} else if (info_container[i].is_normal() && (eq(key, container[i].first))) {
 
 #if defined(REPROBE_STAT)
-		this->reprobes += j;
-		this->max_reprobes = std::max(this->max_reprobes, j);
+				this->reprobes += i - pos;
+				this->max_reprobes = std::max(this->max_reprobes, (i-pos));
 #endif
-		return std::make_pair(iterator(container.begin() + insert_pos, info_container.begin()+ insert_pos, info_container.end(), filter), success);
+				// found a match
+				return std::make_pair(iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter), false);
+			}
+		}
+//		std::cout << " first part insertion pos = " << pos << " buckets = " << buckets << " i = " << i << " insert_pot " << insert_pos << std::endl;
+#if defined(REPROBE_STAT)
+		reprobe = i-pos;
+#endif
+
+		if (i == buckets) {
+			// now repeat for first part
+			for (i = 0; i < pos; ++i) {
+				if (info_container[i].is_empty()) {
+					insert_pos = i;
+					break;
+				}
+
+				if (info_container[i].is_deleted() && (insert_pos == buckets))
+					insert_pos = i;
+				else if (info_container[i].is_normal() && (eq(key, container[i].first))) {
+#if defined(REPROBE_STAT)
+					this->reprobes += reprobe + i;
+					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
+#endif
+					// found a match
+					return std::make_pair(iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter), false);
+
+				}
+			}
+
+#if defined(REPROBE_STAT)
+			reprobe += i;
+#endif
+		}
+#if defined(REPROBE_STAT)
+		this->reprobes += reprobe;
+		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+#endif
+		// finally check if we need to insert.
+		if (insert_pos == buckets) {  // went through the whole container.  must be completely full.
+			throw std::logic_error("ERROR: did not find a slot to insert into.  container must be full.  should not happen.");
+		}
+
+		container[insert_pos].first = key;
+		container[insert_pos].second = val;
+		info_container[insert_pos].info = 0;   // high bits are cleared.
+		++lsize;
+
+		return std::make_pair(iterator(container.begin() + insert_pos, info_container.begin()+ insert_pos, info_container.end(), filter), true);
 
 	}
 
-	std::pair<iterator, bool> insert(key_type && key, mapped_type && val) {
-		auto result = insert(std::make_pair(key, val));
-		return result;
+	std::pair<iterator, bool> insert(value_type const & vv) {
+		return insert(vv.first, vv.second);
 	}
 
 	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
@@ -555,22 +519,20 @@ public:
 		this->reprobes = 0;
 		this->max_reprobes = 0;
 #endif
+
 		size_t count = 0;
 		iterator dummy;
 		bool success;
 
 		for (auto it = begin; it != end; ++it) {
-			std::tie(dummy, success) = insert(std::move(value_type(*it)));  //local insertion.  this requires copy construction...
+			std::tie(dummy, success) = insert(value_type(*it));  //local insertion.  this requires copy construction...
 
-			if (success) {
-				++count;
-			}
+			if (success) ++count;
 		}
 
-#if defined(REPROBE_STAT)
-    std::cout << "lsize " << lsize << std::endl;
 
-    std::cout << "INSERT batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+#if defined(REPROBE_STAT)
+		std::cout << "INSERT batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << count << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 		this->reprobes = 0;
@@ -579,59 +541,62 @@ public:
 		reserve(lsize);  // resize down as needed
 	}
 
-protected:
-
-	/**
-	 * return the bucket id where the current key is found.  if not found, max is returned.
-	 */
-	size_type find_pos(key_type const & k) const {
-
-		unsigned char reprobe = info_type::normal;
-
-		// first get the bucket id
-		size_t i = hash(k) & mask;
-
-		size_type result = std::numeric_limits<size_type>::max();
-
-		size_t j;
-		for (j = 0; j < buckets; ++j) {
-			if (reprobe > info_container[i].info) {
-				// either empty, OR query's distance is larger than the current entries, which indicates
-				// this would have been swapped during insertion, and can also indicate that the current
-				// entry is from a different bucket.
-				// so did not find one.
-				break;
-			} else if (reprobe == info_container[i].info) {
-				// possibly matched.  compare.
-				if (eq(k, container[i].first)) {
-					result = i;
-					break;
-				}
-			} // else still traversing a previous bucket.
-
-			++reprobe;
-			i = (i+1) & mask;   // again power of 2 modulus.
-		}
-		assert(j < buckets);
-
-#if defined(REPROBE_STAT)
-		reprobe &= info_type::dist_mask;
-		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
-#endif
-
-		return result;
-	}
-
-public:
 
 	/**
 	 * @brief count the presence of a key
 	 */
 	size_type count( key_type const & k ) const {
 
-		return (find_pos(k) < buckets) ? 1 : 0;
+		// first get the bucket id
+		size_t pos = hash(k) % buckets;
 
+#if defined(REPROBE_STAT)
+		size_t reprobe = 0;
+#endif
+		size_t i;
+		for (i = pos; i < buckets; ++i) {
+			// first from here to end.
+			if (info_container[i].is_empty())  // done
+				break;
+
+			if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
+				this->reprobes += i - pos;
+				this->max_reprobes = std::max(this->max_reprobes, (i-pos));
+#endif
+				return 1;
+			}
+		}  // ends when i == buckets or empty node.
+#if defined(REPROBE_STAT)
+		reprobe = i - pos;
+#endif
+
+		if (i == buckets) {
+			// search the rest of list.
+
+			for (i = 0; i < pos; ++i) {
+				// first from here to end.
+				if (info_container[i].is_empty())  // done
+					break;
+
+				if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
+					this->reprobes += reprobe + i;
+					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
+#endif
+					return 1;
+				}
+			}  // ends when i == buckets or empty node.
+#if defined(REPROBE_STAT)
+			reprobe += i;
+#endif
+		}
+#if defined(REPROBE_STAT)
+		this->reprobes += reprobe;
+		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+#endif
+		// if we are here, then we did not find it.  return 0.
+		return 0;
 	}
 
 
@@ -651,7 +616,7 @@ public:
 		}
 
 #if defined(REPROBE_STAT)
-		std::cout << "COUNT batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+		std::cout << "COUNT batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << counts.size() << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
@@ -678,7 +643,7 @@ public:
 		}
 
 #if defined(REPROBE_STAT)
-		std::cout << "COUNT batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+		std::cout << "COUNT batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << counts.size() << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
@@ -693,12 +658,56 @@ public:
 	 */
 	iterator find(key_type const & k) {
 
-		size_type idx = find_pos(k);
+		// first get the bucket id
+		size_t pos = hash(k) % buckets;
 
-		if (idx < buckets)
-			return iterator(container.begin() + idx, info_container.begin()+ idx, info_container.end(), filter);
-		else
-			return iterator(container.end(), info_container.end(), filter);
+#if defined(REPROBE_STAT)
+		size_t reprobe = 0;
+#endif
+		size_t i;
+		for (i = pos; i < buckets; ++i) {
+			// first from here to end.
+			if (info_container[i].is_empty())  // done
+				break;
+
+			if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
+				this->reprobes += i - pos;
+				this->max_reprobes = std::max(this->max_reprobes, (i-pos));
+#endif
+				return iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter);
+			}
+		}  // ends when i == buckets or empty node.
+#if defined(REPROBE_STAT)
+		reprobe = i-pos;
+#endif
+		if (i == buckets) {
+			// search the rest of list.
+
+			for (i = 0; i < pos; ++i) {
+				// first from here to end.
+				if (info_container[i].is_empty())  // done
+					break;
+
+				if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
+					this->reprobes += reprobe + i;
+					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
+#endif
+					return iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter);
+				}
+			}  // ends when i == buckets or empty node.
+
+#if defined(REPROBE_STAT)
+			reprobe += i;
+#endif
+		}
+#if defined(REPROBE_STAT)
+		this->reprobes += reprobe;
+		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+#endif
+		// if we are here, then we did not find it.  return  end iterator.
+		return iterator(container.end(), info_container.end(), filter);
 
 	}
 
@@ -707,12 +716,58 @@ public:
 	 */
 	const_iterator find(key_type const & k) const {
 
-		size_type idx = find_pos(k);
+		// first get the bucket id
+		size_t pos = hash(k) % buckets;
 
-		if (idx < buckets)
-			return const_iterator(container.cbegin() + idx, info_container.cbegin()+ idx, info_container.cend(), filter);
-		else
-			return const_iterator(container.cend(), info_container.cend(), filter);
+#if defined(REPROBE_STAT)
+		size_t reprobe = 0;
+#endif
+
+		size_t i;
+		for (i = pos; i < buckets; ++i) {
+			// first from here to end.
+			if (info_container[i].is_empty())  // done
+				break;
+
+			if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
+				this->reprobes += i - pos;
+				this->max_reprobes = std::max(this->max_reprobes, (i-pos));
+#endif
+				return const_iterator(container.cbegin() + i, info_container.cbegin() + i, info_container.cend(), filter);
+			}
+		}  // ends when i == buckets or empty node.
+#if defined(REPROBE_STAT)
+		reprobe = i-pos;
+#endif
+		if (i == buckets) {
+			// search the rest of list.
+
+			for (i = 0; i < pos; ++i) {
+				// first from here to end.
+				if (info_container[i].is_empty())  // done
+					break;
+
+				if (info_container[i].is_normal() && (eq(k, container[i].first))) {
+#if defined(REPROBE_STAT)
+					this->reprobes += reprobe + i;
+					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
+#endif
+
+					return const_iterator(container.cbegin() + i, info_container.cbegin() + i, info_container.cend(), filter);
+				}
+			}  // ends when i == buckets or empty node.
+#if defined(REPROBE_STAT)
+			reprobe += i;
+#endif
+			}
+#if defined(REPROBE_STAT)
+		this->reprobes += reprobe;
+		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+#endif
+
+		// if we are here, then we did not find it.  return 0.
+		return const_iterator(container.cend(), info_container.cend(), filter);
 
 	}
 
@@ -732,68 +787,74 @@ public:
 	}
 
 
-
 	/**
-	 * @brief erases a key.  performs backward shift.
-	 * @details note that entries for the same bucket are always consecutive, so we don't have to shift, but rather, move elements at boundaries only.
-	 *    boundaries are characterized by non-decreasing info dist, or by empty.
-	 *
+	 * @brief erases a key.
 	 */
 	size_type erase_no_resize(key_type const & k) {
 
+		// first get the bucket id
+		size_t pos = hash(k) % buckets;
 
+#if defined(REPROBE_STAT)
+		size_t reprobe = 0;
+#endif
+		size_t i;
+		for (i = pos; i < buckets; ++i) {
+			// first from here to end.
+			if (info_container[i].is_empty()) // done
+				break;
 
-		size_type found = find_pos(k);
+			if (info_container[i].is_normal() && (eq(k, container[i].first))) {
 
-		if (found >= buckets) {  // did not find.
-			return 0;
-		}
+				info_container[i].set_deleted();
 
-    --lsize;   // reduce the size by 1.
-
-    // for iterating to find boundaries
-		size_type curr = found;
-		size_type next = (found + 1) & mask;
-
-		//    unsigned char curr_info = info_container[curr].info;
-		unsigned char next_info = info_container[next].info;
-
-		// a little more short circuiting.
-		if (next_info <= info_type::normal) {
-			info_container[curr].info = info_type::empty;
-			return 1;
-		}
-
-		size_type target = found;
-
-		for (size_t j = 0; j < buckets - 1; ++j) {
-			// terminate when next entry is empty or has distance 0.
-			if (next_info <= info_type::normal) break;
-
-			// do something at bucket boundaries
-			if (next_info <= info_container[curr].info) {
-				// change the curr info
-				info_container[curr].info = next_info - 1;				
-
-				// and move the current value entry.
-				container[target] = std::move(container[curr]);
-
-				// store the curr position as the next target of move.
-				target = curr;
+				--lsize;
+#if defined(REPROBE_STAT)
+				this->reprobes += i - pos;
+				this->max_reprobes = std::max(this->max_reprobes, (i - pos));
+#endif
+				return 1;
 			}
+		}  // ends when i == buckets or empty node.
+//		std::cout << "first: pos = " << pos << "\ti = " << i << std::endl;
+#if defined(REPROBE_STAT)
+		reprobe = i-pos;
+#endif
+		if (i == buckets) {
+			// search the rest of list.
 
-			// advance
-			curr = next;
-			next = (next+1) & mask;
+			for (i = 0; i < pos; ++i) {
+				// first from here to end.
+				if (info_container[i].is_empty())  // done
+					break;
 
-			next_info = info_container[next].info;
+				if (info_container[i].is_normal() && (eq(k, container[i].first))) {
 
+					info_container[i].set_deleted();
+
+					--lsize;
+
+#if defined(REPROBE_STAT)
+					this->reprobes += reprobe + i;
+					this->max_reprobes = std::max(this->max_reprobes, (reprobe + i));
+#endif
+					return 1;
+				}
+			}  // ends when i == buckets or empty node.
+//			std::cout << "second: pos = " << pos << "\ti = " << i << std::endl;
+
+#if defined(REPROBE_STAT)
+			reprobe += i;
+#endif
 		}
-		info_container[curr].info = info_type::empty;  // set last to empty.
-		container[target] = std::move(container[curr]);
 
+#if defined(REPROBE_STAT)
+		this->reprobes += reprobe;
+		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+#endif
+		// if we are here, then we did not find it.  return 0.
+		return 0;
 
-		return 1;
 	}
 
 	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
@@ -811,10 +872,9 @@ public:
 		}
 
 #if defined(REPROBE_STAT)
-		std::cout << "ERASE batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+		std::cout << "ERASE batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << erased << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
-
 		this->reprobes = 0;
 		this->max_reprobes = 0;
 #endif
@@ -836,7 +896,7 @@ public:
 		}
 
 #if defined(REPROBE_STAT)
-		std::cout << "ERASE batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+		std::cout << "ERASE batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
 					"\tvalid=" << erased << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
@@ -874,4 +934,4 @@ public:
 };
 
 }  // namespace fsc
-#endif /* KMERHASH_HASHTABLE_OA_RH_DOUBLING_HPP_ */
+#endif /* KMERHASH_HASHMAP_LINEARPROBE_DOUBLING_HPP_ */

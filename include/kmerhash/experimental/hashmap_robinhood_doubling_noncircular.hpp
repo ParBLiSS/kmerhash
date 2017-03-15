@@ -23,143 +23,37 @@
  *  for robin hood hashing
  */
 
-#ifndef KMERHASH_HASHTABLE_OA_RH_DO_NONCIRCULAR_HPP_
-#define KMERHASH_HASHTABLE_OA_RH_DO_NONCIRCULAR_HPP_
+#ifndef KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_NONCIRCULAR_HPP_
+#define KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_NONCIRCULAR_HPP_
 
 #include <vector>   // for vector.
 #include <type_traits> // for is_constructible
 #include <iterator>  // for iterator traits
 #include <algorithm> // for transform
 
-#include "aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
-#include "math_utils.hpp"
-
-//#if defined(FSC_CIRCULAR_ARRAY)
-//#define advance(x, d, m) (x+d) & m
-//#else
-//#define advance(x, d, m) (x+d)
-//#endif
+#include "kmerhash/aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
+#include "kmerhash/math_utils.hpp"
 
 
 namespace fsc {
 
 /**
- * @brief Open Addressing hashmap that uses linear addressing, with doubling for hashing, and with specialization for k-mers.
- * @details  at the moment, nothing special for k-mers yet.
+ * @brief Open Addressing hashmap that uses robin hood hashing, modified to use linear array instead of circular array.
+ * @details
  * 		This class has the following implementation characteristics
  * 			vector of structs
- * 			open addressing with linear probing
+ * 			open addressing with robinhood hashing
  * 			doubling for reallocation
+ *      linear array with 128 padding slots.  still hash to first 2^x positions.
  *
  *
+ *  TODO:
+ *  [x] linear array.
  *
- *
- *
- * 			using vector internally.
- * 			tracking empty and deleted via special bit instead of using empty and deleted keys (potentially has to compare whole key)
- * 				use bit array instead of storing flags with value type
- * 				Q: should the key and value be stored in separate arrays?  count, exist, and erase may be faster (no need to touch value array).
- *
- *			MPI friendliness - would never send the vector directly - need to permute, which requires extra space and time, and only send value when insert (and possibly update),
- *				neither are technically sending the vector really.
- *
- *				so assume we always are copying then sending, which means we can probably construct as needed.
- *
- *		WANT a simple array of key, value pair.  then have auxillary arrays to support scanning through, ordering, and reordering.
- *			memorizing hashes can be done as well in aux array....
- *
- *
- * 			somethings to put in the aux array:  empty bit.  deleted bit.  probe distance.
- * 				memorizing the hash requires more space, else would need to compute hash anyways.
- *
- * 			TODO: bijective hash could be useful....
- *
- *  requirements
- *		support iterate
- *		no special keys
- *		incremental allocation (perhaps not doubling right now...
- *
- *
- *
- *
- *
- *  array of tuples vs tuple of arrays
- *  start with array of tuples
- *  then do tuple of arrays
- *
- *  hashset may be useful for organizing the query input.
- *  how to order the hash table accesses so that there is maximal cache reuse?  order things by hash?
- *
- *  using a C array may be better - better memory allocation control.
- *
- *
- *
- *  linear probing - if reached end, then wrap around?  or just allocate some extra, but still hash to first 2^x positions.
- *
- *  when rehashing under doubling/halving, since always power of 2 in capacity, can just merge the higher half to the lower half by index.
- *  batch process during insertion?
- *
- *  TODO: when using power-of-2 sizes, using low-to-high hash value bits means that when we grow, a bucket is split between buckets i and i+2^x.
- *  		if we use high-to-low bits, then resize up split into adjacent buckets.
- *  		it is possible that some buckets may not need to move.	 It is possible to grow incrementally potentially.
- *
- *  FIX:
- *  [x] remove max_probe - treat as if circular array.
- *  [x] separate info from rest of struct, so as to remove use of transform_iterator, thus allowing us to change values through iterator. requires a new aux_filter_iterator.
- *  [ ] batch mode operations to allow more opportunities for optimization including SIMD
- *  [ ] predicated version of operations
- *  [ ] macros for repeated code.
- *  [x] testing with k-mers
- *  [x] measure reprobe count for insert
- *  [x] measure reprobe count for find and update.
- *  [x] measure reprobe count for count and erase.
- *  [x] robin hood hashing with back shifting during deletion.
- *  [ ] memmove?  probably not.  current approach swaps only when dist increases, not when they are the same, which is what most of a bucket would contain, so total mem access would be low.
- *
- *  Robin Hood Hashing logic follows
- *  	http://www.sebastiansylvan.com/post/robin-hood-hashing-should-be-your-default-hash-table-implementation/
- *
- *  use an auxillary array.
- *  where as RH standard aux array element represents the distance from source for the corresponding element in container.
- *      idx   ----a---b------------
- *    aux   ===|-|=|-|=|4|3|=====   _4_ is recorded at position hash(X) + _4_ of aux array.
- *    data  -----------|X|Y|-----,  X is inserted into bucket hash(X) = a.  in container position hash(X) + _4_.
- *
- *    empty positions are set to 0x80, and same for all info entries.
- *
- *  this aux array instead has each element represent the offset for the first entry of this bucket.
- *      idx   ----a---b------------
- *    aux   ===|4|=|3|=|-|-|=====   _4_ is recorded at position hash(X) of aux array.
- *    data  -----------|X|Y|-----,  X is inserted into bucket hash(X), in container position hash(X) + _4_.
- *
- *    empty positions are set with high bit 1, but can has distance larger than 0.
- *
- *  in traditional, we linear scan info_container from position hash(Y) and must go to hash(Y) + 4 linearly.
- *    each aux entry is essentailyl independent of others.
- *    have to check and compare each data entry.
- *
- *  in this class, we just need to look at position hash(Y) and hash(Y) + 1 to know where to start and end in the container
- *    for find/count/update, those 2 are the only ones we need.
- *    for insert, we need to find the end of the range to modify, even after the insertion point.
- *      first search for end of range from current bucket (linear scan)
- *      then move from insertion point to end of range to right by 1.
- *      then insert at insertion point
- *      finally update the aux array from hash(Y) +1, to end of bucket range (ends on empty or dist = 0), by adding 1...
- *    for deletion, we need to again find the end of the range to modify, from the point of the deletion
- *      search for end of range from current bucket
- *      then move from deletion point to end of range to left by 1
- *      finally update the aux array from hash(Y) +1 to end of bucket range(ends on dist == 0), by subtracting 1...
- *    for rehash, from the first non-empty, to the next empty
- *      call insert on the entire range.
- *
- *  oa = open addressing
- *  rh = robin hood
- *  do = doubling
- *  tuple = array of tuples (instead of tuple of arrays)
  */
 template <typename Key, typename T, typename Hash = ::std::hash<Key>,
 		typename Equal = ::std::equal_to<Key>, typename Allocator = ::std::allocator<std::pair<const Key, T> > >
-class hashmap_oa_rh_do_noncircular {
+class hashmap_robinhood_doubling_noncircular {
 
 public:
 
@@ -246,7 +140,7 @@ public:
     /**
      * _capacity is the number of usable entries, not the capacity of the underlying container.
      */
-	explicit hashmap_oa_rh_do_noncircular(size_t const & _capacity = 128,
+	explicit hashmap_robinhood_doubling_noncircular(size_t const & _capacity = 128,
 			float const & _min_load_factor = 0.4,
 			float const & _max_load_factor = 0.9) :
 			lsize(0), buckets(next_power_of_2(_capacity)), mask(buckets - 1),
@@ -268,15 +162,15 @@ public:
 	 */
 	template <typename Iter, typename = typename std::enable_if<
 			::std::is_constructible<value_type, typename ::std::iterator_traits<Iter>::value_type>::value  ,int>::type >
-	hashmap_oa_rh_do_noncircular(Iter begin, Iter end,
+	hashmap_robinhood_doubling_noncircular(Iter begin, Iter end,
 			float const & _min_load_factor = 0.4,
 			float const & _max_load_factor = 0.9) :
-		hashmap_oa_rh_do_noncircular(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
+		hashmap_robinhood_doubling_noncircular(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
 
 		insert(begin, end);
 	}
 
-	~hashmap_oa_rh_do_noncircular() {
+	~hashmap_robinhood_doubling_noncircular() {
 #if defined(REPROBE_STAT)
 		::std::cout << "SUMMARY:" << std::endl;
 		::std::cout << "  upsize\t= " << upsize_count << std::endl;
@@ -313,6 +207,9 @@ public:
 		return max_load_factor;
 	}
 
+	size_t capacity() {
+		return buckets;
+	}
 
 
 	/**
@@ -475,98 +372,86 @@ public:
 	 */
 	std::pair<iterator, bool> insert(value_type && vv) {
 
-    // implementing back shifting, so don't worry about deleted entries.
+		unsigned char reprobe = info_type::normal;
 
-    // insert if empty, or if reprobe distance is larger than current position's.  do this via swap.
-    // continue to probe if we swapped out a normal entry.
-    // this logic relies on choice of bits for empty entries.
-
-    // we want the reprobe distance to be larger than empty, so we need to make
-    // normal to have high bits 1 and empty 0.
-
-    // save the insertion position (or equal position) for the first insert or match, but be aware that after the swap
-    //  there will be other inserts or swaps. BUT NOT OTHER MATCH since this is a MAP.
-
-	  unsigned char reprobe = info_type::normal;
 
 		// first check if we need to resize.
 		if (lsize >= max_load) rehash(buckets << 1);
 
 		// first get the bucket id
 		size_type i = hash(vv.first) & mask;  // target bucket id.
-		size_type bid = i;
-
-		// shortcutting.
-		if (info_container[i].info == info_type::empty) {
-		  info_container[i].info = reprobe;
-		  container[i] = std::move(vv);
-		  ++lsize;
-		  return std::make_pair(iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter), true);
-		}
 
 		size_type insert_pos = std::numeric_limits<size_type>::max();
 		bool success = false;
+		size_type j = 0;
 
-		// scan through the part before bucket i
-		for (; reprobe < info_container[i].info; ++reprobe, ++i) {};
+		for (; j < container.size(); ++j) {  // limit to 1 complete loop
 
-		// compare entries in bucket i, see if there is a match.
-		for (; reprobe == info_container[i].info; ++reprobe, ++i) {
-		  if (eq(container[i].first, vv.first)) {
-		    // matched, so found.
+			// implementing back shifting, so don't worry about deleted entries.
 
-		    return std::make_pair(iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter), false);
-		  }
+			// insert if empty, or if reprobe distance is larger than current position's.  do this via swap.
+			// continue to probe if we swapped out a normal entry.
+			// this logic relies on choice of bits for empty entries.
+
+			// we want the reprobe distance to be larger than empty, so we need to make
+			// normal to have high bits 1 and empty 0.
+
+			// save the insertion position (or equal position) for the first insert or match, but be aware that after the swap
+			//  there will be other inserts or swaps. BUT NOT OTHER MATCH since this is a MAP.
+
+			// if current distance is larger than target's distance, (including empty cell), then swap.
+			assert(reprobe >= info_type::normal);  // if distance is over 128, then wrap around would get us less than normal.
+
+			if (reprobe > info_container[i].info) {
+				::std::swap(info_container[i].info, reprobe);
+
+				if (insert_pos == std::numeric_limits<size_type>::max()) {
+					insert_pos = i;  // set insert_pos to first positin of insertion.
+					success = true;
+					++lsize;
+				}  // subsequent "shifts" do not change insert_pos or success.
+
+				// then decide what to do given the swapped out distance.
+				if (reprobe == info_type::empty) {  // previously it was empty,
+					// then we can simply set.
+					container[i] = std::move(vv);
+
+					break;
+
+				} else {
+					// there was a real entry, so need to swap
+					::std::swap(container[i], vv);
+
+					// and continue
+				}
+			} else if (reprobe == info_container[i].info) {
+			  // check for equality, only if haven't inserted (if don't check success, there could be a lot of equality checks.
+
+//			  if (success)  std::cout << ".";
+
+				// same distance, then possibly same value.  let's check.
+				if (!success && eq(container[i].first, vv.first)) {  // note that a previously swapped vv would not match again and can be skipped.
+					// same, then we found it and need to return.
+					insert_pos = i;
+					success = false;
+					break;
+				}  // note that the loop terminates within here so don't need to worry about another insertion point.
+
+			}  // note that it's not possible for a match to occur with shorter current reprobe distance -
+				// that would mean same element is hashed to multiple buckets.
+
+			// increment probe distance
+			++reprobe;
+
+			// circular array.
+			i = (i+1); // & mask;   // for bucket == 2^x, this acts like modulus.
 		}
-
-		// insert the original operand.
-		if (info_container[i].info == info_type::empty) {  // if currently empty, move it in.
-      info_container[i].info = reprobe;
-      container[i] = std::move(vv);
-      ++lsize;
-      return std::make_pair(iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter), true);
-		} else {  // if occupied, swap.
-		  std::swap(reprobe, info_container[i].info);
-		  std::swap(container[i], vv);
-		  insert_pos = i;
-		  // go to next pos.
-		  ++i;
-		  ++reprobe;
-		}
-
-		// loop until reach an empty slot.
-		for (; i < container.size(); ) {
-	    // skip entries of same bucket
-	    for (; reprobe == info_container[i].info; ++reprobe, ++i) {};
-
-	    // now swap back in.
-
-	    // insert the original operand.
-	    if (info_container[i].info == info_type::empty) {  // if currently empty
-	      info_container[i].info = reprobe;
-	      container[i] = std::move(vv);
-	      ++lsize;
-	      return std::make_pair(iterator(container.begin() + i, info_container.begin()+ i, info_container.end(), filter), true);
-	    } else {
-	      // not empty, so swap
-	      std::swap(reprobe, info_container[i].info);
-	      std::swap(container[i], vv);
-	      insert_pos = i;
-	      // go to next pos.
-	      ++i;
-	      ++reprobe;
-	    }
-
-		}
-
-		// if here, then we failed to insert, probably due to array being full.
-		return std::make_pair(iterator(container.end(), info_container.end(), filter), false);
-
+		assert(j < container.size());
 
 #if defined(REPROBE_STAT)
-
-		this->reprobes += i-bid;
-		this->max_reprobes = std::max(this->max_reprobes, (i-bid));
+		reprobe &= info_type::dist_mask;
+		this->reprobes += reprobe;
+		this->max_reprobes = std::max(this->max_reprobes, reprobe);
 #endif
 		return std::make_pair(iterator(container.begin() + insert_pos, info_container.begin()+ insert_pos, info_container.end(), filter), success);
 
@@ -623,35 +508,26 @@ protected:
 
 		size_type result = std::numeric_limits<size_type>::max();
 
-    // Exit when either empty, OR query's distance is larger than the current entries, which indicates
-    // this would have been swapped during insertion, and can also indicate that the current
-    // entry is from a different bucket.
-    // so did not find one.
-
-		// closer to the old way.  see if this is slightly faster...
-		for (; i < info_container.size(); ++i, ++reprobe) {
-			if (reprobe > info_container[i].info) break;
-
-			// else do check
-			if ((reprobe == info_container[i].info) && (eq(k, container[i].first)))
-			{
-				result = i;
+		size_t j;
+		for (j = 0; j < container.size(); ++j) {
+			if (reprobe > info_container[i].info) {
+				// either empty, OR query's distance is larger than the current entries, which indicates
+				// this would have been swapped during insertion, and can also indicate that the current
+				// entry is from a different bucket.
+				// so did not find one.
 				break;
-			}
-		}
+			} else if (reprobe == info_container[i].info) {
+				// possibly matched.  compare.
+				if (eq(k, container[i].first)) {
+					result = i;
+					break;
+				}
+			} // else still traversing a previous bucket.
 
-//		Cleaner code. really should be faster with less branching, but it's not...
-//		// first scan for equal or greater
-//		for (; reprobe < info_container[i].info; ++reprobe, ++i) {};
-//
-//		// now scan within the equal region for kmer match.
-//		for (; reprobe == info_container[i].info; ++reprobe, ++i) {
-//      // possibly matched.  compare.
-//      if (eq(k, container[i].first)) {
-//        result = i;
-//        break;
-//      }
-//		}
+			++reprobe;
+			i = (i+1); // & mask;   // again power of 2 modulus.
+		}
+		assert(j < container.size());
 
 #if defined(REPROBE_STAT)
 		reprobe &= info_type::dist_mask;
@@ -779,6 +655,8 @@ public:
 	 */
 	size_type erase_no_resize(key_type const & k) {
 
+
+
 		size_type found = find_pos(k);
 
 		if (found >= container.size()) {  // did not find.
@@ -787,47 +665,47 @@ public:
 
     --lsize;   // reduce the size by 1.
 
-    size_type target = found;  // save for later swapping.
-    size_type i = (found + 1);  // curr pos.
+    // for iterating to find boundaries
+		size_type curr = found;
+		size_type next = (found + 1); // & mask;
 
-    // for safety.  check last entry.
-    if (i == container.size()) return 1;
+		//    unsigned char curr_info = info_container[curr].info;
+		unsigned char next_info = info_container[next].info;
 
-    // save original target info so can compare (++) to actual
-    unsigned char reprobe = info_container[found].info;
-    // move to next position
-    ++reprobe;  // next entry SHOULD be ...
+		// a little more short circuiting.
+		if (next_info <= info_type::normal) {
+			info_container[curr].info = info_type::empty;
+			return 1;
+		}
 
-    // update the info at target
-    unsigned char target1_info = info_container[i].info;
-    info_container[target].info = (target1_info <= info_type::normal) ? info_type::empty : (target1_info - 1);
+		size_type target = found;
 
-    // shortcutting
-    if (target1_info <= info_type::normal) return 1;
+		for (size_t j = 0; j < container.size() - 1; ++j) {
+			// terminate when next entry is empty or has distance 0.
+			if (next_info <= info_type::normal) break;
 
+			// do something at bucket boundaries
+			if (next_info <= info_container[curr].info) {
+				// change the curr info
+				info_container[curr].info = next_info - 1;				
 
-    // loop at most to end of container.
-    while (i < container.size()) {
+				// and move the current value entry.
+				container[target] = std::move(container[curr]);
 
-      // scan to end of bucket (reprobe == info)
-      for (; reprobe == info_container[i].info; ++reprobe, ++i) {};
+				// store the curr position as the next target of move.
+				target = curr;
+			}
 
-      // update the info at i-1 (new target)
-      reprobe = info_container[i].info;
-      info_container[i-1].info = (reprobe <= info_type::normal) ? info_type::empty : (reprobe - 1);
+			// advance
+			curr = next;
+			next = (next+1); // & mask;
 
-      // move the entry from new target to old target.
-      container[target] = std::move(container[i-1]);
+			next_info = info_container[next].info;
 
-      // if this is the last one, then done.
-      if (reprobe <= info_type::normal) return 1;
+		}
+		info_container[curr].info = info_type::empty;  // set last to empty.
+		container[target] = std::move(container[curr]);
 
-      // else set target
-      target = i-1;
-      ++i;
-      ++reprobe;
-
-    }
 
 		return 1;
 	}
@@ -910,4 +788,4 @@ public:
 };
 
 }  // namespace fsc
-#endif /* KMERHASH_HASHTABLE_OA_RH_DO_NONCIRCULAR_HPP_ */
+#endif /* KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_NONCIRCULAR_HPP_ */

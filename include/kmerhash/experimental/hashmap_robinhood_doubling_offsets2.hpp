@@ -15,7 +15,7 @@
  */
 
 /*
- * hashtable_OA_RH_do_memmove.hpp
+ * hashtable_OA_RH_do_prefix.hpp
  *
  *  Created on: Feb 27, 2017
  *      Author: tpan
@@ -23,146 +23,88 @@
  *  for robin hood hashing
  */
 
-#ifndef KMERHASH_HASHTABLE_OA_RH_DO_MEMMOVE_HPP_
-#define KMERHASH_HASHTABLE_OA_RH_DO_MEMMOVE_HPP_
+#ifndef KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS_HPP_
+#define KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS_HPP_
 
 #include <vector>   // for vector.
 #include <type_traits> // for is_constructible
 #include <iterator>  // for iterator traits
 #include <algorithm> // for transform
 
-#include "aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
-#include "math_utils.hpp"
+#include "kmerhash/aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
+#include "kmerhash/math_utils.hpp"
+
+//#define REPROBE_STAT
 
 namespace fsc {
 
 /**
- * @brief Open Addressing hashmap that uses linear addressing, with doubling for hashing, and with specialization for k-mers.
+ * @brief Open Addressing hashmap that uses Robin Hood hashing, with doubling for resizing, circular internal array.  modified from standard robin hood hashmap to use bucket offsets, in attempt to improve speed.
  * @details  at the moment, nothing special for k-mers yet.
  * 		This class has the following implementation characteristics
  * 			vector of structs
- * 			open addressing with linear probing
+ * 			open addressing with robin hood hashing.
  * 			doubling for reallocation
+ * 			circular internal array
+ *
+ *  like standard robin hood hashmap implementation in "hashmap_robinhood_doubling.hpp", we use an auxillary array.  however, the array is interpreted differently.
+ *  whereas standard imple stores the distance of the current array position from the bucket that the key is "hashed to",
+ *  the "offsets" implementation stores at each position the starting offset of entries for the current bucket, and the empty/occupied bit indicates
+ *  whether the current bucket has content or not (to distinguish between an empty bucket from an occupied bucket with offset 0.).
+ *
+ *  this is possible as robin hood hashing places entries for a bucket consecutively
+ *
+ *  benefits:
+ *  1. no need to scan in order to find start of a bucket.
+ *  2. end of a bucket is determined by the next bucket's offset.
+ *
+ *  Auxillary array interpretation:
+ *
+ *  where as RH standard aux array element represents the distance from source for the corresponding element in container.
+ *    idx   ----a---b------------
+ *    aux   ===|=|=|=|=|4|3|=====   _4_ is recorded at position hash(X) + _4_ of aux array.
+ *    data  -----------|X|Y|-----,  X is inserted into bucket hash(X) = a.  in container position hash(X) + _4_.
+ *
+ *    empty positions are set to 0x80, and same for all info entries.
+ *
+ *  this aux array instead has each element represent the offset for the first entry of this bucket.
+ *    idx   ----a---b------------
+ *    aux   ===|4|=|3|=|=|=|=====   _4_ is recorded at position hash(X) of aux array.
+ *    data  -----------|X|Y|-----,  X is inserted into bucket hash(X), in container position hash(X) + _4_.
+ *
+ *    empty positions are set with high bit 1, but can has distance larger than 0.
+ *
+ *  in standard, we linear scan info_container from position hash(Y) and must go to hash(Y) + 4 linearly.
+ *    each aux entry is essentailyl independent of others.
+ *    have to check and compare each data entry.
+ *
+ *  in this class, we just need to look at position hash(Y) and hash(Y) + 1 to know where to start and end in the container
+ *    for find/count/update, those 2 are the only ones we need.
+ *    for insert, we need to find the end of the range to modify, even after the insertion point.
+ *      first search for end of range from current bucket (linear scan)
+ *      then move from insertion point to end of range to right by 1.
+ *      then insert at insertion point
+ *      finally update the aux array from hash(Y) +1, to end of bucket range (ends on empty or dist = 0), by adding 1...
+ *    for deletion, we need to again find the end of the range to modify, from the point of the deletion
+ *      search for end of range from current bucket
+ *      then move from deletion point to end of range to left by 1
+ *      finally update the aux array from hash(Y) +1 to end of bucket range(ends on dist == 0), by subtracting 1...
+ *    for rehash, from the first non-empty, to the next empty
+ *      call insert on the entire range.
  *
  *
- *
- *
- *
- * 			using vector internally.
- * 			tracking empty and deleted via special bit instead of using empty and deleted keys (potentially has to compare whole key)
- * 				use bit array instead of storing flags with value type
- * 				Q: should the key and value be stored in separate arrays?  count, exist, and erase may be faster (no need to touch value array).
- *
- *			MPI friendliness - would never send the vector directly - need to permute, which requires extra space and time, and only send value when insert (and possibly update),
- *				neither are technically sending the vector really.
- *
- *				so assume we always are copying then sending, which means we can probably construct as needed.
- *
- *		WANT a simple array of key, value pair.  then have auxillary arrays to support scanning through, ordering, and reordering.
- *			memorizing hashes can be done as well in aux array....
- *
- *
- * 			somethings to put in the aux array:  empty bit.  deleted bit.  probe distance.
- * 				memorizing the hash requires more space, else would need to compute hash anyways.
- *
- * 			TODO: bijective hash could be useful....
- *
- *  requirements
- *		support iterate
- *		no special keys
- *		incremental allocation (perhaps not doubling right now...
- *
- *
- *
- *
- *
- *  array of tuples vs tuple of arrays
- *  start with array of tuples
- *  then do tuple of arrays
- *
- *  hashset may be useful for organizing the query input.
- *  how to order the hash table accesses so that there is maximal cache reuse?  order things by hash?
- *
- *  using a C array may be better - better memory allocation control.
- *
- *
- *
- *  linear probing - if reached end, then wrap around?  or just allocate some extra, but still hash to first 2^x positions.
- *
- *  when rehashing under doubling/halving, since always power of 2 in capacity, can just merge the higher half to the lower half by index.
- *  batch process during insertion?
- *
- *  TODO: when using power-of-2 sizes, using low-to-high hash value bits means that when we grow, a bucket is split between buckets i and i+2^x.
- *  		if we use high-to-low bits, then resize up split into adjacent buckets.
- *  		it is possible that some buckets may not need to move.	 It is possible to grow incrementally potentially.
- *
- *  FIX:
- *  [x] remove max_probe - treat as if circular array.
- *  [x] separate info from rest of struct, so as to remove use of transform_iterator, thus allowing us to change values through iterator. requires a new aux_filter_iterator.
+ *  TODO:
  *  [ ] batch mode operations to allow more opportunities for optimization including SIMD
  *  [ ] predicated version of operations
  *  [ ] macros for repeated code.
- *  [x] testing with k-mers
- *  [x] measure reprobe count for insert
- *  [x] measure reprobe count for find and update.
- *  [x] measure reprobe count for count and erase.
- *  [x] robin hood hashing with back shifting durign deletion.
- *  [ ] modification to use memmove during insertion and deletion - does not seem to make much difference for erase, so perhaps not for insert.
- *  [ ] add a new array, where entries are value of the reprobe distances of the first bucket entry in the array.  (guarantee that all elements in bucket are consecutive from the robin hood hashing).
- *        use this (+ neighbor's value) for direct access to the bucket without needing to scan up to the bucket.
- *        very likely don't need the original array after that...
- *  [ ] prefix scan version. - kind of - may require sorting or shuffling to build.  still need some way to scan fast.
- *  separate array version is probably not useful.
- *    checking for key equality is the only reason for doing that
- *    at the cost of constructing pairs all the time, and having iterators that are zip iterators so harder to "update" values.
- *
- *  Robin Hood Hashing logic follows
- *  	http://www.sebastiansylvan.com/post/robin-hood-hashing-should-be-your-default-hash-table-implementation/
- *
- *
- *  oa = open addressing
- *  rh = robin hood
- *  do = doubling
- *  memmove = use memmove wherever possible instead of individually move the entries.
- *
- *
- *  use an auxillary array.
- *  where as RH standard aux array element represents the distance from source for the corresponding element in container.
- *      idx   ----a---b------------
- *  	aux   ===|=|=|=|=|4|3|=====   _4_ is recorded at position hash(X) + _4_ of aux array.
- *  	data  -----------|X|Y|-----,  X is inserted into bucket hash(X) = a.  in container position hash(X) + _4_.
- *
- *  	empty positions are set to 0x80, and same for all info entries.
- *
- *  this aux array instead has each element represent the offset for the first entry of this bucket.
- *      idx   ----a---b------------
- *  	aux   ===|4|=|3|=|=|=|=====   _4_ is recorded at position hash(X) of aux array.
- *  	data  -----------|X|Y|-----,  X is inserted into bucket hash(X), in container position hash(X) + _4_.
- *
- *		empty positions are set with high bit 1, but can has distance larger than 0.
- *
- *  in traditional, we linear scan info_container from position hash(Y) and must go to hash(Y) + 4 linearly.
- *  	each aux entry is essentailyl independent of others.
- *  	have to check and compare each data entry.
- *
- *  in this class, we just need to look at position hash(Y) and hash(Y) + 1 to know where to start and end in the container
- *  	for find/count/update, those 2 are the only ones we need.
- *  	for insert, we need to find the end of the range to modify, even after the insertion point.
- *  		first search for end of range from current bucket (linear scan)
- *  		then move from insertion point to end of range to right by 1.
- *  		then insert at insertion point
- *  		finally update the aux array from hash(Y) +1, to end of bucket range (ends on empty or dist = 0), by adding 1...
- * 		for deletion, we need to again find the end of the range to modify, from the point of the deletion
- * 			search for end of range from current bucket
- * 			then move from deletion point to end of range to left by 1
- * 			finally update the aux array from hash(Y) +1 to end of bucket range(ends on dist == 0), by subtracting 1...
- * 		for rehash, from the first non-empty, to the next empty
- * 			call insert on the entire range.
+ *  [x] use bucket offsets instead of distance to bucket.
+ *  [ ] faster insertion in batch
+ *  [ ] faster find?
  *
  */
 template <typename Key, typename T, typename Hash = ::std::hash<Key>,
 		typename Equal = ::std::equal_to<Key>, typename Allocator = ::std::allocator<std::pair<const Key, T> > >
-class hashmap_oa_rh_do_memmove {
+class hashmap_robinhood_doubling_offsets {
 
 public:
 
@@ -262,7 +204,7 @@ public:
     /**
      * _capacity is the number of usable entries, not the capacity of the underlying container.
      */
-	explicit hashmap_oa_rh_do_memmove(size_t const & _capacity = 128,
+	explicit hashmap_robinhood_doubling_offsets(size_t const & _capacity = 128,
 			float const & _min_load_factor = 0.4,
 			float const & _max_load_factor = 0.9) :
 			lsize(0), buckets(next_power_of_2(_capacity)), mask(buckets - 1),
@@ -284,17 +226,17 @@ public:
 	 */
 	template <typename Iter, typename = typename std::enable_if<
 			::std::is_constructible<value_type, typename ::std::iterator_traits<Iter>::value_type>::value  ,int>::type >
-	hashmap_oa_rh_do_memmove(Iter begin, Iter end,
+	hashmap_robinhood_doubling_offsets(Iter begin, Iter end,
 			float const & _min_load_factor = 0.4,
 			float const & _max_load_factor = 0.9) :
-		hashmap_oa_rh_do_memmove(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
+		hashmap_robinhood_doubling_offsets(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
 
 		for (auto it = begin; it != end; ++it) {
 			insert(value_type(*it));  //local insertion.  this requires copy construction...
 		}
 	}
 
-	~hashmap_oa_rh_do_memmove() {
+	~hashmap_robinhood_doubling_offsets() {
 #if defined(REPROBE_STAT)
 		::std::cout << "SUMMARY:" << std::endl;
 		::std::cout << "  upsize\t= " << upsize_count << std::endl;
@@ -429,6 +371,8 @@ public:
 		if (n != buckets) {
 #if defined(REPROBE_STAT)
 			std::cout << "REHASH before copy lsize = " << lsize << " capacity = " << buckets << std::endl;
+
+			// print();
 #endif
 			buckets = n;
 			mask = buckets - 1;
@@ -436,10 +380,9 @@ public:
 			info_container_type tmp_info(buckets, info_type(info_type::empty));
 			container.swap(tmp);
 			info_container.swap(tmp_info);
+
 	    if (lsize == 0) return;   // nothing to copy.
-
 	    lsize = 0;  // reset lsize since we will be inserting.
-
 
 			min_load = static_cast<size_t>(static_cast<float>(buckets) * min_load_factor);
 			max_load = static_cast<size_t>(static_cast<float>(buckets) * max_load_factor);
@@ -449,6 +392,7 @@ public:
 
 #if defined(REPROBE_STAT)
 			std::cout << "REHASH after copy lsize = " << lsize << " capacity = " << buckets << std::endl;
+      // print();
 #endif
 		}
 	}
@@ -466,26 +410,29 @@ protected:
 		// first get the bucket id
 		size_t i = hash(k) & mask;   // get bucket id
 		if (info_container[i].is_empty() ) {
+			// std::cout << "Empty entry at " << i << " val " << static_cast<size_t>(info_container[i].info) << std::endl;
 			return std::make_pair(i, std::numeric_limits<size_type>::max());  // empty BUCKET.  so done.
 		}
 
 		// get the next bucket id
-		size_t i1 = (i+1) & mask;
+		size_t end = (i+1) & mask;
 		// no need to check for empty.  if i is empty, then this one should be.
 		// otherwise, we are checking distance so doesn't matter if empty.
 
 		// now we scan through the current.
 		size_t start = (i + info_container[i].get_offset()) & mask;  // distance is at least 0, and definitely not empty
-		size_t end = (i1 + info_container[i1].get_offset()) & mask;   // distance is at least 0, and can be empty.
+		end = (end + info_container[end].get_offset()) & mask;   // distance is at least 0, and can be empty.
 		size_t result = std::numeric_limits<size_type>::max();
 
 #if defined(REPROBE_STAT)
 		size_t reprobe = 0;
 #endif
-
 		for (; start != end; ) {
+
 			if (eq(k, container[start].first)) {
 				result = start;
+
+///				std::cout << "FIND found " << k << " at " << start << std::endl;
 				break; //found it.
 			}
 
@@ -700,6 +647,7 @@ protected:
 		this->max_reprobes = 0;
 #endif
 
+
 		// insert using the iterators.
 		insert(const_iterator(tmp.cbegin(), info_tmp.cbegin(), info_tmp.cend(), filter),
 				const_iterator(tmp.cend(), info_tmp.cend(), filter));
@@ -724,80 +672,68 @@ public:
 	 */
 	std::pair<iterator, bool> insert(value_type && vv) {
 
-		if (lsize >= max_load) rehash(buckets << 1);  // double in size.
+		if (lsize >= max_load) {
+		  std::cout << "RESIZE lsize " << lsize << " max_load " << max_load << " new size " << (buckets << 1) << std::endl;
 
+			rehash(buckets << 1);  // double in size.
+			std::cout << "RESIZE DONE" << std::endl;
+		}
 
 		size_type bid;
 		size_type found;
 		std::tie(bid, found) = find_pos(vv.first); // container insertion point.
 
-		// empty, so insert.
-		if (info_container[bid].info == info_type::empty) {
-			// empty, can insert directly.
-			info_container[bid].info = info_type::normal;
-			container[bid] = std::move(vv);
-			++lsize;
-			return std::make_pair(iterator(container.begin() + bid, info_container.begin()+ bid, info_container.end(), filter), true);
-		}
+    if (found < buckets) {  // found it.  so no insert.
+//      std::cout << "duplicate found at " << found << std::endl;
+//      std::cout << "  existing at " << container[found].first << "->" << container[found].second << std::endl;
+//      std::cout << "  inserting " << vv.first << "->" << vv.second << std::endl;
+      return std::make_pair(iterator(container.begin() + found, info_container.begin()+ found, info_container.end(), filter), false);
+    }
 
-		// check for insertion point.
-		//size_type found = find_pos(vv.first); // container insertion point.
+    // did not find, so insert.
+    ++lsize;
 
-		if (found < buckets) {  // found it.  so no insert.
-			return std::make_pair(iterator(container.begin() + found, info_container.begin()+ found, info_container.end(), filter), false);
-		}
-
-		// did not find, so insert.
-		++lsize;
-
-		// else this is already occupied.  insert at the end of bucket == start of next bucket
-		size_t bid1 = (bid + 1) & mask;
-		found = (bid1 + info_container[bid1].get_offset()) & mask; // insert location
-		size_t found1 = (found + 1) & mask;
-
-		// end of region to move.
-		size_type end = find_next_empty_pos(found);
-
-		// forward shift to make room
-		if (end < found) {  // wrapped around
-
-			// now if there is still more, than do it
-			if (end > 0)
-				memmove(&(container[1]), &(container[0]), end * sizeof(value_type));
-
-			// definitely wrapped around, so copy first entry to last
-			container[0] = std::move(container[buckets - 1]);
-
-			// first move to the end.
-			memmove(&(container[found1]), &(container[found]), ((buckets - 1) - found) * sizeof(value_type));
-
-		} else if (end > found) {  // no wrap around.
-			memmove(&(container[found1]), &(container[found]), (end - found) * sizeof(value_type));
-		} // else end == found, nothing to shift.
-
-		// and now insert.
-		container[found] = std::move(vv);
-
-		// if the current bucket is empty, then change to say occupied.
-		info_container[bid].set_normal();
-
-		// and now increment the info vector.  need to include the empty entry as well
-		end = (end + 1) & mask;
-		if (end < bid1) {  // wrapped around
-			// first move to the end.
-			std::for_each(info_container.begin() + bid1, info_container.end(),
-					[](info_type & x){ ++x; });
-
-			std::for_each(info_container.begin(), info_container.begin() + end,
-					[](info_type & x){ ++x; });
-
-		} else {  // no wrap around.
-			std::for_each(info_container.begin() + bid1, info_container.begin() + end,
-					[](info_type & x){ ++x; });
-		}
+    // 4 cases:
+    // empty bucket, offset == 0        use this bucket. offset at original bucket converted to non-empty.  move vv in.  done
+    // empty bucket, offset > 0         use this bucket. offset at original bucket converted to non-empty.  swap vv in.  go to next bucket
+    // non empty bucket, offset == 0.   use next bucket. offset at original bucket not changed              swap vv in.  go to next bucket
+    // non empty bucket, offset > 0.    use next bucket. offset at original bucket not changed.             swap vv in.  go to next bucket
 
 
-		return std::make_pair(iterator(container.begin() + found, info_container.begin()+ found, info_container.end(), filter), true);
+    // first swap in at start of bucket, then deal with the swapped.
+
+
+    // incrementally swap.
+    size_t target_bid = bid;
+    // now iterate and try to swap, terminate when we've reached an empty slot that points to self.
+    while (info_container[target_bid].info != info_type::empty) {
+      if (info_container[target_bid].is_normal()) {
+        // swap for occupied buckets only
+        found = (target_bid + info_container[target_bid].get_offset()) & mask;
+        ::std::swap(container[found], vv);
+      }
+
+      // increment everyone's info except for the first one., but don't change the occupied bit.
+      info_container[target_bid].info += (target_bid == bid) ? 0 : 1;
+
+      target_bid = (target_bid+1) & mask;
+
+    }
+
+    // reached end, insert last
+
+    found = (target_bid + info_container[target_bid].get_offset()) & mask;
+    container[found] = std::move(vv);  // empty slot.
+    // if we are at the original bucket, then set it to normal (1 entry)
+
+    info_container[bid].set_normal();  // head is always marked as occupied.
+    if (target_bid != bid) {  // tail, originally == empty
+      ++info_container[target_bid];  // increment tail end if it's not same as head.
+    }
+
+    found = (bid + info_container[bid].get_offset()) & mask;
+		
+		return std::make_pair(iterator(container.begin() + found, info_container.begin() + found, info_container.end(), filter), true);
 
 	}
 
@@ -846,8 +782,13 @@ public:
 	 * @brief count the presence of a key
 	 */
 	size_type count( key_type const & k ) const {
-
-		return (find_pos(k).second < buckets) ? 1 : 0;
+		size_t bucket;
+		size_t pos;
+		std::tie(bucket, pos) = find_pos(k);
+	
+//		std::cout << "found at bucket " << bucket << " pos " << pos << std::endl;
+	
+		return (pos < buckets) ? 1 : 0;
 
 	}
 
@@ -924,7 +865,7 @@ public:
 	 */
 	const_iterator find(key_type const & k) const {
 
-		size_type idx = find_bucket(k);
+		size_type idx = find_pos(k).second;
 
 		if (idx < buckets)
 			return const_iterator(container.cbegin() + idx, info_container.cbegin()+ idx, info_container.cend(), filter);
@@ -962,7 +903,7 @@ public:
 
 
 	/**
-	 * @brief erases a key.  performs backward shift.
+	 * @brief erases a key.  performs backward shift.  swap at bucket boundaries only.
 	 */
 	size_type erase_no_resize(key_type const & k) {
 		size_t bid;
@@ -980,6 +921,9 @@ public:
 
 		//size_t bid = hash(k) & mask;   // get bucket id
 		// get the end of the non-empty range, starting from the next position.
+    size_type bid1 = (bid + 1) & mask;  // get the next bucket, since bucket contains offset for current bucket.
+
+
 		size_type found1 = (found + 1) & mask;
 		size_type end = find_next_zero_offset_pos(found1);
 
@@ -1003,10 +947,8 @@ public:
 
 // debug		print();
 
-
 		// now change the offsets.
 		// start from bid+1, end at end - 1.
-		size_t bid1 = (bid == (buckets - 1)) ? 0 : bid + 1;  // get the next bucket, since bucket contains offset for current bucket.
 
 
 		// if that was the last entry for the bucket, then need to change this to say empty.
@@ -1104,7 +1046,10 @@ public:
 
 		size_type res = erase_no_resize(k);
 
-		if (lsize < min_load) rehash(buckets >> 1);
+		if (lsize < min_load) {
+			std::cout << "lsize " << lsize << " min_load " << min_load << " new size " << (buckets >> 1) << std::endl;
+			rehash(buckets >> 1);
+		}
 
 		return res;
 	}
@@ -1116,8 +1061,12 @@ public:
 
 		//std::cout << "erase resize: curr size is " << lsize << " target max_load is " << (static_cast<float>(lsize) / max_load_factor) << " buckets is " <<
 		//		next_power_of_2(static_cast<size_t>(static_cast<float>(lsize) / max_load_factor)) << std::endl;
-		if (lsize < min_load) rehash(static_cast<size_t>(static_cast<float>(lsize) / max_load_factor));
-
+		if (lsize < min_load) {
+			
+			std::cout << "lsize " << lsize << " min_load " << min_load << " new size " << 
+				next_power_of_2(static_cast<size_t>(static_cast<float>(lsize) / max_load_factor)) << std::endl;
+			rehash(static_cast<size_t>(static_cast<float>(lsize) / max_load_factor));
+		}
 		return erased;
 	}
 
@@ -1127,4 +1076,4 @@ public:
 #undef REPROBE_STAT
 
 }  // namespace fsc
-#endif /* KMERHASH_HASHTABLE_OA_RH_DO_MEMMOVE_HPP_ */
+#endif /* KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS_HPP_ */

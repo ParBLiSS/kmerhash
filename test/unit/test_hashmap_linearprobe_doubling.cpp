@@ -17,7 +17,7 @@
 
 // include google test
 #include <gtest/gtest.h>
-#include "kmerhash/hashtable_OA_RH_DO_prefix.hpp"
+#include "kmerhash/hashmap_linearprobe_doubling.hpp"
 
 #include <string>
 #include <unordered_map>
@@ -47,7 +47,7 @@
  * test class holding some information.  Also, needed for the typed tests
  */
 template<typename T>
-class Hashtable_OARHDO_PrefixTest : public ::testing::Test
+class Hashtable_OALP_DoublingTest : public ::testing::Test
 {
     static_assert(std::is_integral<T>::value, "only supporting integral types in tests right now.");
   protected:
@@ -57,7 +57,7 @@ class Hashtable_OARHDO_PrefixTest : public ::testing::Test
     ::std::vector<std::pair<T, T>> temp;
 
 
-    size_t iters = 100000;  // 16
+    size_t iters = 100000;
     T min_val = 2;
     T max_val = ::std::numeric_limits<T>::max() - 2;
 
@@ -79,57 +79,41 @@ class Hashtable_OARHDO_PrefixTest : public ::testing::Test
 };
 
 // indicate this is a typed test
-TYPED_TEST_CASE_P(Hashtable_OARHDO_PrefixTest);
+TYPED_TEST_CASE_P(Hashtable_OALP_DoublingTest);
 
-TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert)
+TYPED_TEST_P(Hashtable_OALP_DoublingTest, insert_partial)
 {
   bool same = false;
 
-  using MAP = ::fsc::hashmap_oa_rh_do_prefix<TypeParam, TypeParam>;
+  using MAP = ::fsc::hashmap_linearprobe_doubling<TypeParam, TypeParam>;
 
-  MAP test;
-  // MAP test(this->iters);
-   test.insert(this->temp.begin(), this->temp.end());
-	
-   test.reserve(test.size());
 
-   //test.print();
+   MAP test(this->temp.begin(), this->temp.end());
 
-      ::std::vector<::std::pair<TypeParam, TypeParam> > test_vals(test.to_vector());
+      ::std::vector<::std::pair<TypeParam, TypeParam> > test_vals = test.to_vector();
       ::std::vector<::std::pair<TypeParam, TypeParam> > gold_vals(this->gold.begin(), this->gold.end());
 
-      ASSERT_EQ(test_vals.size(), gold_vals.size());
 
-//      for (size_t i = 0; i < test_vals.size(); ++i) {
-//        printf("before %ld->%ld\tinserted\t%ld->%ld\n", test_vals[i].first, test_vals[i].second, this->temp[i].first, this->temp[i].second);
+      ::std::sort(test_vals.begin(), test_vals.end(), [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const &y) {
+        return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
+      } );
+      ::std::sort(gold_vals.begin(), gold_vals.end(), [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const &y) {
+        return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
+      } );
+
+      same = ::std::equal(test_vals.begin(), test_vals.end(), gold_vals.begin());
+//
+//      if (!same) {
+//        for (int i = 0; i < this->iters; ++i) {
+//          printf("%ld->%ld\t%ld->%ld\n", test_vals[i].first, test_vals[i].second, gold_vals[i].first, gold_vals[i].second);
+//        }
 //      }
-
-      ::std::sort(test_vals.begin(), test_vals.end(),
-    		  [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const &y) {
-        return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
-      } );
-      ::std::sort(gold_vals.begin(), gold_vals.end(),
-    		  [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const &y) {
-        return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
-      } );
-
-
-     same = ::std::equal(test_vals.begin(), test_vals.end(), gold_vals.begin());
-
-      if (!same) {
-        for (size_t i = 0; i < gold_vals.size(); ++i) {
-          printf("%ld->%ld\t%ld->%ld, %ld\n",
-        		  test_vals[i].first, test_vals[i].second,
-				  gold_vals[i].first, gold_vals[i].second,
-			  gold_vals[i].first % (test.capacity()));
-        }
-      }
 
       EXPECT_TRUE(same);
 }
 
 
-//TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, equal_range_partial)
+//TYPED_TEST_P(Hashtable_OALP_DoublingTest, equal_range_partial)
 //{
 //	  using MAP = ::fsc::densehash_map<TypeParam, TypeParam>;
 //
@@ -187,52 +171,40 @@ TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert)
 //}
 
 
-TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, count)
+TYPED_TEST_P(Hashtable_OALP_DoublingTest, count_partial)
 {
-	  using MAP = ::fsc::hashmap_oa_rh_do_prefix<TypeParam, TypeParam>;
+	  using MAP = ::fsc::hashmap_linearprobe_doubling<TypeParam, TypeParam>;
 
-	  MAP test;
-   //MAP test(this->iters);
-   test.insert(this->temp.begin(), this->temp.end());
 
-   test.reserve(test.size());
-// test.print();
+	   MAP test(this->temp.begin(), this->temp.end());
 
 	   ::std::vector<::std::pair<TypeParam, TypeParam> > unique(this->temp.begin(), this->temp.end());
-	   std::sort(unique.begin(), unique.end(),
-			   [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const & y){
+	   std::sort(unique.begin(), unique.end(), [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const & y){
 		   return x.first < y.first;
 	   });
-	   auto newend = std::unique(unique.begin(), unique.end(),
-			   [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const & y){
+	   auto newend = std::unique(unique.begin(), unique.end(), [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const & y){
 		   return x.first == y.first;
 	   });
 	   unique.erase(newend, unique.end());
 
 
-	bool same;
-	size_t j = 0;
-	  for (auto i : unique) {
-		same = this->gold.count(i.first) == test.count(i.first);
-		
-		if (!same) std::cout << "count not same for entry " << j << " value " << i.first << std::endl; 
 
-	EXPECT_TRUE(same);
-	++j;
+		  for (auto i : unique) {
+      EXPECT_EQ(this->gold.count(i.first), test.count(i.first));
     }
 }
 
 // now register the test cases
-REGISTER_TYPED_TEST_CASE_P(Hashtable_OARHDO_PrefixTest, insert,
-//		equal_range,
-		count);
+REGISTER_TYPED_TEST_CASE_P(Hashtable_OALP_DoublingTest, insert_partial,
+//		equal_range_partial,
+		count_partial);
 
 
 //////////////////// RUN the tests with different types.
 
-typedef ::testing::Types<uint16_t, // uint8_t,
-    uint32_t, uint64_t> Hashtable_OARHDO_PrefixTestTypes;
-INSTANTIATE_TYPED_TEST_CASE_P(Bliss, Hashtable_OARHDO_PrefixTest, Hashtable_OARHDO_PrefixTestTypes);
+typedef ::testing::Types<uint8_t, uint16_t,
+    uint32_t, uint64_t> Hashtable_OALP_DoublingTestTypes;
+INSTANTIATE_TYPED_TEST_CASE_P(Bliss, Hashtable_OALP_DoublingTest, Hashtable_OALP_DoublingTestTypes);
 
 
 
@@ -243,7 +215,7 @@ INSTANTIATE_TYPED_TEST_CASE_P(Bliss, Hashtable_OARHDO_PrefixTest, Hashtable_OARH
  * test class holding some information.  Also, needed for the typed tests
  */
 template<typename T>
-class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
+class Hashmap_OA_LP_Doubling_KmerTest : public ::testing::Test
 {
   protected:
 
@@ -255,7 +227,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
     		typename ::std::vector<std::pair<T, uint32_t> >::iterator,
     		::bliss::kmer::transform::lex_less<T> >;
 
-    size_t iters = 100000; // 16;
+    size_t iters = 100000;
     int min_val = 2;
     int max_val = 253;
 
@@ -296,12 +268,12 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
                      CANONICAL_ITER(this->temp.end(), ::bliss::kmer::transform::lex_less<Kmer>()));
         test.insert(entries.begin(), entries.end());
         gold.insert(entries.begin(), entries.end());
-//        printf("canonical insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
+        printf("canonical insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
       } else {
         entries.insert(entries.end(), this->temp.begin(), this->temp.end());
         test.insert(entries.begin(), entries.end());
         gold.insert(entries.begin(), entries.end());
-//        printf("raw insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
+        printf("raw insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
       }
 
       // check unique items in list.
@@ -356,7 +328,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 
     template <typename Kmer = T, bool canonical,
 			typename Hash, typename Equal>
-    ::fsc::hashmap_oa_rh_do_prefix<Kmer, uint32_t, Hash, Equal>
+    ::fsc::hashmap_linearprobe_doubling<Kmer, uint32_t, Hash, Equal>
     make_kmer_map() {
 //    	::bliss::kmer::hash::sparsehash::special_keys<Kmer, canonical> specials;
 //    	if (canonical) std::cout << "CANONICAL ";
@@ -386,7 +358,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 //			std::cout << std::endl;
 //    	}
 
-		return ::fsc::hashmap_oa_rh_do_prefix<Kmer, uint32_t, Hash, Equal >();
+		return ::fsc::hashmap_linearprobe_doubling<Kmer, uint32_t, Hash, Equal >();
     }
 
 
@@ -588,6 +560,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
     	}
     }
 
+
     template <typename Kmer = T, bool canonical = false,
     		template <typename> class Transform = ::bliss::transform::identity,
 			template <typename> class Hash = std::hash,
@@ -603,29 +576,16 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
     	//using Equal2 = ::fsc::sparsehash::compare<Kmer, Equal, Transform>;
 
     	auto test = make_kmer_map<Kmer, canonical, THash, Equal1>();
-    	//test.reserve(this->iters);
 		::std::unordered_map<Kmer, uint32_t, THash, Equal1> gold;
 		::std::vector<std::pair<Kmer, uint32_t> > entries;
 
 		this->map_insert<canonical, TLess>(test, gold, entries);
 
-		std::cout << "BEFORE ERASE.  size= " << test.size() << " capacity= " << test.capacity() << std::endl;
-// debug		test.print();
-
 		// now erase half of the entries.
 		test.erase(entries.begin(), entries.begin() + entries.size() / 2);
 		for (auto it = entries.begin(); it != entries.begin() + entries.size() / 2; ++it) {
 			gold.erase((*it).first);
-
-			//std::cout << "erased " << (*it).first << std::endl;
 		}
-
-
-
-		std::cout << "AFTER ERASE.  size= " << test.size() << " capacity= " << test.capacity() << std::endl;
-// debug		test.print();
-
-		ASSERT_EQ(test.size(), gold.size());
 
 		// get list of unique k-mers
 		std::vector<Kmer> keys = test.keys();
@@ -648,9 +608,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
     		ASSERT_EQ(test.count(entries[i].first), 1UL);
     		ASSERT_EQ(gold.count(entries[i].first), 1UL);
     	}
-
     }
-
 
 //    template <typename Kmer = T, bool canonical = false,
 //    		template <typename> class Transform = ::bliss::transform::identity,
@@ -822,14 +780,14 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 };
 
 // indicate this is a typed test
-TYPED_TEST_CASE_P(Hashmap_OA_RHDO_Prefix_KmerTest);
+TYPED_TEST_CASE_P(Hashmap_OA_LP_Doubling_KmerTest);
 
 
 template<typename K>
 using HASH_K = ::bliss::kmer::hash::farm<K, false>;
 
 
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert)
+TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, single_map_insert)
 {
 	this->template test_map_insert<TypeParam, false,
 									  ::bliss::transform::identity,
@@ -837,7 +795,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert)
 }
 
 
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_equal_range)
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, single_map_equal_range)
 //{
 //
 //  this->template test_map_equal_range<TypeParam, false,
@@ -846,19 +804,20 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert)
 //
 //}
 
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_count)
+TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, single_map_count)
 {
   this->template test_map_count<TypeParam, false,
 								  ::bliss::transform::identity,
 								  HASH_K, std::equal_to, std::less>();
 }
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_erase)
+TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, single_map_erase)
 {
-	  this->template test_map_erase<TypeParam, false,
-	  ::bliss::transform::identity,
-	  									  HASH_K, std::equal_to, std::less>();
+  this->template test_map_erase<TypeParam, false,
+								  ::bliss::transform::identity,
+								  HASH_K, std::equal_to, std::less>();
 }
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert)
+
+TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, canonical_map_insert)
 {
 	this->template test_map_insert<TypeParam, true,
 									  ::bliss::transform::identity,
@@ -867,28 +826,30 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert)
 
 
 
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_equal_range)
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, canonical_map_equal_range)
 //{
 //	  this->template test_map_equal_range<TypeParam, true,
 //									  ::bliss::transform::identity,
 //									  HASH_K, std::equal_to, std::less>();
 //}
 
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_count)
+TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, canonical_map_count)
 {
 	  this->template test_map_count<TypeParam, true,
 									  ::bliss::transform::identity,
 									  HASH_K, std::equal_to, std::less>();
 
 }
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_erase)
+TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, canonical_map_erase)
 {
 	  this->template test_map_erase<TypeParam, true,
-	  ::bliss::transform::identity,
-	  									  HASH_K, std::equal_to, std::less>();
+									  ::bliss::transform::identity,
+									  HASH_K, std::equal_to, std::less>();
+
 }
 
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert)
+
+TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, bimolecule_map_insert)
 {
 	this->template test_map_insert<TypeParam, false,
 									  ::bliss::kmer::transform::lex_less,
@@ -908,7 +869,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert)
 }
 
 
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_equal_range)
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, bimolecule_map_equal_range)
 //{
 //	 this->template test_map_equal_range<TypeParam, false,
 //	 ::bliss::kmer::transform::lex_less,
@@ -928,7 +889,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert)
 //}
 
 
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_count)
+TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, bimolecule_map_count)
 {
 	  this->template test_map_count<TypeParam, false,
 	  ::bliss::kmer::transform::lex_less,
@@ -946,13 +907,28 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_count)
 //
 //  this->template test_map_count<TypeParam, false, ((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) <= 1), THASH, EQUAL, LESS>();
 }
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_erase)
+
+TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, bimolecule_map_erase)
 {
 	  this->template test_map_erase<TypeParam, false,
 	  ::bliss::kmer::transform::lex_less,
 	  									  HASH_K, std::equal_to, std::less>();
+
+//  using SPLITTER = typename std::conditional<((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) > 1),
+//      ::bliss::filter::TruePredicate,
+//       ::fsc::TransformedPredicate<TypeParam, ::bliss::utils::KmerInLowerSpace, ::bliss::kmer::transform::lex_less> >::type;
+//
+//
+//  using THASH = ::fsc::TransformedHash<TypeParam, HASH_K, ::bliss::kmer::transform::lex_less >;
+//
+//  using EQUAL = ::bliss::kmer::hash::sparsehash::TransformedComparator<TypeParam, ::std::equal_to, ::bliss::kmer::transform::lex_less >;
+//  using LESS = ::fsc::TransformedComparator<TypeParam, ::std::less, ::bliss::kmer::transform::lex_less >;
+//
+//  this->template test_map_count<TypeParam, false, ((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) <= 1), THASH, EQUAL, LESS>();
 }
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_multimap_insert)
+
+
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, single_multimap_insert)
 //{
 ////  using SPLITTER = typename std::conditional<((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) > 1),
 ////      ::bliss::filter::TruePredicate,  ::bliss::utils::KmerInLowerSpace<TypeParam> >::type;
@@ -969,14 +945,14 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_erase)
 //									  HASH_K, std::equal_to, std::less>();
 //
 //}
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_multimap_equal_range)
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, single_multimap_equal_range)
 //{
 //	  this->template test_multimap_equal_range<TypeParam, false,
 //									  ::bliss::transform::identity,
 //									  HASH_K, std::equal_to, std::less>();
 //
 //}
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_multimap_count)
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, single_multimap_count)
 //{
 //	  this->template test_multimap_count<TypeParam, false,
 //									  ::bliss::transform::identity,
@@ -985,7 +961,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_erase)
 //}
 //
 //
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_multimap_insert)
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, canonical_multimap_insert)
 //{
 //	this->template test_multimap_insert<TypeParam, true,
 //									  ::bliss::transform::identity,
@@ -994,7 +970,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_erase)
 //}
 //
 //
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_multimap_equal_range)
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, canonical_multimap_equal_range)
 //{
 //	  this->template test_multimap_equal_range<TypeParam, true,
 //									  ::bliss::transform::identity,
@@ -1002,7 +978,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_erase)
 //
 //}
 //
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_multimap_count)
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, canonical_multimap_count)
 //{
 //	  this->template test_multimap_count<TypeParam, true,
 //									  ::bliss::transform::identity,
@@ -1010,7 +986,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_erase)
 //
 //}
 //
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_multimap_insert)
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, bimolecule_multimap_insert)
 //{
 //	this->template test_multimap_insert<TypeParam, false,
 //									  ::bliss::kmer::transform::lex_less,
@@ -1032,7 +1008,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_erase)
 //
 //
 //
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_multimap_equal_range)
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, bimolecule_multimap_equal_range)
 //{
 //	this->template test_multimap_equal_range<TypeParam, false,
 //									  ::bliss::kmer::transform::lex_less,
@@ -1040,7 +1016,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_erase)
 //}
 //
 //
-//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_multimap_count)
+//TYPED_TEST_P(Hashmap_OA_LP_Doubling_KmerTest, bimolecule_multimap_count)
 //{
 //	this->template test_multimap_count<TypeParam, false,
 //									  ::bliss::kmer::transform::lex_less,
@@ -1048,28 +1024,28 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_erase)
 //}
 
 // now register the test cases
-REGISTER_TYPED_TEST_CASE_P(Hashmap_OA_RHDO_Prefix_KmerTest,
-		//                           single_multimap_insert,
-		//						   single_multimap_equal_range,
-		//						   single_multimap_count,
-		//                           canonical_multimap_insert,
-		//						   canonical_multimap_equal_range,
-		//						   canonical_multimap_count,
-		//                           bimolecule_multimap_insert,
-		//						   bimolecule_multimap_equal_range,
-		//						   bimolecule_multimap_count,
-		                           single_map_insert,
-		//						   single_map_equal_range,
-								   single_map_count,
-								   single_map_erase,
-		                           canonical_map_insert,
-		//						   canonical_map_equal_range,
-								   canonical_map_count,
-								   canonical_map_erase,
-		                           bimolecule_map_insert,
-		//						   bimolecule_map_equal_range,
-								   bimolecule_map_count,
-								   bimolecule_map_erase
+REGISTER_TYPED_TEST_CASE_P(Hashmap_OA_LP_Doubling_KmerTest,
+//                           single_multimap_insert,
+//						   single_multimap_equal_range,
+//						   single_multimap_count,
+//                           canonical_multimap_insert,
+//						   canonical_multimap_equal_range,
+//						   canonical_multimap_count,
+//                           bimolecule_multimap_insert,
+//						   bimolecule_multimap_equal_range,
+//						   bimolecule_multimap_count,
+                           single_map_insert,
+//						   single_map_equal_range,
+						   single_map_count,
+						   single_map_erase,
+                           canonical_map_insert,
+//						   canonical_map_equal_range,
+						   canonical_map_count,
+						   canonical_map_erase,
+                           bimolecule_map_insert,
+//						   bimolecule_map_equal_range,
+						   bimolecule_map_count,
+						   bimolecule_map_erase
 
                            );
 
@@ -1082,8 +1058,8 @@ typedef ::testing::Types<
 			::bliss::common::Kmer<5, ::bliss::common::DNA6, uint16_t>,
 				::bliss::common::Kmer<3, ::bliss::common::DNA16, uint16_t>,
 				 ::bliss::common::Kmer<4, ::bliss::common::DNA16, uint16_t>
-		> Hashmap_OA_RHDO_Prefix_KmerTestTypes;
-INSTANTIATE_TYPED_TEST_CASE_P(Bliss, Hashmap_OA_RHDO_Prefix_KmerTest, Hashmap_OA_RHDO_Prefix_KmerTestTypes);
+		> Hashmap_OA_LP_Doubling_KmerTestTypes;
+INSTANTIATE_TYPED_TEST_CASE_P(Bliss, Hashmap_OA_LP_Doubling_KmerTest, Hashmap_OA_LP_Doubling_KmerTestTypes);
 
 
 

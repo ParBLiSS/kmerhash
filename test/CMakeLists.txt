@@ -18,11 +18,12 @@ if (IS_DIRECTORY ${PROJECT_SOURCE_DIR}/test/unit)
 #    FILE(GLOB TEST_FILES unit/test_*.cpp)
 #    kmerhash_add_test(${TEST_NAME} FALSE ${TEST_FILES})
 
-    kmerhash_add_test(kmerhash_oaLPdo FALSE unit/test_hashtable_oalp_doubling.cpp)
-    kmerhash_add_test(kmerhash_oaRHdo FALSE unit/test_hashtable_oarh_doubling.cpp)
-    kmerhash_add_test(kmerhash_oaRHdoNonCirc FALSE unit/test_hashtable_oarh_do_noncirc.cpp)
-    kmerhash_add_test(kmerhash_oaRHdoPrefix FALSE unit/test_hashtable_oarh_do_prefix.cpp)
     kmerhash_add_test(kmerhash_aux_filter_iter FALSE unit/test_aux_filter_iterator.cpp)
+
+    kmerhash_add_test(kmerhash_LP FALSE unit/test_hashmap_linearprobe_doubling.cpp)
+    kmerhash_add_test(kmerhash_RH FALSE unit/test_hashmap_robinhood_doubling.cpp)
+    kmerhash_add_test(kmerhash_RH_NonCirc FALSE unit/test_hashmap_robinhood_doubling_noncirc.cpp)
+    kmerhash_add_test(kmerhash_RH_Offsets FALSE unit/test_hashmap_robinhood_doubling_offsets.cpp)
 
     # get all mpi test files from ./test
 #    FILE(GLOB MPI_TEST_FILES unit/mpi_test_*.cpp)
