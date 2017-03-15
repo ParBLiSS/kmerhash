@@ -44,7 +44,7 @@ To compile, first create a build directory, preferably outside of the source dir
 #!sh
 mkdir {build}
 cd {build}
-cmake {src} -DENABLE_TESTING-ON -DENABLE_BENCHMARKING-ON -DBUILD_EXAMPLE_APPLICATIONS=ON
+cmake {src} -DENABLE_TESTING=ON -DENABLE_BENCHMARKING=ON -DBUILD_EXAMPLE_APPLICATIONS=ON
 make
 
 ```
@@ -93,4 +93,3 @@ bin/benchmark_hashtables
 * Other guidelines
 
 ### Who do I talk to? ###
-
