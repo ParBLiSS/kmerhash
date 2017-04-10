@@ -409,7 +409,7 @@ protected:
 
 #if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 		// insert at i.
 		container[i] = value;
@@ -424,7 +424,7 @@ public:
 	/**
 	 * @brief insert a single key-value pair into container.
 	 */
-	std::pair<iterator, bool> insert(key_type const & key, mapped_type const & val) {
+	std::pair<iterator, bool> insert(key_type && key, mapped_type && val) {
 
 #if defined(REPROBE_STAT)
 		size_type reprobe = 0;
@@ -491,7 +491,7 @@ public:
 		}
 #if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 		// finally check if we need to insert.
 		if (insert_pos == buckets) {  // went through the whole container.  must be completely full.
@@ -507,8 +507,8 @@ public:
 
 	}
 
-	std::pair<iterator, bool> insert(value_type const & vv) {
-		return insert(vv.first, vv.second);
+	std::pair<iterator, bool> insert(value_type && vv) {
+		return insert(std::move(vv.first), std::move(vv.second));
 	}
 
 	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
@@ -540,6 +540,33 @@ public:
 #endif
 		reserve(lsize);  // resize down as needed
 	}
+
+	void insert(std::vector<value_type> && input) {
+
+#if defined(REPROBE_STAT)
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+#endif
+
+		size_t count = 0;
+
+		for (size_t i = 0; i < input.size(); ++i) {
+			if( insert(std::move(input[i])).second)  //local insertion.  this requires copy construction...
+				++count;
+
+		}
+
+
+#if defined(REPROBE_STAT)
+		std::cout << "INSERT batch:\treprobe max=" << this->max_reprobes << "\treprobe total=" << this->reprobes <<
+					"\tvalid=" << count << "\ttotal=" << input.size() <<
+					"\tbuckets=" << buckets <<std::endl;
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+#endif
+		reserve(lsize);  // resize down as needed
+	}
+
 
 
 	/**
@@ -593,7 +620,7 @@ public:
 		}
 #if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 		// if we are here, then we did not find it.  return 0.
 		return 0;
@@ -704,7 +731,7 @@ public:
 		}
 #if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 		// if we are here, then we did not find it.  return  end iterator.
 		return iterator(container.end(), info_container.end(), filter);
@@ -763,7 +790,7 @@ public:
 			}
 #if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 
 		// if we are here, then we did not find it.  return 0.
@@ -850,7 +877,7 @@ public:
 
 #if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 		// if we are here, then we did not find it.  return 0.
 		return 0;

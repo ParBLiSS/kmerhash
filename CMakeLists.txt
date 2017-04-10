@@ -164,7 +164,10 @@ endif()
 OPTION(BUILD_SHARED_LIBS "Build shared libraries (.dll/.so) instead of static ones (.lib/.a)" ON)
 
 
-
+OPTION(REPORT_REPROBES "Report reprobe counts" ON)
+if (REPORT_REPROBES)
+    add_definitions(-DREPROBE_STAT)
+endif(REPORT_REPROBES)
 
 
 

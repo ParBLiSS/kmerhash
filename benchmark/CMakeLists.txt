@@ -12,9 +12,11 @@ endif(ENABLE_TESTING)
 
 if (BL_BENCHMARK)
 
+include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/tclap-1.2.1/include")
+
 
 # EXECUTABLES
-include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/tommyds")
+#include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/tommyds")
 add_executable(benchmark_hashtables BenchmarkHashTables.cpp)
 target_link_libraries(benchmark_hashtables ${EXTRA_LIBS})
 

@@ -381,7 +381,7 @@ protected:
 
 #if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 
 		return std::make_pair(i, result);
@@ -461,7 +461,7 @@ protected:
 			reprobe = i - pos;
 		}
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 		return i;
 
@@ -553,7 +553,7 @@ protected:
 			reprobe = i - pos;
 		}
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 		return i;
 

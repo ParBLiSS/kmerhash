@@ -133,7 +133,7 @@ protected:
     size_t upsize_count;
     size_t downsize_count;
     mutable size_t reprobes;   // for use as temp variable
-    mutable unsigned char max_reprobes;
+    mutable size_t max_reprobes;
 
 public:
 
@@ -451,7 +451,7 @@ public:
 #if defined(REPROBE_STAT)
 		reprobe &= info_type::dist_mask;
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 		return std::make_pair(iterator(container.begin() + insert_pos, info_container.begin()+ insert_pos, info_container.end(), filter), success);
 
@@ -532,7 +532,7 @@ protected:
 #if defined(REPROBE_STAT)
 		reprobe &= info_type::dist_mask;
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, reprobe);
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 
 		return result;
