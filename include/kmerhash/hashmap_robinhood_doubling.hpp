@@ -450,9 +450,10 @@ public:
 	std::pair<iterator, bool> insert(value_type && vv) {
 
 		unsigned char reprobe = info_type::normal;
+#if defined(REPROBE_STAT)
 		unsigned char probe_count = 0;
 		size_t move_count = 0;
-
+#endif
 		// first check if we need to resize.
 		if (lsize >= max_load) rehash(buckets << 1);
 
@@ -486,11 +487,13 @@ public:
 				if (insert_pos == std::numeric_limits<size_type>::max()) {
 					insert_pos = i;  // set insert_pos to first positin of insertion.
 					success = true;
-					probe_count = j;
 					++lsize;
+#if defined(REPROBE_STAT)
+					probe_count = j;
 				} else {
 					// subsequent "shifts" do not change insert_pos or success.
 					++move_count;
+#endif
 				}
 
 				// then decide what to do given the swapped out distance.
@@ -515,7 +518,9 @@ public:
 					// same, then we found it and need to return.
 					insert_pos = i;
 					success = false;
+#if defined(REPROBE_STAT)
 					probe_count = j;
+#endif
 					break;
 				}  // note that the loop terminates within here so don't need to worry about another insertion point.
 
@@ -555,17 +560,22 @@ public:
 		this->max_reprobes = 0;
 		this->moves = 0;
 		this->max_moves = 0;
-#endif
 		size_t count = 0;
 		iterator dummy;
 		bool success;
+#endif
 
 		for (auto it = begin; it != end; ++it) {
-			std::tie(dummy, success) = insert(std::move(value_type(*it)));  //local insertion.  this requires copy construction...
+#if defined(REPROBE_STAT)
+			std::tie(dummy, success) =
+#endif
+					insert(std::move(value_type(*it)));  //local insertion.  this requires copy construction...
 
+#if defined(REPROBE_STAT)
 			if (success) {
 				++count;
 			}
+#endif
 		}
 
 #if defined(REPROBE_STAT)
@@ -593,12 +603,22 @@ public:
 		this->max_reprobes = 0;
 		this->moves = 0;
 		this->max_moves = 0;
-#endif
 		size_t count = 0;
+		iterator dummy;
+		bool success;
+#endif
 
 		for (size_t i = 0; i < input.size(); ++i) {
-			if ( insert(std::move(input[i])).second)   //local insertion.  this requires copy construction...
+#if defined(REPROBE_STAT)
+			std::tie(dummy, success) =
+#endif
+			insert(std::move(input[i]));   //local insertion.  this requires copy construction...
+
+#if defined(REPROBE_STAT)
+			if (success) {
 				++count;
+			}
+#endif
 		}
 
 #if defined(REPROBE_STAT)
@@ -625,19 +645,21 @@ public:
 		this->max_reprobes = 0;
 		this->moves = 0;
 		this->max_moves = 0;
+		unsigned char probe_count = 0;
+		size_t move_count = 0;
 #endif
 		size_t count = 0;
 		unsigned char reprobe = info_type::normal;
-		unsigned char probe_count = 0;
-		size_t move_count = 0;
 		size_t id;
 		size_type j;
 
 		for (size_t i = 0; i < input.size(); ++i) {
 
 			reprobe = info_type::normal;
+#if defined(REPROBE_STAT)
 			probe_count = std::numeric_limits<unsigned char>::max();
 			move_count = 0;
+#endif
 
 			// first check if we need to resize.
 			if (lsize >= max_load) rehash(buckets << 1);
@@ -653,19 +675,21 @@ public:
 				if (reprobe > info_container[id].info) {
 					::std::swap(info_container[id].info, reprobe);
 
+#if defined(REPROBE_STAT)
 					if (probe_count == std::numeric_limits<unsigned char>::max()) {
 						// first insertion.
 						probe_count = j;
-						++count;
 					} else {
 						// subsequent "shifts" do not change insert_pos or success.
 						++move_count;
 					}
+#endif
 
 					// then decide what to do given the swapped out distance.
 					if (reprobe == info_type::empty) {  // previously it was empty,
 						// then we can simply set.
 						container[id] = std::move(input[i]);
+						++count;
 						break;
 
 					} else {
@@ -682,7 +706,9 @@ public:
 					// same distance, then possibly same value.  let's check.
 					if (eq(container[id].first, input[i].first)) {  // note that a previously swapped vv would not match again and can be skipped.
 						// same, then we found it and need to return.
+#if defined(REPROBE_STAT)
 						probe_count = j;
+#endif
 						break;
 					}  // note that the loop terminates within here so don't need to worry about another insertion point.
 
@@ -720,6 +746,8 @@ public:
 		this->moves = 0;
 		this->max_moves = 0;
 #endif
+
+
 		reserve(lsize);  // resize down as needed
 	}
 
@@ -737,10 +765,10 @@ public:
 		this->max_reprobes = 0;
 		this->moves = 0;
 		this->max_moves = 0;
+		size_t total = input.size();
 #endif
 		LESS less;
 
-		size_t total = input.size();
 		size_t local_mask = next_power_of_2(static_cast<size_t>(static_cast<float>(input.size()) / this->max_load_factor)) - 1;
 
 		// first sort by hash value.  two with same hash then are compared by key.  radix sort later?
@@ -810,7 +838,7 @@ public:
 		size_t pos = 0;
 		size_t last_id = std::numeric_limits<size_t>::max();
 		unsigned char dist = info_type::normal;
-		unsigned char last_dist = info_type::empty;
+//		unsigned char last_dist = info_type::empty;
 		for (size_t i = 0; i < input.size(); ++i) {
 			id = hash(input[i].first) & mask;
 
