@@ -28,9 +28,9 @@
 #include "kmerhash/hashmap_linearprobe_doubling.hpp"
 #include "kmerhash/hashmap_robinhood_doubling.hpp"
 // experimental
-//#include "kmerhash/experimental/hashmap_robinhood_doubling_noncircular.hpp"
+#include "kmerhash/experimental/hashmap_robinhood_doubling_noncircular.hpp"
 //#include "kmerhash/experimental/hashmap_robinhood_doubling_memmove.hpp"
-//#include "kmerhash/experimental/hashmap_robinhood_doubling_offsets2.hpp"
+#include "kmerhash/experimental/hashmap_robinhood_doubling_offsets2.hpp"
 
 #include "common/kmer.hpp"
 #include "common/kmer_transform.hpp"
@@ -544,6 +544,8 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 #define KMERIND_TYPE 3
 #define LINEARPROBE_TYPE 4
 #define ROBINHOOD_TYPE 5
+#define ROBINHOOD_NONCIRC_TYPE 6
+#define ROBINHOOD_OFFSET_TYPE 7
 
 #define DNA_TYPE 1
 #define DNA5_TYPE 2
@@ -585,9 +587,11 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, bool> parse_cmdline(int
 	  allowed.push_back("kmerind");
 	  allowed.push_back("linearprobe");
 	  allowed.push_back("robinhood");
+	  allowed.push_back("robinhood_noncirc");
+	  allowed.push_back("robinhood_offset");
 	  TCLAP::ValuesConstraint<std::string> allowedVals( allowed );
 
-	  TCLAP::ValueArg<std::string> mapArg("m","map_type","type of map to use",false,"robinhood",&allowedVals, cmd);
+	  TCLAP::ValueArg<std::string> mapArg("m","map_type","type of map to use (default robinhood)",false,"robinhood",&allowedVals, cmd);
 
 	  std::vector<std::string> allowed_alphabet;
 	  allowed_alphabet.push_back("dna");
@@ -595,7 +599,7 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, bool> parse_cmdline(int
 	  allowed_alphabet.push_back("dna16");
 	  TCLAP::ValuesConstraint<std::string> allowedAlphabetVals( allowed_alphabet );
 
-	  TCLAP::ValueArg<std::string> alphabetArg("A","alphabet","alphabet to use",false,"dna",&allowedAlphabetVals, cmd);
+	  TCLAP::ValueArg<std::string> alphabetArg("A","alphabet","alphabet to use (default dna)",false,"dna",&allowedAlphabetVals, cmd);
 
 
 	  // Define a value argument and add it to the command line.
@@ -626,6 +630,10 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, bool> parse_cmdline(int
 		  map = LINEARPROBE_TYPE;
 	  } else if (map_type == "robinhood") {
 		  map = ROBINHOOD_TYPE;
+	  } else if (map_type == "robinhood_noncirc") {
+		  map = ROBINHOOD_NONCIRC_TYPE;
+	  } else if (map_type == "robinhood_offset") {
+		  map = ROBINHOOD_OFFSET_TYPE;
 	  }
 
 	  std::string alpha = alphabetArg.getValue();
@@ -834,49 +842,63 @@ int main(int argc, char** argv) {
 		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 	  }
 
+  } else if (map == ROBINHOOD_NONCIRC_TYPE) {
 
-  // --------------- my new hashmap.
+	    // experimental...
+	    //================ my new hashmap non_circular
+	  if (dna == DNA_TYPE) {
+		  if (full) {
+			  BL_BENCH_START(test);
+			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, FullKmer, size_t>("hashmap_robinhood_doubling_noncirc_Full", count, repeat_rate, query_frac, batch_mode, comm);
+			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_Full", count, comm);
+		  } else {
+			  BL_BENCH_START(test);
+			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, Kmer, size_t>("hashmap_robinhood_doubling_noncirc_DNA", count, repeat_rate, query_frac, batch_mode, comm);
+			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_DNA", count, comm);
+		  }
+	  } else if (dna == DNA5_TYPE) {
+		  BL_BENCH_START(test);
+		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, DNA5Kmer, size_t>("hashmap_robinhood_doubling_noncirc_DNA5", count, repeat_rate, query_frac, batch_mode, comm);
+		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_DNA5", count, comm);
+	  } else if (dna == DNA16_TYPE) {
+		  BL_BENCH_START(test);
+		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, DNA16Kmer, size_t>("hashmap_robinhood_doubling_noncirc_DNA16", count, repeat_rate, query_frac, batch_mode, comm);
+		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_DNA16", count, comm);
+	  } else {
+
+		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
+	  }
+
+
+  } else if (map == ROBINHOOD_OFFSET_TYPE) {
+
+	  //================ my new hashmap offsets
+	  if (dna == DNA_TYPE) {
+		  if (full) {
+			  BL_BENCH_START(test);
+			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, FullKmer, size_t>("hashmap_robinhood_doubling_offsets_Full", count, repeat_rate, query_frac, batch_mode, comm);
+			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_Full", count, comm);
+		  } else {
+			  BL_BENCH_START(test);
+			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA", count, repeat_rate, query_frac, batch_mode, comm);
+			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA", count, comm);
+		  }
+	  } else if (dna == DNA5_TYPE) {
+		  BL_BENCH_START(test);
+		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, DNA5Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA5", count, repeat_rate, query_frac, batch_mode, comm);
+		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA5", count, comm);
+	  } else if (dna == DNA16_TYPE) {
+		  BL_BENCH_START(test);
+		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, DNA16Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA16", count, repeat_rate, query_frac, batch_mode, comm);
+		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA16", count, comm);
+	  } else {
+
+		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
+	  }
   } else {
 	  throw std::invalid_argument("UNSUPPORTED MAP TYPE");
   }
 
-#if 0
-    // experimental...
-    //================ my new hashmap non_circular
-    BL_BENCH_START(test);
-    benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, Kmer, size_t>("hashmap_robinhood_doubling_noncirc_DNA", count, repeat_rate, query_frac, comm);
-    BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_DNA", count, comm);
-
-    BL_BENCH_START(test);
-    benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, DNA5Kmer, size_t>("hashmap_robinhood_doubling_noncirc_DNA5", count, repeat_rate, query_frac, comm);
-    BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_DNA5", count, comm);
-    BL_BENCH_START(test);
-    benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, DNA16Kmer, size_t>("hashmap_robinhood_doubling_noncirc_DNA16", count, repeat_rate, query_frac, comm);
-    BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_DNA16", count, comm);
-
-    BL_BENCH_START(test);
-    benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, FullKmer, size_t>("hashmap_robinhood_doubling_noncirc_Full", count, repeat_rate, query_frac, comm);
-    BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_Full", count, comm);
-    // --------------- my new hashmap non_circular.
-
-  //================ my new hashmap offsets
-  BL_BENCH_START(test);
-  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA", count, repeat_rate, query_frac, comm);
-  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA", count, comm);
-
-  BL_BENCH_START(test);
-  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, DNA5Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA5", count, repeat_rate, query_frac, comm);
-  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA5", count, comm);
-
-  BL_BENCH_START(test);
-  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, DNA16Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA16", count, repeat_rate, query_frac, comm);
-  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA16", count, comm);
-
-  BL_BENCH_START(test);
-  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, FullKmer, size_t>("hashmap_robinhood_doubling_offsets_Full", count, repeat_rate, query_frac, comm);
-  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_Full", count, comm);
-  // --------------- my new hashmap offsets.
-#endif
 
 
 #if 0

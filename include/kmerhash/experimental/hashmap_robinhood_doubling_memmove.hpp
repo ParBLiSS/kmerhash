@@ -724,6 +724,31 @@ public:
 		reserve(lsize);  // resize down as needed
 	}
 
+	/// batch insert not using iterator
+	void insert(std::vector<value_type> && input) {
+
+#if defined(REPROBE_STAT)
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+#endif
+		size_t count = 0;
+
+		for (size_t i = 0; i < input.size(); ++i) {
+			if ( insert(std::move(input[i])).second)   //local insertion.  this requires copy construction...
+				++count;
+		}
+
+#if defined(REPROBE_STAT)
+    std::cout << "lsize " << lsize << std::endl;
+
+    std::cout << "INSERT batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+					"\tvalid=" << count << "\ttotal=" << input.size() <<
+					"\tbuckets=" << buckets <<std::endl;
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+#endif
+		reserve(lsize);  // resize down as needed
+	}
 
 	/**
 	 * @brief count the presence of a key
