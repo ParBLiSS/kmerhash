@@ -515,9 +515,15 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
         BL_BENCH_END(map, "insert_integrated", map.size());
 
     } else if (vector_mode == SORT_MODE) {
+    	std::cout << "WARNING: SORTING ONLY, NO INSERTION.  4x slower on i5-4300U hashwell with 10M DNA 31-mers even without insertion." << std::endl;
         BL_BENCH_START(map);
     	map.insert_sort(std::move(input));
         BL_BENCH_END(map, "insert_integrated", map.size());
+    } else if (vector_mode == SHUFFLE_MODE) {
+    	std::cout << "WARNING: SHUFFLING ONLY, NO INSERTION.  2x slower on i5-4300U hashwell with 10M DNA 31-mers, even without insertion." << std::endl;
+        BL_BENCH_START(map);
+    	map.insert_shuffled(std::move(input));
+        BL_BENCH_END(map, "insert_shuffled", map.size());
     } else {
         BL_BENCH_START(map);
     	map.insert(input.begin(), input.end());

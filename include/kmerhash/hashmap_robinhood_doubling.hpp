@@ -34,6 +34,7 @@
 #include "kmerhash/aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
 #include "kmerhash/math_utils.hpp"
 
+#include "io/incremental_mxx.hpp"
 
 namespace fsc {
 
@@ -754,7 +755,7 @@ public:
 
 
 
-	/// batch insert not using iterator
+	/// batch insert using sorting.  This is about 4x slower on core i5-4200U (haswell) than integrated batch insertion above, even just for sort.
 	template <typename LESS = ::std::less<key_type> >
 	void insert_sort(::std::vector<value_type> && input) {
 
@@ -772,7 +773,7 @@ public:
 		size_t local_mask = next_power_of_2(static_cast<size_t>(static_cast<float>(input.size()) / this->max_load_factor)) - 1;
 
 		// first sort by hash value.  two with same hash then are compared by key.  radix sort later?
-		std::stable_sort(input.begin(), input.end(),
+		std::sort(input.begin(), input.end(),
 				[this, &local_mask, &less](value_type const & x, value_type const & y){
 			size_t id_x = this->hash(x.first) & local_mask;
 			size_t id_y = this->hash(y.first) & local_mask;
@@ -780,6 +781,7 @@ public:
 			return (id_x < id_y) || ( (id_x == id_y) && less(x.first, y.first) );
 		});
 
+#if 0
 		// then do unique by key_value, so we have an accurate count
 		auto new_end = std::unique(input.begin(), input.end(),
 				[this](value_type const & x, value_type const & y){
@@ -831,8 +833,7 @@ public:
 			}
 		}
 
-		// set up the hash table, using only unique entries (by key value)
-
+		// set up the hash table, using only unique entries (by key value)  THIS PART PROBABLY IS CAUSING SEGV.
 		std::fill(info_container.begin(), info_container.end(), info_type::empty);
 		size_t id = 0;
 		size_t pos = 0;
@@ -868,7 +869,7 @@ public:
 				container[pos] = std::move(input[i]);
 		}
 		 lsize += input.size();
-
+#endif
 
 	#if defined(REPROBE_STAT)
 //			this->reprobes += probe_count;
@@ -891,6 +892,53 @@ public:
 		this->moves = 0;
 		this->max_moves = 0;
 #endif
+
+		reserve(lsize);  // resize down as needed
+	}
+
+
+
+
+	/// batch insert using extra memory and do shuffling
+	void insert_shuffled(::std::vector<value_type> && input) {
+
+		assert(lsize == 0);   // currently only works with empty hashmap.
+
+#if defined(REPROBE_STAT)
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
+		size_t total = input.size();
+#endif
+
+		size_t local_mask = next_power_of_2(static_cast<size_t>(static_cast<float>(input.size()) / this->max_load_factor)) - 1;
+		local_mask = ::std::max(local_mask, mask);
+
+		::std::vector<size_t> bucket_sizes;
+		bucket_sizes.reserve(local_mask);
+
+		// first compute hash values
+		::imxx::local::bucketing_impl(input, [this, &local_mask](value_type const & x){
+			return this->hash(x.first) & local_mask;
+		}, local_mask, bucket_sizes);
+		// now shuffle to bucket them together.
+
+
+
+#if defined(REPROBE_STAT)
+    std::cout << "lsize " << lsize << std::endl;
+
+    std::cout << "INSERT_I batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
+					"\tvalid=" << input.size() << "\ttotal=" << total <<
+					"\tbuckets=" << buckets <<std::endl;
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
+#endif
+
 		reserve(lsize);  // resize down as needed
 	}
 
