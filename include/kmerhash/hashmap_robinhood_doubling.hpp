@@ -35,7 +35,6 @@
 #include "kmerhash/math_utils.hpp"
 
 
-
 namespace fsc {
 
 /**
@@ -204,6 +203,8 @@ protected:
     size_t downsize_count;
     mutable size_t reprobes;   // for use as temp variable
     mutable size_t max_reprobes;
+    mutable size_t moves;
+    mutable size_t max_moves;
 
 public:
 
@@ -402,7 +403,9 @@ protected:
 #if defined(REPROBE_STAT)
     size_t count = 0;
 		this->reprobes = 0;
+		this->moves = 0;
 		this->max_reprobes = 0;
+		this->max_moves = 0;
     iterator dummy;
     bool success;
 #endif
@@ -422,11 +425,14 @@ protected:
 
 #if defined(REPROBE_STAT)
 		std::cout << "REHASH copy:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+	    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
 					"\tvalid=" << count << "\ttotal=" << std::distance(begin, end) << "\tlsize=" << lsize <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
+		this->moves = 0;
 		this->max_reprobes = 0;
+		this->max_moves = 0;
 #endif
 	}
 
@@ -444,7 +450,8 @@ public:
 	std::pair<iterator, bool> insert(value_type && vv) {
 
 		unsigned char reprobe = info_type::normal;
-
+		unsigned char probe_count = 0;
+		size_t move_count = 0;
 
 		// first check if we need to resize.
 		if (lsize >= max_load) rehash(buckets << 1);
@@ -479,22 +486,25 @@ public:
 				if (insert_pos == std::numeric_limits<size_type>::max()) {
 					insert_pos = i;  // set insert_pos to first positin of insertion.
 					success = true;
+					probe_count = j;
 					++lsize;
-				}  // subsequent "shifts" do not change insert_pos or success.
+				} else {
+					// subsequent "shifts" do not change insert_pos or success.
+					++move_count;
+				}
 
 				// then decide what to do given the swapped out distance.
 				if (reprobe == info_type::empty) {  // previously it was empty,
 					// then we can simply set.
 					container[i] = std::move(vv);
-
 					break;
 
 				} else {
 					// there was a real entry, so need to swap
 					::std::swap(container[i], vv);
-
 					// and continue
 				}
+
 			} else if (reprobe == info_container[i].info) {
 			  // check for equality, only if haven't inserted (if don't check success, there could be a lot of equality checks.
 
@@ -505,13 +515,14 @@ public:
 					// same, then we found it and need to return.
 					insert_pos = i;
 					success = false;
+					probe_count = j;
 					break;
 				}  // note that the loop terminates within here so don't need to worry about another insertion point.
 
 			}  // note that it's not possible for a match to occur with shorter current reprobe distance -
 				// that would mean same element is hashed to multiple buckets.
 
-			// increment probe distance
+			// increment probe distance from assigned slot.
 			++reprobe;
 
 			// circular array.
@@ -520,8 +531,11 @@ public:
 		assert(j < buckets);
 
 #if defined(REPROBE_STAT)
-		this->reprobes += j;
-		this->max_reprobes = std::max(this->max_reprobes, j);
+		this->reprobes += probe_count;
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(probe_count));
+
+		this->moves += move_count;
+		this->max_moves = std::max(this->max_moves, move_count);
 #endif
 		return std::make_pair(iterator(container.begin() + insert_pos, info_container.begin()+ insert_pos, info_container.end(), filter), success);
 
@@ -539,6 +553,8 @@ public:
 #if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
 #endif
 		size_t count = 0;
 		iterator dummy;
@@ -556,10 +572,13 @@ public:
     std::cout << "lsize " << lsize << std::endl;
 
     std::cout << "INSERT batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
 					"\tvalid=" << count << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
 #endif
 		reserve(lsize);  // resize down as needed
 	}
@@ -572,6 +591,8 @@ public:
 #if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
 #endif
 		size_t count = 0;
 
@@ -584,13 +605,267 @@ public:
     std::cout << "lsize " << lsize << std::endl;
 
     std::cout << "INSERT batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
 					"\tvalid=" << count << "\ttotal=" << input.size() <<
 					"\tbuckets=" << buckets <<std::endl;
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
 #endif
 		reserve(lsize);  // resize down as needed
 	}
+
+
+	/// batch insert not using iterator
+	void insert_integrated(std::vector<value_type> && input) {
+
+#if defined(REPROBE_STAT)
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
+#endif
+		size_t count = 0;
+		unsigned char reprobe = info_type::normal;
+		unsigned char probe_count = 0;
+		size_t move_count = 0;
+		size_t id;
+		size_type j;
+
+		for (size_t i = 0; i < input.size(); ++i) {
+
+			reprobe = info_type::normal;
+			probe_count = std::numeric_limits<unsigned char>::max();
+			move_count = 0;
+
+			// first check if we need to resize.
+			if (lsize >= max_load) rehash(buckets << 1);
+
+			// first get the bucket id
+			id = hash(input[i].first) & mask;  // target bucket id.
+
+			for (j = 0; j < buckets; ++j) {  // limit to 1 complete loop
+
+				// if current distance is larger than target's distance, (including empty cell), then swap.
+				assert(reprobe >= info_type::normal);  // if distance is over 128, then wrap around would get us less than normal.
+
+				if (reprobe > info_container[id].info) {
+					::std::swap(info_container[id].info, reprobe);
+
+					if (probe_count == std::numeric_limits<unsigned char>::max()) {
+						// first insertion.
+						probe_count = j;
+						++count;
+					} else {
+						// subsequent "shifts" do not change insert_pos or success.
+						++move_count;
+					}
+
+					// then decide what to do given the swapped out distance.
+					if (reprobe == info_type::empty) {  // previously it was empty,
+						// then we can simply set.
+						container[id] = std::move(input[i]);
+						break;
+
+					} else {
+						// there was a real entry, so need to swap
+						::std::swap(container[id], input[i]);
+						// and continue
+					}
+
+				} else if (reprobe == info_container[id].info) {
+				  // check for equality, only if haven't inserted (if don't check success, there could be a lot of equality checks.
+
+	//			  if (success)  std::cout << ".";
+
+					// same distance, then possibly same value.  let's check.
+					if (eq(container[id].first, input[i].first)) {  // note that a previously swapped vv would not match again and can be skipped.
+						// same, then we found it and need to return.
+						probe_count = j;
+						break;
+					}  // note that the loop terminates within here so don't need to worry about another insertion point.
+
+				}  // note that it's not possible for a match to occur with shorter current reprobe distance -
+					// that would mean same element is hashed to multiple buckets.
+
+				// increment probe distance from assigned slot.
+				++reprobe;
+
+				// circular array.
+				id = (id+1) & mask;   // for bucket == 2^x, this acts like modulus.
+			}
+			assert(j < buckets);
+
+	#if defined(REPROBE_STAT)
+			this->reprobes += probe_count;
+			this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(probe_count));
+
+			this->moves += move_count;
+			this->max_moves = std::max(this->max_moves, move_count);
+	#endif
+
+		}
+		lsize += count;
+
+#if defined(REPROBE_STAT)
+    std::cout << "lsize " << lsize << std::endl;
+
+    std::cout << "INSERT_I batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
+					"\tvalid=" << count << "\ttotal=" << input.size() <<
+					"\tbuckets=" << buckets <<std::endl;
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
+#endif
+		reserve(lsize);  // resize down as needed
+	}
+
+
+
+
+	/// batch insert not using iterator
+	template <typename LESS = ::std::less<key_type> >
+	void insert_sort(::std::vector<value_type> && input) {
+
+		assert(lsize == 0);   // currently only works with empty hashmap.
+
+#if defined(REPROBE_STAT)
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
+#endif
+		LESS less;
+
+		size_t total = input.size();
+		size_t local_mask = next_power_of_2(static_cast<size_t>(static_cast<float>(input.size()) / this->max_load_factor)) - 1;
+
+		// first sort by hash value.  two with same hash then are compared by key.  radix sort later?
+		std::stable_sort(input.begin(), input.end(),
+				[this, &local_mask, &less](value_type const & x, value_type const & y){
+			size_t id_x = this->hash(x.first) & local_mask;
+			size_t id_y = this->hash(y.first) & local_mask;
+
+			return (id_x < id_y) || ( (id_x == id_y) && less(x.first, y.first) );
+		});
+
+		// then do unique by key_value, so we have an accurate count
+		auto new_end = std::unique(input.begin(), input.end(),
+				[this](value_type const & x, value_type const & y){
+			return this->eq(x.first, y.first);
+		});
+		input.erase(new_end, input.end());
+
+		// now allocate for the new size.
+		reserve(input.size());
+
+		auto merge_comparator = [this, &less](value_type const & x, value_type const & y){
+			size_t id_x = this->hash(x.first) & this->mask;
+			size_t id_y = this->hash(y.first) & this->mask;
+
+			return (id_x < id_y) || ( (id_x == id_y) && less(x.first, y.first) );
+		};
+
+		// do one scan, and get all the break points (at (& mask) == 0).
+		if (local_mask > this->mask) { // need to condense.
+			// first get the splitters.
+			std::vector<typename ::std::vector<value_type>::iterator> iterators;
+			auto it = input.begin();
+			iterators.push_back(it);
+			++it;
+			for (; it !=  input.end(); ++it) {
+				if ((hash(it->first) & mask) == 0) {
+					// wrapped around again.
+					iterators.push_back(it);
+				}
+			}
+			iterators.push_back(input.end());
+
+			// next merge.
+			while (iterators.size() > 2) {
+				// merge pairwise.
+				for (size_t j = 0; j < iterators.size() - 2; j+=2) {
+					std::inplace_merge(iterators[j], iterators[j+1], iterators[j+2],
+					merge_comparator);
+				}
+
+				// remove every other entry from iterators.
+				std::vector<typename ::std::vector<value_type>::iterator> new_iters;
+				for (size_t j = 0; j < iterators.size() - 1; j+=2) {
+					new_iters.push_back(iterators[j]);
+				}
+				new_iters.push_back(iterators.back());
+
+				iterators.swap(new_iters);
+			}
+		}
+
+		// set up the hash table, using only unique entries (by key value)
+
+		std::fill(info_container.begin(), info_container.end(), info_type::empty);
+		size_t id = 0;
+		size_t pos = 0;
+		size_t last_id = std::numeric_limits<size_t>::max();
+		unsigned char dist = info_type::normal;
+		unsigned char last_dist = info_type::empty;
+		for (size_t i = 0; i < input.size(); ++i) {
+			id = hash(input[i].first) & mask;
+
+			if (id == last_id) {
+				// same bucket, so increment the position by 1.
+				++pos;
+				++dist;
+			} else {
+				// recall this is sorted, so "else" implies id > last_id
+				if (id > pos) {  // write to future position, no dependency to last pos.
+					pos = id;
+					dist = info_type::normal;
+
+				} else if (id == pos) {  // write to current position, which must be occupied, so need to increment by 1.
+					++pos;
+					dist = info_type::normal + 1;
+				} else {  // a previous bucket.
+					++pos;
+					dist = info_type::normal + pos - id;
+				}
+
+
+				last_id = id;
+
+			}
+				info_container[pos] = dist;
+				container[pos] = std::move(input[i]);
+		}
+		 lsize += input.size();
+
+
+	#if defined(REPROBE_STAT)
+//			this->reprobes += probe_count;
+//			this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(probe_count));
+//
+//			this->moves += move_count;
+//			this->max_moves = std::max(this->max_moves, move_count);
+	#endif
+
+
+#if defined(REPROBE_STAT)
+    std::cout << "lsize " << lsize << std::endl;
+
+    std::cout << "INSERT_I batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
+					"\tvalid=" << input.size() << "\ttotal=" << total <<
+					"\tbuckets=" << buckets <<std::endl;
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
+#endif
+		reserve(lsize);  // resize down as needed
+	}
+
 
 
 protected:
@@ -768,6 +1043,7 @@ public:
     // for iterating to find boundaries
 		size_type curr = found;
 		size_type next = (found + 1) & mask;
+		size_t move_count = 0;
 
 		//    unsigned char curr_info = info_container[curr].info;
 		unsigned char next_info = info_container[next].info;
@@ -792,6 +1068,8 @@ public:
 				// and move the current value entry.
 				container[target] = std::move(container[curr]);
 
+				++move_count;
+
 				// store the curr position as the next target of move.
 				target = curr;
 			}
@@ -805,8 +1083,12 @@ public:
 		}
 		info_container[curr].info = info_type::empty;  // set last to empty.
 		container[target] = std::move(container[curr]);
+		++move_count;
 
-
+#if defined(REPROBE_STAT)
+		this->moves += move_count;
+		this->max_moves = std::max(this->max_moves, move_count);
+#endif
 		return 1;
 	}
 
@@ -818,6 +1100,8 @@ public:
 #if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
 #endif
 
 		for (auto it = begin; it != end; ++it) {
@@ -826,11 +1110,14 @@ public:
 
 #if defined(REPROBE_STAT)
 		std::cout << "ERASE batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+	    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
 					"\tvalid=" << erased << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
 #endif
 		return erased;
 	}
@@ -843,6 +1130,8 @@ public:
 #if defined(REPROBE_STAT)
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
 #endif
 
 		for (auto it = begin; it != end; ++it) {
@@ -851,11 +1140,14 @@ public:
 
 #if defined(REPROBE_STAT)
 		std::cout << "ERASE batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+	    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
 					"\tvalid=" << erased << "\ttotal=" << ::std::distance(begin, end) <<
 					"\tbuckets=" << buckets <<std::endl;
 
 		this->reprobes = 0;
 		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
 #endif
 		return erased;
 	}

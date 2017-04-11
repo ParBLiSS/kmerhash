@@ -6,6 +6,7 @@
 #include <tuple>
 #include <string>
 #include <exception>
+#include <functional>
 
 #if 0
 #include <tommyds/tommyalloc.h>
@@ -465,18 +466,24 @@ void benchmark_google_densehash_map(std::string name, size_t const count,  size_
   BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
 }
 
+#define ITER_MODE 1
+#define INDEX_MODE 2
+#define INTEGRATED_MODE 3
+#define SORT_MODE 4
+#define SHUFFLE_MODE 5
 
 
 template <template <typename, typename, typename, typename, typename> class MAP,
 typename Kmer, typename Value>
-void benchmark_hashmap(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, bool vector_mode, ::mxx::comm const & comm) {
+void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, int vector_mode, ::mxx::comm const & comm) {
   BL_BENCH_INIT(map);
 
   std::vector<Kmer> query;
 
   BL_BENCH_START(map);
   // no transform involved.
-  MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::std::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > > map(count * 2 / repeat_rate);
+  using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::std::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
+  MAP_TYPE map(count * 2 / repeat_rate);
   BL_BENCH_END(map, "reserve", count);
 
   {
@@ -493,10 +500,94 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
     });
     BL_BENCH_END(map, "generate input", input.size());
 
-    if (vector_mode) {
+    if (vector_mode == ITER_MODE) {
+        BL_BENCH_START(map);
+    	map.insert(input.begin(), input.end());
+        BL_BENCH_END(map, "insert", map.size());
+    } else if (vector_mode == INDEX_MODE) {
         BL_BENCH_START(map);
     	map.insert(std::move(input));
         BL_BENCH_END(map, "v_insert", map.size());
+
+    } else if (vector_mode == INTEGRATED_MODE) {
+        BL_BENCH_START(map);
+    	map.insert_integrated(std::move(input));
+        BL_BENCH_END(map, "insert_integrated", map.size());
+
+    } else if (vector_mode == SORT_MODE) {
+        BL_BENCH_START(map);
+    	map.insert_sort(std::move(input));
+        BL_BENCH_END(map, "insert_integrated", map.size());
+    } else {
+        BL_BENCH_START(map);
+    	map.insert(input.begin(), input.end());
+        BL_BENCH_END(map, "insert", map.size());
+    }
+  }
+
+  BL_BENCH_START(map);
+  size_t result = 0;
+  size_t i = 0;
+  size_t max = count / query_frac;
+  for (; i < max; ++i) {
+    auto iter = map.find(query[i]);
+    result ^= (*iter).second;
+  }
+  BL_BENCH_END(map, "find", result);
+
+  BL_BENCH_START(map);
+  auto counts = map.count(query.begin(), query.end());
+  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+  BL_BENCH_END(map, "count", result);
+
+  BL_BENCH_START(map);
+  result = map.erase(query.begin(), query.end());
+  BL_BENCH_END(map, "erase", result);
+
+
+  BL_BENCH_START(map);
+  counts = map.count(query.begin(), query.end());
+  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+  BL_BENCH_END(map, "count2", result);
+
+
+  BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
+}
+
+
+
+template <template <typename, typename, typename, typename, typename> class MAP,
+typename Kmer, typename Value>
+void benchmark_hashmap(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, int vector_mode, ::mxx::comm const & comm) {
+  BL_BENCH_INIT(map);
+
+  std::vector<Kmer> query;
+
+  BL_BENCH_START(map);
+  // no transform involved.
+  using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::std::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
+  MAP_TYPE map(count * 2 / repeat_rate);
+  BL_BENCH_END(map, "reserve", count);
+
+  {
+    BL_BENCH_START(map);
+    std::vector<::std::pair<Kmer, Value> > input(count);
+    BL_BENCH_END(map, "reserve input", count);
+
+    BL_BENCH_START(map);
+    generate_input(input, count, repeat_rate);
+    query.resize(count / query_frac);
+    std::transform(input.begin(), input.begin() + input.size() / query_frac, query.begin(),
+                   [](::std::pair<Kmer, Value> const & x){
+      return x.first;
+    });
+    BL_BENCH_END(map, "generate input", input.size());
+
+    if (vector_mode == INDEX_MODE) {
+        BL_BENCH_START(map);
+    	map.insert(std::move(input));
+        BL_BENCH_END(map, "v_insert", map.size());
+
     } else {
         BL_BENCH_START(map);
     	map.insert(input.begin(), input.end());
@@ -552,9 +643,11 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 #define DNA16_TYPE 3
 
 
+
+
 /// parse the parameters.  return int map type, int DNA type, bool full, and bool canonical
 /// size_t, query frac, repeat rate.  last bool is vector mode (input is vector, not iterator.)
-std::tuple<int, int, bool, bool, size_t, size_t, size_t, bool> parse_cmdline(int argc, char** argv) {
+std::tuple<int, int, bool, bool, size_t, size_t, size_t, int> parse_cmdline(int argc, char** argv) {
 
 	int map = ROBINHOOD_TYPE;
 	int dna = DNA_TYPE;
@@ -566,7 +659,7 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, bool> parse_cmdline(int
 	  size_t query_frac = 10;
 	  size_t repeat_rate = 10;
 
-	  bool vector_mode = false;
+	  int insert_mode = INDEX_MODE;
 
 	// Wrap everything in a try block.  Do this every time,
 	// because exceptions will be thrown for problems.
@@ -598,8 +691,16 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, bool> parse_cmdline(int
 	  allowed_alphabet.push_back("dna5");
 	  allowed_alphabet.push_back("dna16");
 	  TCLAP::ValuesConstraint<std::string> allowedAlphabetVals( allowed_alphabet );
-
 	  TCLAP::ValueArg<std::string> alphabetArg("A","alphabet","alphabet to use (default dna)",false,"dna",&allowedAlphabetVals, cmd);
+
+	  std::vector<std::string> insert_modes;
+	  insert_modes.push_back("iter");
+	  insert_modes.push_back("index");
+	  insert_modes.push_back("integrated");
+	  insert_modes.push_back("sort");
+	  insert_modes.push_back("shuffle");
+	  TCLAP::ValuesConstraint<std::string> insertModeVals( insert_modes );
+	  TCLAP::ValueArg<std::string> insertModeArg("I","insert_mode","insert mode (default index)",false,"index",&insertModeVals, cmd);
 
 
 	  // Define a value argument and add it to the command line.
@@ -613,7 +714,6 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, bool> parse_cmdline(int
 	  TCLAP::ValueArg<size_t> queryArg("q","query_fraction","percent of count to use for query", false, query_frac, "size_t", cmd);
 	  TCLAP::ValueArg<size_t> repeatArg("R","repeate_rate","maximum number of repeats in data", false, repeat_rate, "size_t", cmd);
 
-	  TCLAP::SwitchArg batchArg("B", "batch_mode", "batch mode insert via vector", cmd, vector_mode);
 
 	  // Parse the argv array.
 	  cmd.parse( argc, argv );
@@ -652,7 +752,18 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, bool> parse_cmdline(int
 	  query_frac = queryArg.getValue();
 	  repeat_rate = repeatArg.getValue();
 
-	  vector_mode = batchArg.getValue();
+	  std::string insert_mode_str = insertModeArg.getValue();
+	  if (insert_mode_str == "iter") {
+		  insert_mode = ITER_MODE;
+	  } else if (insert_mode_str == "index") {
+		  insert_mode = INDEX_MODE;
+	  } else if (insert_mode_str == "integrated") {
+		  insert_mode = INTEGRATED_MODE;
+	  } else if (insert_mode_str == "sort") {
+		  insert_mode = SORT_MODE;
+	  } else if (insert_mode_str == "shuffle") {
+		  insert_mode = SHUFFLE_MODE;
+	  }
 
 	  // Do what you intend.
 
@@ -662,7 +773,7 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, bool> parse_cmdline(int
 	  exit(-1);
 	}
 
-	return std::make_tuple(map, dna, full, canonical, count, query_frac, repeat_rate, vector_mode);
+	return std::make_tuple(map, dna, full, canonical, count, query_frac, repeat_rate, insert_mode);
 }
 
 
@@ -678,7 +789,7 @@ int main(int argc, char** argv) {
 	  size_t query_frac = 10;
 	  size_t repeat_rate = 10;
 
-	  bool batch_mode = false;
+	  int batch_mode = INDEX_MODE;
 
 	  std::tie(map, dna, full, canonical, count, query_frac, repeat_rate, batch_mode) = parse_cmdline(argc, argv);
 
@@ -822,20 +933,20 @@ int main(int argc, char** argv) {
 	  if (dna == DNA_TYPE) {
 		  if (full) {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, FullKmer, size_t>("hashmap_robinhood_doubling_Full", count, repeat_rate, query_frac, batch_mode, comm);
+			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling, FullKmer, size_t>("hashmap_robinhood_doubling_Full", count, repeat_rate, query_frac, batch_mode, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_Full", count, comm);
 		  } else {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, Kmer, size_t>("hashmap_robinhood_doubling_DNA", count, repeat_rate, query_frac, batch_mode, comm);
+			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling, Kmer, size_t>("hashmap_robinhood_doubling_DNA", count, repeat_rate, query_frac, batch_mode, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_DNA", count, comm);
 		  }
 	  } else if (dna == DNA5_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, DNA5Kmer, size_t>("hashmap_robinhood_doubling_DNA5", count, repeat_rate, query_frac, batch_mode, comm);
+		  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling, DNA5Kmer, size_t>("hashmap_robinhood_doubling_DNA5", count, repeat_rate, query_frac, batch_mode, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_DNA5", count, comm);
 	  } else if (dna == DNA16_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, DNA16Kmer, size_t>("hashmap_robinhood_doubling_DNA16", count, repeat_rate, query_frac, batch_mode, comm);
+		  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling, DNA16Kmer, size_t>("hashmap_robinhood_doubling_DNA16", count, repeat_rate, query_frac, batch_mode, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_DNA16", count, comm);
 	  } else {
 
