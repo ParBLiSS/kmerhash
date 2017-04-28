@@ -24,10 +24,19 @@ if (IS_DIRECTORY ${PROJECT_SOURCE_DIR}/test/unit)
     kmerhash_add_test(kmerhash_RH FALSE unit/test_hashmap_robinhood_doubling.cpp)
     kmerhash_add_test(kmerhash_RH_NonCirc FALSE unit/test_hashmap_robinhood_doubling_noncirc.cpp)
     kmerhash_add_test(kmerhash_RH_Offsets FALSE unit/test_hashmap_robinhood_doubling_offsets.cpp)
+    kmerhash_add_test(kmerhash_RH_Prefetch FALSE unit/test_hashmap_robinhood_prefetch.cpp)
 
     # get all mpi test files from ./test
 #    FILE(GLOB MPI_TEST_FILES unit/mpi_test_*.cpp)
 #    kmerhash_add_mpi_test(${TEST_NAME} FALSE ${MPI_TEST_FILES})
 endif(IS_DIRECTORY ${PROJECT_SOURCE_DIR}/test/unit)
 
+
+# EXECUTABLES
+add_executable(projection projection_lut.cpp)
+target_link_libraries(projection ${EXTRA_LIBS})
+
+
 endif(ENABLE_TESTING)
+
+

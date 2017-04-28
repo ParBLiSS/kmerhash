@@ -23,8 +23,8 @@
  *  for robin hood hashing
  */
 
-#ifndef KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS_HPP_
-#define KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS_HPP_
+#ifndef KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS2_HPP_
+#define KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS2_HPP_
 
 #include <vector>   // for vector.
 #include <type_traits> // for is_constructible

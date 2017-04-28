@@ -32,6 +32,7 @@
 #include "kmerhash/experimental/hashmap_robinhood_doubling_noncircular.hpp"
 //#include "kmerhash/experimental/hashmap_robinhood_doubling_memmove.hpp"
 #include "kmerhash/experimental/hashmap_robinhood_doubling_offsets2.hpp"
+#include "kmerhash/hashmap_robinhood_prefetch.hpp"
 
 #include "common/kmer.hpp"
 #include "common/kmer_transform.hpp"
@@ -518,7 +519,7 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
     	std::cout << "WARNING: SORTING ONLY, NO INSERTION.  4x slower on i5-4300U hashwell with 10M DNA 31-mers even without insertion." << std::endl;
         BL_BENCH_START(map);
     	map.insert_sort(std::move(input));
-        BL_BENCH_END(map, "insert_integrated", map.size());
+        BL_BENCH_END(map, "insert_sorted", map.size());
     } else if (vector_mode == SHUFFLE_MODE) {
     	std::cout << "WARNING: SHUFFLING ONLY, NO INSERTION.  2x slower on i5-4300U hashwell with 10M DNA 31-mers, even without insertion." << std::endl;
         BL_BENCH_START(map);
@@ -643,6 +644,7 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 #define ROBINHOOD_TYPE 5
 #define ROBINHOOD_NONCIRC_TYPE 6
 #define ROBINHOOD_OFFSET_TYPE 7
+#define ROBINHOOD_PREFETCH_TYPE 8
 
 #define DNA_TYPE 1
 #define DNA5_TYPE 2
@@ -688,6 +690,7 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, int> parse_cmdline(int 
 	  allowed.push_back("robinhood");
 	  allowed.push_back("robinhood_noncirc");
 	  allowed.push_back("robinhood_offset");
+    allowed.push_back("robinhood_prefetch");
 	  TCLAP::ValuesConstraint<std::string> allowedVals( allowed );
 
 	  TCLAP::ValueArg<std::string> mapArg("m","map_type","type of map to use (default robinhood)",false,"robinhood",&allowedVals, cmd);
@@ -740,6 +743,8 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, int> parse_cmdline(int 
 		  map = ROBINHOOD_NONCIRC_TYPE;
 	  } else if (map_type == "robinhood_offset") {
 		  map = ROBINHOOD_OFFSET_TYPE;
+    } else if (map_type == "robinhood_prefetch") {
+      map = ROBINHOOD_PREFETCH_TYPE;
 	  }
 
 	  std::string alpha = alphabetArg.getValue();
@@ -1012,6 +1017,32 @@ int main(int argc, char** argv) {
 
 		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 	  }
+
+  } else if (map == ROBINHOOD_PREFETCH_TYPE) {
+
+    //================ my new hashmap offsets
+    if (dna == DNA_TYPE) {
+      if (full) {
+        BL_BENCH_START(test);
+        benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, FullKmer, size_t>("hashmap_robinhood_prefetch_Full", count, repeat_rate, query_frac, batch_mode, comm);
+        BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_prefetch_Full", count, comm);
+      } else {
+        BL_BENCH_START(test);
+        benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, Kmer, size_t>("hashmap_robinhood_prefetch_DNA", count, repeat_rate, query_frac, batch_mode, comm);
+        BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_prefetch_DNA", count, comm);
+      }
+    } else if (dna == DNA5_TYPE) {
+      BL_BENCH_START(test);
+      benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, DNA5Kmer, size_t>("hashmap_robinhood_prefetch_DNA5", count, repeat_rate, query_frac, batch_mode, comm);
+      BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_prefetch_DNA5", count, comm);
+    } else if (dna == DNA16_TYPE) {
+      BL_BENCH_START(test);
+      benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, DNA16Kmer, size_t>("hashmap_robinhood_prefetch_DNA16", count, repeat_rate, query_frac, batch_mode, comm);
+      BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_prefetch_DNA16", count, comm);
+    } else {
+
+      throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
+    }
   } else {
 	  throw std::invalid_argument("UNSUPPORTED MAP TYPE");
   }
