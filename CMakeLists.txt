@@ -165,9 +165,12 @@ OPTION(BUILD_SHARED_LIBS "Build shared libraries (.dll/.so) instead of static on
 
 
 OPTION(REPORT_REPROBES "Report reprobe counts" ON)
-if (REPORT_REPROBES)
-    add_definitions(-DREPROBE_STAT)
-endif(REPORT_REPROBES)
+function(update_reprobe_reporting varname cacheaccess varval) 
+	if (REPORT_REPROBES)
+	    add_definitions(-DREPROBE_STAT)
+	endif(REPORT_REPROBES)
+endfunction(update_reprobe_reporting varname cacheaccess varval)
+variable_watch(REPORT_REPROBES update_reprobe_reporting)
 
 
 
