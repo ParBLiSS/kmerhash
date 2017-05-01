@@ -753,7 +753,7 @@ public:
 
 		// prefetch.
     // allocate a circular buffer of size 64 (8 cache lines)
-      size_t *hashes = (size_t *)(malloc(64, LOOK_AHEAD * sizeof(size_t)));
+      size_t *hashes = (size_t *)(malloc(LOOK_AHEAD * sizeof(size_t)));
       info_type hash_pos = 0;
 
       // first preload LOOK_AHEAD number of items.
@@ -1107,7 +1107,7 @@ public:
 
     // prefetch.
     // allocate a circular buffer of size 64 (8 cache lines)
-      size_t *hashes = (size_t *)(malloc(64, LOOK_AHEAD * sizeof(size_t)));
+      size_t *hashes = (size_t *)(malloc(LOOK_AHEAD * sizeof(size_t)));
       info_type hash_pos = 0;
 
       // first preload LOOK_AHEAD number of items.
@@ -1191,7 +1191,7 @@ public:
 
     // prefetch.
     // allocate a circular buffer of size 64 (8 cache lines)
-      size_t *hashes = (size_t *)(malloc(64, LOOK_AHEAD * sizeof(size_t)));
+      size_t *hashes = (size_t *)(malloc(LOOK_AHEAD * sizeof(size_t)));
       info_type hash_pos = 0;
 
       // first preload LOOK_AHEAD number of items.
