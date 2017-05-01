@@ -228,7 +228,7 @@ class Hashmap_OA_RH_Prefetch_KmerTest : public ::testing::Test
     		typename ::std::vector<std::pair<T, uint32_t> >::iterator,
     		::bliss::kmer::transform::lex_less<T> >;
 
-    size_t iters = 10000;
+    size_t iters = 100000;
     int min_val = 2;
     int max_val = 253;
 
@@ -282,7 +282,43 @@ class Hashmap_OA_RH_Prefetch_KmerTest : public ::testing::Test
       auto new_end = std::unique(entries.begin(), entries.end(), Equal());
       entries.erase(new_end, entries.end());
 
-      std::cout << "gold size " << gold.size() <<" test size  " << test.size() << " entries " << entries.size() << std::endl;
+//      std::cout << "gold size " << gold.size() <<" test size  " << test.size() << " entries " << entries.size() << std::endl;
+
+      ASSERT_EQ(gold.size(), entries.size());
+
+      ASSERT_EQ(test.size(), gold.size());
+
+    }
+
+    template <bool canonical, typename Less, typename MAP, typename Kmer, typename Hash, typename Equal>
+    void map_insert_integrated(MAP & test,
+                    ::std::unordered_map<Kmer, uint32_t, Hash, Equal> & gold,
+                     ::std::vector<std::pair<Kmer, uint32_t> > & entries) {
+
+      test.clear();
+      gold.clear();
+      entries.clear();
+
+      if (canonical) {
+        entries.insert(entries.end(),
+                     CANONICAL_ITER(this->temp.begin(), ::bliss::kmer::transform::lex_less<Kmer>()),
+                     CANONICAL_ITER(this->temp.end(), ::bliss::kmer::transform::lex_less<Kmer>()));
+        gold.insert(entries.begin(), entries.end());
+        test.insert_integrated(entries);
+//        printf("canonical insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
+      } else {
+        entries.insert(entries.end(), this->temp.begin(), this->temp.end());
+        gold.insert(entries.begin(), entries.end());
+        test.insert_integrated(entries);
+        //        printf("raw insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
+      }
+
+      // check unique items in list.
+      std::stable_sort(entries.begin(), entries.end(), Less());
+      auto new_end = std::unique(entries.begin(), entries.end(), Equal());
+      entries.erase(new_end, entries.end());
+
+//      std::cout << "gold size " << gold.size() <<" test size  " << test.size() << " entries " << entries.size() << std::endl;
 
       ASSERT_EQ(gold.size(), entries.size());
 
@@ -456,6 +492,60 @@ class Hashmap_OA_RH_Prefetch_KmerTest : public ::testing::Test
 		ASSERT_TRUE(same);
     }
 
+    template <typename Kmer = T, bool canonical = false,
+    		template <typename> class Transform = ::bliss::transform::identity,
+			template <typename> class Hash = std::hash,
+			template <typename> class Equal = std::equal_to,
+			template <typename> class Less = std::less
+			>
+    void test_map_insert_integrated() {
+
+    	using THash = ::fsc::TransformedHash<Kmer, Hash, Transform>;
+    	using TLess = ::fsc::TransformedComparator<Kmer, Less, Transform>;
+    	using Equal1 = ::fsc::TransformedComparator<Kmer, Equal, Transform>;
+//    	using Equal2 = ::fsc::sparsehash::compare<Kmer, Equal, Transform>;
+
+
+    	auto test = make_kmer_map<Kmer, canonical, THash, Equal1>();
+		::std::unordered_map<Kmer, uint32_t, THash, Equal1> gold;
+		::std::vector<std::pair<Kmer, uint32_t> > entries;
+
+		this->map_insert_integrated<canonical, TLess>(test, gold, entries);
+
+//		test.print();
+
+		::std::vector<::std::pair<Kmer, uint32_t> > test_vals = test.to_vector();
+		::std::vector<::std::pair<Kmer, uint32_t> > gold_vals(gold.begin(), gold.end());
+
+
+		EXPECT_EQ(gold_vals.size(), test_vals.size());
+
+
+		::std::sort(test_vals.begin(), test_vals.end(), [](::std::pair<Kmer, uint32_t> const & x, ::std::pair<Kmer, uint32_t> const &y) {
+			return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
+		} );
+		::std::sort(gold_vals.begin(), gold_vals.end(), [](::std::pair<Kmer, uint32_t> const & x, ::std::pair<Kmer, uint32_t> const &y) {
+			return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
+		} );
+
+		bool same = ::std::equal(test_vals.begin(), test_vals.end(), gold_vals.begin());
+
+	  if (!same) {
+		for (size_t i = 0; i < 100; ++i) {
+			std::cout << test_vals[i].first << "->" << test_vals[i].second << "\t" << gold_vals[i].first << "->" << gold_vals[i].second << std::endl;
+//		  printf("%ld->%ld\t%ld->%ld\n", test_vals[i].first, test_vals[i].second, gold_vals[i].first, gold_vals[i].second);
+		}
+		printf("\n...\n\n");
+		for (size_t i = test_vals.size() - std::min(100UL, test_vals.size()); i < test_vals.size(); ++i) {
+			std::cout << test_vals[i].first << "->" << test_vals[i].second << "\t" << gold_vals[i].first << "->" << gold_vals[i].second << std::endl;
+//		  printf("%ld->%ld\t%ld->%ld\n", test_vals[i].first, test_vals[i].second, gold_vals[i].first, gold_vals[i].second);
+		}
+	  }
+
+
+		ASSERT_TRUE(same);
+    }
+
 
 //    template <typename Kmer = T, bool canonical = false,
 //    		template <typename> class Transform = ::bliss::transform::identity,
@@ -587,7 +677,13 @@ class Hashmap_OA_RH_Prefetch_KmerTest : public ::testing::Test
 		this->map_insert<canonical, TLess>(test, gold, entries);
 
 		// now erase half of the entries.
-		test.erase(entries.begin(), entries.begin() + entries.size() / 2);
+//		test.erase(entries.begin(), entries.begin() + entries.size() / 2);
+//	test.print();
+//	for (auto it = entries.begin(); it != entries.begin() + 2; ++it) {
+//			test.erase((*it).first);
+//			test.print();
+//		}
+  test.erase(entries.begin(), entries.begin() + entries.size() / 2);
 		for (auto it = entries.begin(); it != entries.begin() + entries.size() / 2; ++it) {
 			gold.erase((*it).first);
 		}
@@ -800,6 +896,12 @@ TYPED_TEST_P(Hashmap_OA_RH_Prefetch_KmerTest, single_map_insert)
 									  HASH_K, std::equal_to, std::less>();
 }
 
+TYPED_TEST_P(Hashmap_OA_RH_Prefetch_KmerTest, single_map_insert_integrated)
+{
+	this->template test_map_insert_integrated<TypeParam, false,
+									  ::bliss::transform::identity,
+									  HASH_K, std::equal_to, std::less>();
+}
 
 //TYPED_TEST_P(Hashmap_OA_RH_Prefetch_KmerTest, single_map_equal_range)
 //{
@@ -829,6 +931,12 @@ TYPED_TEST_P(Hashmap_OA_RH_Prefetch_KmerTest, canonical_map_insert)
 									  HASH_K, std::equal_to, std::less>();
 }
 
+TYPED_TEST_P(Hashmap_OA_RH_Prefetch_KmerTest, canonical_map_insert_integrated)
+{
+	this->template test_map_insert_integrated<TypeParam, true,
+									  ::bliss::transform::identity,
+									  HASH_K, std::equal_to, std::less>();
+}
 
 
 //TYPED_TEST_P(Hashmap_OA_RH_Prefetch_KmerTest, canonical_map_equal_range)
@@ -871,6 +979,24 @@ TYPED_TEST_P(Hashmap_OA_RH_Prefetch_KmerTest, bimolecule_map_insert)
 //  this->template test_map_insert<TypeParam, false, ((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) <= 1), THASH, EQUAL, LESS>();
 }
 
+TYPED_TEST_P(Hashmap_OA_RH_Prefetch_KmerTest, bimolecule_map_insert_integrated)
+{
+	this->template test_map_insert_integrated<TypeParam, false,
+									  ::bliss::kmer::transform::lex_less,
+									  HASH_K, std::equal_to, std::less>();
+
+	//  using SPLITTER = typename std::conditional<((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) > 1),
+//		  ::bliss::filter::TruePredicate,
+//		   ::fsc::TransformedPredicate<TypeParam, ::bliss::utils::KmerInLowerSpace, ::bliss::kmer::transform::lex_less> >::type;
+//
+//
+//  using THASH = ::fsc::TransformedHash<TypeParam, HASH_K, ::bliss::kmer::transform::lex_less >;
+//
+//  using EQUAL = ::bliss::kmer::hash::sparsehash::TransformedComparator<TypeParam, ::std::equal_to, ::bliss::kmer::transform::lex_less >;
+//  using LESS = ::fsc::TransformedComparator<TypeParam, ::std::less, ::bliss::kmer::transform::lex_less >;
+//
+//  this->template test_map_insert<TypeParam, false, ((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) <= 1), THASH, EQUAL, LESS>();
+}
 
 //TYPED_TEST_P(Hashmap_OA_RH_Prefetch_KmerTest, bimolecule_map_equal_range)
 //{
@@ -1023,14 +1149,17 @@ REGISTER_TYPED_TEST_CASE_P(Hashmap_OA_RH_Prefetch_KmerTest,
 		//						   bimolecule_multimap_equal_range,
 		//						   bimolecule_multimap_count,
 		                           single_map_insert,
+		                           single_map_insert_integrated,
 		//						   single_map_equal_range,
 								   single_map_count,
 								   single_map_erase,
 		                           canonical_map_insert,
+		                           canonical_map_insert_integrated,
 		//						   canonical_map_equal_range,
 								   canonical_map_count,
 								   canonical_map_erase,
 		                           bimolecule_map_insert,
+		                           bimolecule_map_insert_integrated,
 		//						   bimolecule_map_equal_range,
 								   bimolecule_map_count,
 								   bimolecule_map_erase
