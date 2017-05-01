@@ -29,7 +29,7 @@
 #include "kmerhash/hashmap_linearprobe_doubling.hpp"
 #include "kmerhash/hashmap_robinhood_doubling.hpp"
 // experimental
-#include "kmerhash/experimental/hashmap_robinhood_doubling_noncircular.hpp"
+#include "kmerhash/hashmap_robinhood_noncircular3.hpp"
 //#include "kmerhash/experimental/hashmap_robinhood_doubling_memmove.hpp"
 #include "kmerhash/experimental/hashmap_robinhood_doubling_offsets2.hpp"
 #include "kmerhash/hashmap_robinhood_prefetch.hpp"

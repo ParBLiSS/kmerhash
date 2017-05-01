@@ -17,7 +17,7 @@
 
 // include google test
 #include <gtest/gtest.h>
-#include "kmerhash/experimental/hashmap_robinhood_doubling_noncircular.hpp"
+#include "kmerhash/hashmap_robinhood_noncircular3.hpp"
 
 #include <string>
 #include <unordered_map>
