@@ -849,8 +849,44 @@ public:
     bucket_id_type i_max;
     bool no_shift;
 
+
+    // ================ PREFETCH.
+    // allocate a circular buffer of size 64 (8 cache lines)
+      size_t *hashes = (size_t *)(malloc(LOOK_AHEAD * sizeof(size_t)));
+      info_type hash_pos = 0;
+
+      // first preload LOOK_AHEAD number of items.
+      size_t block1_max = std::min(static_cast<size_t>(LOOK_AHEAD), input.size());  // if fewer than LOOK_AHEAD, no point in using?
+      size_t block2_max = (input.size() > LOOK_AHEAD) ? (input.size() - LOOK_AHEAD) : 0;  // if fewer than LOOK_AHEAD, no block 2.
+      size_t block3_min = block2_max;  // may not need to allocate this...
+
+      // try _MM_HINT_NT and _MM_HINT_T0.  try simple loop first.
+
+      // ====  prefetch.  also save the hash function.
+      for (size_t j = 0; j < block1_max; ++j) {
+        // compute hash and store it.
+        hashes[j] = hash(input[j].first);  // no need to prefetch here - sequential access.
+
+        id = hashes[j] & mask;  //
+
+        // prefetch info container
+        _mm_prefetch(&(info_container[id]), _MM_HINT_T0);
+        // prefetch container
+        _mm_prefetch(&(container[id]), _MM_HINT_T0);
+        // adding a second does not help/
+        //_mm_prefetch(&(container[id + (64 / sizeof(value_type))]), _MM_HINT_NTA);
+
+      }
+
+      // =================  PROCESS MAIN BLOCK
+
+
+      size_t hashes_mask = LOOK_AHEAD - 1;
+
+      // ------------- INSERT
+
     // iterate based on size between rehashes
-    for (size_t j = 0; j < input.size(); ++j) {
+    for (size_t j = 0; j < block2_max; ++j) {
 
       // === same code as in insert(1)..
 
@@ -858,17 +894,20 @@ public:
       if (lsize >= max_load) rehash(buckets << 1);
 
       // first get the bucket id
-      vv = input[j];
-      no_shift = false;
-
-      id = hash(vv.first) & mask;  // target bucket id.
+      hash_pos = j & hashes_mask;
+      id = hashes[hash_pos] & mask;  // target bucket id.
 
       //=== prefetch
-      if ((j + LOOK_AHEAD) < input.size()) {
-        id_la = hash(input[j + LOOK_AHEAD].first) & mask;
-        _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
-        _mm_prefetch(&(container[id_la]), _MM_HINT_T0);
-      }
+      hashes[hash_pos] = hash(input[j + LOOK_AHEAD].first);
+      id_la = hashes[hash_pos] & mask;
+      _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
+      _mm_prefetch(&(container[id_la]), _MM_HINT_T0);
+      //_mm_prefetch(&(container[id_la + (64 / sizeof(value_type))]), _MM_HINT_NTA);
+
+      //==== now do some work to insert.
+      // first get the bucket id
+      vv = input[j];
+      no_shift = false;
 
       reprobe = info_normal;
 
@@ -901,6 +940,11 @@ public:
           ::std::swap(container[i], vv);
 
           ++lsize;
+
+          // prefetch container.
+          for (size_t l = sizeof(value_type); l <= 64; l += sizeof(value_type)) {
+            _mm_prefetch(&(container[i + l]), _MM_HINT_T0);
+          }
 
 
   #if defined(REPROBE_STAT)
@@ -936,6 +980,7 @@ public:
         continue;
       }
 
+      // --------- SHIFT
         // if here, then swapped and breaked. reprobe and i need to advance 1.
         ++reprobe;
         ++i;
@@ -985,6 +1030,155 @@ public:
         }
 
 
+#if defined(REPROBE_STAT)
+    this->moves += move_count;
+    this->max_moves = std::max(this->max_moves, move_count);
+    this->shifts += (i - orig_i);
+    this->max_shifts = std::max(this->max_shifts, (i-orig_i));
+#endif
+    }
+
+        // ===========  LAST PART ==============.
+
+        // ----------  INSERT
+
+    for (size_t j = block3_min; j < input.size(); ++j) {
+          // === same code as in insert(1)..
+
+          // first check if we need to resize.
+          if (lsize >= max_load) rehash(buckets << 1);
+
+          // first get the bucket id
+          hash_pos = j & hashes_mask;
+          id = hashes[hash_pos] & mask;  // target bucket id.
+
+
+
+          //==== now do some work to insert.
+          // first get the bucket id
+          vv = input[j];
+          no_shift = false;
+
+
+          reprobe = info_normal;
+
+          i = get_bucket_id(id);
+          i_max = i + static_cast<bucket_id_type>(std::numeric_limits<info_type>::max()) + 1;
+          i_max = std::min(i_max, static_cast<bucket_id_type>(info_container.size()));
+
+          // first take care of inserting vv, search for the first entry of the next bucket, reprobe > target_info.
+          // if found duplicate before that or empty slot, then finish.
+          // scan through at most max of info_type.
+          for (; i < i_max; ++i, ++reprobe) {  // limit to max info_type reprobe positions for vv insert.
+
+            curr_info = info_container[i];
+
+            if (is_empty(curr_info)) {
+              // if current position is empty, then insert here and return.  no shifting is needed.
+              info_container[i] = reprobe;
+              container[i] = vv;
+              ++lsize;
+
+      #if defined(REPROBE_STAT)
+          this->reprobes += get_distance(reprobe);
+          this->max_reprobes = std::max(this->max_reprobes, get_distance(reprobe));
+      #endif
+              no_shift = true;
+              break;
+            } else if (reprobe > curr_info) {
+              // if current position has less than reprobe dist, then swap
+              ::std::swap(info_container[i], reprobe);
+              ::std::swap(container[i], vv);
+
+              ++lsize;
+
+              // prefetch container.
+              for (size_t l = sizeof(value_type); l <= 64; l += sizeof(value_type)) {
+                _mm_prefetch(&(container[i + l]), _MM_HINT_T0);
+              }
+
+      #if defined(REPROBE_STAT)
+          this->reprobes += get_distance(info_container[i]);
+          this->max_reprobes = std::max(this->max_reprobes, get_distance(info_container[i]));
+      #endif
+              break;
+            } else if (reprobe == curr_info) {
+              // if current position is equal to reprobe, then check for equality.
+
+              // same distance, then possibly same value.  let's check.
+              // note that a previously swapped vv would not match again and can be skipped.
+              if (eq(container[i].first, vv.first)) {
+                // same, then we found it and need to return.
+      #if defined(REPROBE_STAT)
+          this->reprobes += get_distance(reprobe);
+          this->max_reprobes = std::max(this->max_reprobes, get_distance(reprobe));
+      #endif
+
+                no_shift = true;
+                break;
+              }
+            }  // else reprobe < info_container[i], increase reprobe and i and try again.
+
+          }
+
+          if (i == i_max) {
+            std::cout << j << ", " << i << ", " << i_max << std::endl;
+            throw std::logic_error("ERROR: searching for insertion position reached max reprobe distance (128)");
+          }
+
+          if (no_shift) {   // skip rest of loop if no need to shift.
+            continue;
+          }
+
+          // --------- SHIFT
+
+            // if here, then swapped and breaked. reprobe and i need to advance 1.
+            ++reprobe;
+            ++i;
+
+        #if defined(REPROBE_STAT)
+            size_t move_count = 0;
+            bucket_id_type orig_i = i;
+        #endif
+
+            // now shift.  note that since we are incrementing reprobe, consecutive entries for the same bucket
+            // when shifting would have reprobe == info_container[i], until changing bucket.
+            // therefore swap only occurs at bucket bundaries.
+            // this MAY save some memory access for now, but story may be different we are bandwidth bound (and hardware prefetching becomes important).
+
+            // this shift may go all the way to end of buckets.  no wrapping around.
+            i_max = static_cast<bucket_id_type>(info_container.size());
+            for (; i < i_max; ++i, ++reprobe) {  // limit to max info_type reprobe positions for vv insert.
+
+              curr_info = info_container[i];
+
+              if (is_empty(curr_info)) {
+                // if current position is empty, then insert here and stop.
+                info_container[i] = reprobe;
+                container[i] = vv;
+
+        #if defined(REPROBE_STAT)
+                ++move_count;
+        #endif
+
+                break;
+              } else if (reprobe > curr_info) {
+                // if current position has less than reprobe dist (boundary), then swap
+                ::std::swap(info_container[i], reprobe);
+                ::std::swap(container[i], vv);
+
+        #if defined(REPROBE_STAT)
+                ++move_count;
+        #endif
+                // continue until reaching an empty slot
+              } // since we are just shifting and swapping at boundaries, in the else cluase we have reprobe == info_container[i] and never reprobe < info_container[i]
+                // we should also never get the case of duplicate entries,
+            }
+
+            if (i == i_max) {
+              std::cout << i << ", " << i_max << std::endl;
+              throw std::logic_error("ERROR: shifting entries to the right ran out of room in container.");
+            }
 
   #if defined(REPROBE_STAT)
       this->moves += move_count;
@@ -1128,7 +1322,7 @@ public:
         // prefetch info container
         _mm_prefetch(&(info_container[id]), _MM_HINT_T0);
         // prefetch container
-        _mm_prefetch(&(container[id]), _MM_HINT_T0);
+        _mm_prefetch(&(container[id]), _MM_HINT_NTA);
       }
 
     size_t hashes_mask = LOOK_AHEAD - 1;
@@ -1147,7 +1341,7 @@ public:
       hashes[hash_pos] = hash((*it2).first);
       id_la = hashes[hash_pos] & mask;
       _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
-      _mm_prefetch(&(container[id_la]), _MM_HINT_T0);
+      _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
 
       counts[i] = find_failed(find_pos_with_hint((*it).first, id)) ? 0 : 1;
     }
@@ -1212,7 +1406,7 @@ public:
         // prefetch info container
         _mm_prefetch(&(info_container[id]), _MM_HINT_T0);
         // prefetch container
-        _mm_prefetch(&(container[id]), _MM_HINT_T0);
+        _mm_prefetch(&(container[id]), _MM_HINT_NTA);
       }
 
     size_t hashes_mask = LOOK_AHEAD - 1;
@@ -1231,7 +1425,7 @@ public:
       hashes[hash_pos] = hash(*it2);
       id_la = hashes[hash_pos] & mask;
       _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
-      _mm_prefetch(&(container[id_la]), _MM_HINT_T0);
+      _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
 
       counts[i] = find_failed(find_pos_with_hint(*it, id)) ? 0 : 1;
     }
