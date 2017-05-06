@@ -170,7 +170,7 @@ protected:
 	//=========  end INFO_TYPE definitions.
 
     // filter
-    struct empty_deleted_filter {
+    struct valid_entry_filter {
     	inline bool operator()(info_type const & x) { return x >= info_normal; };
     };
 
@@ -185,32 +185,35 @@ public:
     using const_reference	    = typename container_type::const_reference;
     using pointer				= typename container_type::pointer;
     using const_pointer		    = typename container_type::const_pointer;
-    using iterator              = ::bliss::iterator::aux_filter_iterator<typename container_type::iterator, typename info_container_type::iterator, empty_deleted_filter>;
-    using const_iterator        = ::bliss::iterator::aux_filter_iterator<typename container_type::const_iterator, typename info_container_type::const_iterator, empty_deleted_filter>;
+    using iterator              = ::bliss::iterator::aux_filter_iterator<typename container_type::iterator, typename info_container_type::iterator, valid_entry_filter>;
+    using const_iterator        = ::bliss::iterator::aux_filter_iterator<typename container_type::const_iterator, typename info_container_type::const_iterator, valid_entry_filter>;
     using size_type             = typename container_type::size_type;
     using difference_type       = typename container_type::difference_type;
 
 protected:
 
     //=========  start BUCKET_ID_TYPE definitions.
-    // difference type should be signed.  use the sign bit for indication of success/failure of insertion
+    // difference type should be signed.
+    //  use the sign bit for indication of success/failure of insertion.
+    // failed insert (MSB set) and successful find have same meaning.
+    //  remaining bits indicate insertion position.
     using bucket_id_type = size_t;
     static constexpr bucket_id_type bid_mask = ~(static_cast<bucket_id_type>(0)) >> 1;   // lower bits set.
-    static constexpr bucket_id_type bid_flag = ~(bid_mask);
+    static constexpr bucket_id_type bid_exists = 1UL << 63;
     // failed is speial, correspond to all bits set (max distnace failed).  not using 0x800000... because that indicates failed inserting due to occupied.
     static constexpr bucket_id_type bid_failed = ~(static_cast<bucket_id_type>(0));
 
-	inline bool insert_success(bucket_id_type const & x) const {
-		return x <= bid_mask;
-	}
-	inline bool find_failed(bucket_id_type const & x) const {
+	inline bool exists(bucket_id_type const & x) const {
 		return x > bid_mask;
 	}
+  inline bool missing(bucket_id_type const & x) const {
+    return x <= bid_mask;
+  }
 	inline bucket_id_type get_bucket_id(bucket_id_type const & x) const {
 		return x & bid_mask;
 	}
-	inline bucket_id_type get_duplicated_bucket_id(bucket_id_type const & x) const {
-		return x | bid_flag;
+	inline bucket_id_type mark_as_existing(bucket_id_type const & x) const {
+		return x | bid_exists;
 	}
     //=========  end BUCKET_ID_TYPE definitions.
 
@@ -237,7 +240,7 @@ protected:
 #endif
 
 
-    empty_deleted_filter filter;
+    valid_entry_filter filter;
     hasher hash;
     key_equal eq;
 
@@ -403,34 +406,36 @@ public:
     // check it's power of 2
     size_type n = next_power_of_2(b);
 
-	if ((n != buckets) && (lsize < (max_load_factor * n))) {
+    if ((n != buckets) && (lsize < (max_load_factor * n))) {
 
-		container_type tmp(n + std::numeric_limits<info_type>::max() + 1);
-		info_container_type tmp_info(n + std::numeric_limits<info_type>::max() + 1, info_empty);
+      container_type tmp(n + std::numeric_limits<info_type>::max() + 1);
+      info_container_type tmp_info(n + std::numeric_limits<info_type>::max() + 1, info_empty);
 
-		if (n > buckets) {
-			this->copy_upsize(tmp, tmp_info, n);
-#if defined(REPROBE_STAT)
-			++upsize_count;
-#endif
-		} else {
-			this->copy_downsize(tmp, tmp_info, n);
-#if defined(REPROBE_STAT)
-			++downsize_count;
-#endif
-		}
+      if (lsize > 0) {
+        if (n > buckets) {
+          this->copy_upsize(tmp, tmp_info, n);
+    #if defined(REPROBE_STAT)
+          ++upsize_count;
+    #endif
+        } else {
+          this->copy_downsize(tmp, tmp_info, n);
+    #if defined(REPROBE_STAT)
+          ++downsize_count;
+    #endif
+        }
+      }
 
-		// new size and mask
-		buckets = n;
-		mask = n - 1;
+      // new size and mask
+      buckets = n;
+      mask = n - 1;
 
-		min_load = static_cast<size_type>(static_cast<float>(n) * min_load_factor);
-		max_load = static_cast<size_type>(static_cast<float>(n) * max_load_factor);
+      min_load = static_cast<size_type>(static_cast<float>(n) * min_load_factor);
+      max_load = static_cast<size_type>(static_cast<float>(n) * max_load_factor);
 
-		// swap in.
-		container.swap(tmp);
-		info_container.swap(tmp_info);
-	}
+      // swap in.
+      container.swap(tmp);
+      info_container.swap(tmp_info);
+    }
   }
 
 
@@ -573,7 +578,7 @@ protected:
 		this->max_reprobes = std::max(this->max_reprobes, get_distance(reprobe));
 #endif
 
-					return get_duplicated_bucket_id(i);   // indicate that this is a duplicate.
+					return mark_as_existing(i);   // indicate that this is a duplicate.
 				}
 			}  // else reprobe < target_info[i], increase reprobe and i and try again.
 
@@ -686,8 +691,8 @@ public:
 		bucket_id_type id = hash(vv.first) & mask;  // target bucket id.
 
 		id = insert_with_hint(container, info_container, id, id, vv);
-		bool success = insert_success(id);
-		size_t dist = get_bucket_id(id);
+		bool success = missing(id);
+		size_t bid = get_bucket_id(id);
 
 		if (success) ++lsize;
 
@@ -695,7 +700,7 @@ public:
 		print_reprobe_stats("INSERT 1", 1, (success ? 1 : 0));
 #endif
 
-		return std::make_pair(iterator(container.begin() + dist, info_container.begin()+ dist, info_container.end(), filter), success);
+		return std::make_pair(iterator(container.begin() + bid, info_container.begin()+ bid, info_container.end(), filter), success);
 
 	}
 
@@ -725,7 +730,7 @@ public:
 			// first get the bucket id
 			id = hash((*it).first) & mask;  // target bucket id.
 
-			if (insert_success(insert_with_hint(container, info_container, id, id, *it)))
+			if (missing(insert_with_hint(container, info_container, id, id, *it)))
 				++lsize;
 		}
 
@@ -801,7 +806,7 @@ public:
       // adding a second does not help/
       //_mm_prefetch(&(container[id_la + (64 / sizeof(value_type))]), _MM_HINT_T0);
 
-			if (insert_success(insert_with_hint(container, info_container, id, id, input[i])))
+			if (missing(insert_with_hint(container, info_container, id, id, input[i])))
 				++lsize;
 		}
 
@@ -815,7 +820,7 @@ public:
       hash_pos = i & hashes_mask;
       id = hashes[hash_pos] & mask;  // target bucket id.
 
-      if (insert_success(insert_with_hint(container, info_container, id, id, input[i])))
+      if (missing(insert_with_hint(container, info_container, id, id, input[i])))
         ++lsize;
 		}
 
@@ -1251,7 +1256,7 @@ protected:
     this->reprobes += get_distance(reprobe);
     this->max_reprobes = std::max(this->max_reprobes, get_distance(reprobe));
 #endif
-        return get_duplicated_bucket_id(i);
+        return i;
       } else if (reprobe == curr_info) {
         // possibly matched.  compare.
         if (eq(k, container[i].first)) {
@@ -1259,7 +1264,7 @@ protected:
     this->reprobes += get_distance(reprobe);
     this->max_reprobes = std::max(this->max_reprobes, get_distance(reprobe));
 #endif
-          return i;
+          return mark_as_existing(i);
         }
       } // else still traversing a previous bucket.
     }
@@ -1270,8 +1275,8 @@ protected:
 #endif
 
     // reaching here means it was not found.
-    return get_duplicated_bucket_id(i);
-
+    //return i;
+    throw std::logic_error("ERROR: exhausted search range without finding a match.  THIS SHOULD NOT HAPPEN");
   }
 
 public:
@@ -1281,7 +1286,7 @@ public:
 	 */
 	size_type count( key_type const & k ) const {
 
-		return find_failed(find_pos(k)) ? 0 : 1;
+		return exists(find_pos(k)) ? 1 : 0;
 
 	}
 
@@ -1343,7 +1348,7 @@ public:
       _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
       _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
 
-      counts[i] = find_failed(find_pos_with_hint((*it).first, id)) ? 0 : 1;
+      counts[i] = exists(find_pos_with_hint((*it).first, id)) ? 1 : 0;
     }
 
     for (Iter it = begin + block3_min; it != end; ++it, ++i) {
@@ -1353,14 +1358,8 @@ public:
       hash_pos = i & hashes_mask;
       id = hashes[hash_pos] & mask;  // target bucket id.
 
-      counts[i] = find_failed(find_pos_with_hint((*it).first, id)) ? 0 : 1;
+      counts[i] = exists(find_pos_with_hint((*it).first, id)) ? 1 : 0;
     }
-
-//		size_t i = 0;
-//		for (auto it = begin; it != end; ++it, ++i) {
-//
-//			counts[i] = find_failed(find_pos((*it).first)) ? 0 : 1;
-//		}
 
 #if defined(REPROBE_STAT)
 		print_reprobe_stats("COUNT ITER", std::distance(begin, end), counts.size());
@@ -1427,7 +1426,7 @@ public:
       _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
       _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
 
-      counts[i] = find_failed(find_pos_with_hint(*it, id)) ? 0 : 1;
+      counts[i] = exists(find_pos_with_hint((*it).first, id)) ? 1 : 0;
     }
 
     for (Iter it = begin + block3_min; it != end; ++it, ++i) {
@@ -1437,14 +1436,10 @@ public:
       hash_pos = i & hashes_mask;
       id = hashes[hash_pos] & mask;  // target bucket id.
 
-      counts[i] = find_failed(find_pos_with_hint(*it, id)) ? 0 : 1;
+      counts[i] = exists(find_pos_with_hint((*it).first, id)) ? 1 : 0;
     }
 
 
-//		size_t i = 0;
-//		for (auto it = begin; it != end; ++it, ++i) {
-//			counts[i] = find_failed(find_pos(*it)) ? 0 : 1;
-//		}
 
 #if defined(REPROBE_STAT)
 		print_reprobe_stats("COUNT ITER", std::distance(begin, end), counts.size());
@@ -1461,11 +1456,11 @@ public:
 
 		bucket_id_type idx = find_pos(k);
 
-		if (find_failed(idx))
-			return iterator(container.end(), info_container.end(), filter);
+		if (exists(idx))
+      return iterator(container.begin() + get_bucket_id(idx), info_container.begin()+ get_bucket_id(idx),
+          info_container.end(), filter);
 		else
-			return iterator(container.begin() + get_bucket_id(idx), info_container.begin()+ get_bucket_id(idx),
-					info_container.end(), filter);
+      return iterator(container.end(), info_container.end(), filter);
 
 	}
 
@@ -1476,17 +1471,17 @@ public:
 
 		bucket_id_type idx = find_pos(k);
 
-		if (find_failed(idx))
-			return const_iterator(container.cend(), info_container.cend(), filter);
+		if (exists(idx))
+      return const_iterator(container.cbegin() + get_bucket_id(idx), info_container.cbegin()+ get_bucket_id(idx),
+          info_container.cend(), filter);
 		else
-			return const_iterator(container.cbegin() + get_bucket_id(idx), info_container.cbegin()+ get_bucket_id(idx),
-					info_container.cend(), filter);
+      return const_iterator(container.cend(), info_container.cend(), filter);
 
 
 	}
 
 	/**
-	 * @brief.  updates current value.  behaves like insert, but overwrites the existing.
+	 * @brief.  updates current value.  behaves like insert, but overwrites the exists.
 	 */
 	iterator update(key_type const & k, mapped_type const & val) {
 		// find and update.  if not present, insert.
@@ -1513,15 +1508,15 @@ protected:
 
 		bucket_id_type found = find_pos(k);
 
-		if (find_failed(found)) {  // did not find.   Found means "found >= 0".
+		if (missing(found)) {  // did not find.
 			return 0;
 		}
 
 		//========= if next is empty, just mark current as empty as well.
 
 		--lsize;   // reduce the size by 1.
-		bucket_id_type curr = found;
-		bucket_id_type next = found + static_cast<bucket_id_type>(1);
+		bucket_id_type curr = get_bucket_id(found);
+		bucket_id_type next = curr + static_cast<bucket_id_type>(1);
 
 
 		//=========== CHECK IF WE NEED TO SHIFT
@@ -1538,7 +1533,7 @@ protected:
 #endif
 
 		// otherwise, save the position where we are deleting - we will move the last entry of the bucket to here.
-		bucket_id_type target = found;
+		bucket_id_type target = get_bucket_id(found);
 
 		// for iterating to find boundaries
 		info_type next_info;
@@ -1680,7 +1675,7 @@ constexpr typename hashmap_robinhood_prefetch<Key, T, Hash, Equal, Allocator>::i
 template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
 constexpr typename hashmap_robinhood_prefetch<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_prefetch<Key, T, Hash, Equal, Allocator>::bid_failed;
 template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
-constexpr typename hashmap_robinhood_prefetch<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_prefetch<Key, T, Hash, Equal, Allocator>::bid_flag;
+constexpr typename hashmap_robinhood_prefetch<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_prefetch<Key, T, Hash, Equal, Allocator>::bid_exists;
 template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
 constexpr typename hashmap_robinhood_prefetch<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_prefetch<Key, T, Hash, Equal, Allocator>::bid_mask;
 

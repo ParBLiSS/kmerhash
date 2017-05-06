@@ -143,7 +143,7 @@ protected:
     using info_container_type	= ::std::vector<info_type, Allocator>;
 
     // filter
-    struct empty_deleted_filter {
+    struct valid_entry_filter {
     	bool operator()(info_type const & x) { return x.is_normal(); };
     };
 
@@ -154,8 +154,8 @@ public:
     using const_reference	    = typename container_type::const_reference;
     using pointer				= typename container_type::pointer;
     using const_pointer		    = typename container_type::const_pointer;
-    using iterator              = ::bliss::iterator::aux_filter_iterator<typename container_type::iterator, typename info_container_type::iterator, empty_deleted_filter>;
-    using const_iterator        = ::bliss::iterator::aux_filter_iterator<typename container_type::const_iterator, typename info_container_type::const_iterator, empty_deleted_filter>;
+    using iterator              = ::bliss::iterator::aux_filter_iterator<typename container_type::iterator, typename info_container_type::iterator, valid_entry_filter>;
+    using const_iterator        = ::bliss::iterator::aux_filter_iterator<typename container_type::const_iterator, typename info_container_type::const_iterator, valid_entry_filter>;
     using size_type             = typename container_type::size_type;
     using difference_type       = typename container_type::difference_type;
 
@@ -170,7 +170,7 @@ protected:
     mutable float max_load_factor;
 
 
-    empty_deleted_filter filter;
+    valid_entry_filter filter;
     hasher hash;
     key_equal eq;
 
