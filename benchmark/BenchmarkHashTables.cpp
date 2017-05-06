@@ -64,22 +64,36 @@
 // results:  google dense hash is fastest.
 // question is how to make google dense hash support multimap style operations?  vector is expensive...
 
-
+#define LOOK_AHEAD 32
 
 template <typename Kmer, typename Value>
 void generate_input(std::vector<::std::pair<Kmer, Value> > & output, size_t const count, size_t const repeats = 10, bool canonical = false) {
-  output.resize(count);
+  output.reserve(count);
 
   size_t freq;
+  //typename Kmer::KmerWordType val;
+  Kmer k, kr;
 
   srand(23);
   for (size_t i = 0; i < count; ++i) {
+
+//    if ((i + LOOK_AHEAD) < count) {
+//      _mm_prefetch(&(output[i]), _MM_HINT_T0);
+//    }
+
     for (size_t j = 0; j < Kmer::nWords; ++j) {
-      output[i].first.getDataRef()[j] = static_cast<typename Kmer::KmerWordType>(static_cast<long>(rand()) << 32) ^ static_cast<long>(rand());
+      //val = static_cast<typename Kmer::KmerWordType>(static_cast<long>(rand()) << 32) ^ static_cast<long>(rand());
+      k.getDataRef()[j] = static_cast<typename Kmer::KmerWordType>(static_cast<long>(rand()) << 32) ^ static_cast<long>(rand());
     }
-    output[i].first.sanitize();
-    //output[i].second = static_cast<Value>(static_cast<long>(rand()) << 32) ^ static_cast<long>(rand());
-    output[i].second = i;
+    k.sanitize();
+
+    // do the reverse complement if desired.
+    if (canonical) {
+      kr = k.reverse_complement();
+      k = (k < kr) ? k : kr;
+    }
+
+    output.emplace_back(k, i);
 
     // average repeat/2 times inserted.
     freq = rand() % repeats;
@@ -88,24 +102,18 @@ void generate_input(std::vector<::std::pair<Kmer, Value> > & output, size_t cons
     	if (i+1 < count) {
     		++i;
 
-            output[i] = output[i-1];
-            //output[i].second = static_cast<Value>(static_cast<long>(rand()) << 32) ^ static_cast<long>(rand());
-            output[i].second = i;
+    		output.emplace_back(k, i);
     	}
     }
 
   }
 
-  if (canonical) {
-	  for (size_t i = 0; i < output.size(); ++i) {
-		  Kmer revcomp = output[i].first.reverse_complement();
-		  if (revcomp < output[i].first) output[i].first = revcomp;
-	  }
-  }
-
   // do random shuffling to avoid consecutively identical items.
   std::random_shuffle(output.begin(), output.end());
 }
+
+
+
 
 template <typename Kmer, typename Value>
 void benchmark_unordered_map(std::string name, size_t const count, size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
@@ -120,7 +128,8 @@ void benchmark_unordered_map(std::string name, size_t const count, size_t const 
 
   {
     BL_BENCH_START(map);
-    std::vector<::std::pair<Kmer, Value> > input(count);
+    std::vector<::std::pair<Kmer, Value> > input;
+    input.reserve(count);
     BL_BENCH_END(map, "reserve input", count);
 
     BL_BENCH_START(map);
@@ -192,7 +201,8 @@ void benchmark_densehash_map(std::string name, size_t const count,  size_t const
 
   {
     BL_BENCH_START(map);
-    std::vector<::std::pair<Kmer, Value> > input(count);
+    std::vector<::std::pair<Kmer, Value> > input;
+    input.reserve(count);
     BL_BENCH_END(map, "reserve input", count);
 
     BL_BENCH_START(map);
@@ -264,7 +274,8 @@ void benchmark_densehash_full_map(std::string name, size_t const count,  size_t 
 
   {
     BL_BENCH_START(map);
-    std::vector<::std::pair<Kmer, Value> > input(count);
+    std::vector<::std::pair<Kmer, Value> > input;
+    input.reserve(count);
     BL_BENCH_END(map, "reserve input", count);
 
     BL_BENCH_START(map);
@@ -334,7 +345,8 @@ void benchmark_flat_hash_map(std::string name, size_t const count,  size_t const
 
   {
     BL_BENCH_START(map);
-    std::vector<::std::pair<Kmer, Value> > input(count);
+    std::vector<::std::pair<Kmer, Value> > input;
+    input.reserve(count);
     BL_BENCH_END(map, "reserve input", count);
 
     BL_BENCH_START(map);
@@ -413,7 +425,8 @@ void benchmark_google_densehash_map(std::string name, size_t const count,  size_
 
   {
     BL_BENCH_START(map);
-    std::vector<::std::pair<Kmer, Value> > input(count);
+    std::vector<::std::pair<Kmer, Value> > input;
+    input.reserve(count);
     BL_BENCH_END(map, "reserve input", count);
 
     BL_BENCH_START(map);
@@ -489,7 +502,8 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
 
   {
     BL_BENCH_START(map);
-    std::vector<::std::pair<Kmer, Value> > input(count);
+    std::vector<::std::pair<Kmer, Value> > input;
+    input.reserve(count);
     BL_BENCH_END(map, "reserve input", count);
 
     BL_BENCH_START(map);
@@ -532,30 +546,30 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
     }
   }
 
-  BL_BENCH_START(map);
-  size_t result = 0;
-  size_t i = 0;
-  size_t max = count / query_frac;
-  for (; i < max; ++i) {
-    auto iter = map.find(query[i]);
-    result ^= (*iter).second;
-  }
-  BL_BENCH_END(map, "find", result);
+//  BL_BENCH_START(map);
+//  size_t result = 0;
+//  size_t i = 0;
+//  size_t max = count / query_frac;
+//  for (; i < max; ++i) {
+//    auto iter = map.find(query[i]);
+//    result ^= (*iter).second;
+//  }
+//  BL_BENCH_END(map, "find", result);
+//
+//  BL_BENCH_START(map);
+//  auto counts = map.count(query.begin(), query.end());
+//  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+//  BL_BENCH_END(map, "count", result);
 
-  BL_BENCH_START(map);
-  auto counts = map.count(query.begin(), query.end());
-  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-  BL_BENCH_END(map, "count", result);
-
-  BL_BENCH_START(map);
-  result = map.erase(query.begin(), query.end());
-  BL_BENCH_END(map, "erase", result);
-
-
-  BL_BENCH_START(map);
-  counts = map.count(query.begin(), query.end());
-  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-  BL_BENCH_END(map, "count2", result);
+//  BL_BENCH_START(map);
+//  result = map.erase(query.begin(), query.end());
+//  BL_BENCH_END(map, "erase", result);
+//
+//
+//  BL_BENCH_START(map);
+//  counts = map.count(query.begin(), query.end());
+//  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+//  BL_BENCH_END(map, "count2", result);
 
 
   BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
@@ -578,7 +592,8 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 
   {
     BL_BENCH_START(map);
-    std::vector<::std::pair<Kmer, Value> > input(count);
+    std::vector<::std::pair<Kmer, Value> > input;
+    input.reserve(count);
     BL_BENCH_END(map, "reserve input", count);
 
     BL_BENCH_START(map);
@@ -602,30 +617,30 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
     }
   }
 
-  BL_BENCH_START(map);
-  size_t result = 0;
-  size_t i = 0;
-  size_t max = count / query_frac;
-  for (; i < max; ++i) {
-    auto iter = map.find(query[i]);
-    result ^= (*iter).second;
-  }
-  BL_BENCH_END(map, "find", result);
+//  BL_BENCH_START(map);
+//  size_t result = 0;
+//  size_t i = 0;
+//  size_t max = count / query_frac;
+//  for (; i < max; ++i) {
+//    auto iter = map.find(query[i]);
+//    result ^= (*iter).second;
+//  }
+//  BL_BENCH_END(map, "find", result);
+//
+//  BL_BENCH_START(map);
+//  auto counts = map.count(query.begin(), query.end());
+//  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+//  BL_BENCH_END(map, "count", result);
 
-  BL_BENCH_START(map);
-  auto counts = map.count(query.begin(), query.end());
-  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-  BL_BENCH_END(map, "count", result);
-
-  BL_BENCH_START(map);
-  result = map.erase(query.begin(), query.end());
-  BL_BENCH_END(map, "erase", result);
-
-
-  BL_BENCH_START(map);
-  counts = map.count(query.begin(), query.end());
-  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-  BL_BENCH_END(map, "count2", result);
+//  BL_BENCH_START(map);
+//  result = map.erase(query.begin(), query.end());
+//  BL_BENCH_END(map, "erase", result);
+//
+//
+//  BL_BENCH_START(map);
+//  counts = map.count(query.begin(), query.end());
+//  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+//  BL_BENCH_END(map, "count2", result);
 
 
   BL_BENCH_REPORT_MPI_NAMED(map, name, comm);

@@ -92,6 +92,7 @@ namespace fsc {
  *    for rehash, from the first non-empty, to the next empty
  *      call insert on the entire range.
  *
+ *  need AT LEAST 1 extra element, since copy_downsize and copy_upsize rely on those.
  *
  *  TODO:
  *  [ ] batch mode operations to allow more opportunities for optimization including SIMD
@@ -117,8 +118,7 @@ public:
 protected:
 
     //=========  start INFO_TYPE definitions.
-
-    // info_type, and helpers for it.
+    // MSB is to indicate if current BUCKET is empty.  rest 7 bits indicate offset for the first BUCKET entry.
     using info_type = uint8_t;
 
 	static constexpr info_type info_empty = 0x80;
@@ -143,7 +143,7 @@ protected:
 
 	//=========  end INFO_TYPE definitions.
     // filter
-    struct empty_deleted_filter {
+    struct valid_entry_filter {
     	inline bool operator()(info_type const & x) {   // a container entry is empty only if the corresponding info is empty (0x80), not just have empty flag set.
     		return x != info_empty;   // (curr bucket is empty and position is also empty.  otherwise curr bucket is here or prev bucket is occupying this)
     	};
@@ -162,15 +162,75 @@ public:
     using const_reference	    = typename container_type::const_reference;
     using pointer				= typename container_type::pointer;
     using const_pointer		    = typename container_type::const_pointer;
-    using iterator              = ::bliss::iterator::aux_filter_iterator<typename container_type::iterator, typename info_container_type::iterator, empty_deleted_filter>;
-    using const_iterator        = ::bliss::iterator::aux_filter_iterator<typename container_type::const_iterator, typename info_container_type::const_iterator, empty_deleted_filter>;
+    using iterator              = ::bliss::iterator::aux_filter_iterator<typename container_type::iterator, typename info_container_type::iterator, valid_entry_filter>;
+    using const_iterator        = ::bliss::iterator::aux_filter_iterator<typename container_type::const_iterator, typename info_container_type::const_iterator, valid_entry_filter>;
     using size_type             = typename container_type::size_type;
     using difference_type       = typename container_type::difference_type;
 
 
 protected:
 
-//    HERE
+
+    //=========  start BUCKET_ID_TYPE definitions.
+    // find_pos returns 2 pieces of information:  assigned bucket, and the actual position.  actual position is set to all bits on if not found.
+    // so 3 pieces of information needs to be incorporated.
+    //   note that pos - bucket = offset, where offset just needs 1 bytes.
+    //   we can try to limit bucket id or pos to only 56 bits, to avoid constructing a pair.
+    // 56 bits gives 64*10^15, or 64 peta entries (local entries).  should be enough for now...
+    // majority - looking for position, not bucket, but sometimes do need bucket pos.
+    // also need to know if NOT FOUND - 1. bucket is empty, 2. bucket does not contain this entry.
+    //    if bucket empty, then the offset has the empty flag on.  pos should bucket + offset.
+    //    if bucket does not contain entry, then pos should be start pos of next bucket.  how to indicate nothing found? use the MSB of the 56 bits.
+    // if found, then return pos, and offset of original bucket (for convenience).
+    // NOTE that the pos part may not point to the first entry of the bucket.
+
+    // failed insert (pos_flag set) means the same as successful find.
+
+    using bucket_id_type = size_t;
+    static constexpr bucket_id_type bid_pos_mask = ~(static_cast<bucket_id_type>(0)) >> 9;   // lower 55 bits set.
+    static constexpr bucket_id_type bid_pos_exists = 1UL << 55;  // 56th bit set.
+    static constexpr bucket_id_type bid_info_mask = static_cast<bucket_id_type>(info_mask) << 56;   // lower 55 bits set.
+    static constexpr bucket_id_type bid_info_empty = static_cast<bucket_id_type>(info_empty) << 56;  // 56th bit set.
+
+    // failed is speial, correspond to all bits set (max distnace failed).  not using 0x800000... because that indicates failed inserting due to occupied.
+    static constexpr bucket_id_type bid_failed = ~(static_cast<bucket_id_type>(0));
+
+    inline bucket_id_type make_missing_bucket_id(size_t const & pos, info_type const & info) const {
+      assert(pos <= bid_pos_mask);
+      return (static_cast<bucket_id_type>(info) << 55) | pos;
+    }
+    inline bucket_id_type make_existing_bucket_id(size_t const & pos, info_type const & info) const {
+      return make_missing_bucket_id(pos, info) | bid_pos_exists;
+    }
+
+    inline bool is_empty(bucket_id_type const & x) const {
+      return x >= bid_info_empty;  // empty 0x80....
+    }
+    inline bool is_normal(bucket_id_type const & x) const {
+      return x < bid_info_empty;  // normal. both top bits are set. 0xC0
+    }
+    inline bool exists(bucket_id_type const & x) const {
+      return (x & bid_pos_exists) > 0;
+    }
+//    inline bucket_id_type mark_as_existing(bucket_id_type const & x) const {
+//      return x | bid_pos_exists;
+//    }
+    inline info_type get_info(bucket_id_type const & x) const {
+      return static_cast<info_type>(x >> 56);
+    }
+
+    inline size_t get_pos(bucket_id_type const & x) const {
+      return x & bid_pos_mask;
+    }
+    inline size_t get_offset(bucket_id_type const & x) const {
+      return (x & bid_info_mask) >> 56;
+    }
+
+//    inline size_t get_bucket_id(bucket_id_type const & x) const {
+//      return get_pos(x) - get_offset(x);
+//    }
+    //=========  end BUCKET_ID_TYPE definitions.
+
 
     size_t lsize;
     mutable size_t buckets;
@@ -180,19 +240,25 @@ protected:
     mutable float min_load_factor;
     mutable float max_load_factor;
 
+#if defined(REPROBE_STAT)
+    // some stats.
+    size_type upsize_count;
+    size_type downsize_count;
+    mutable size_type reprobes;   // for use as temp variable
+    mutable info_type max_reprobes;
+    mutable size_type moves;
+    mutable size_type max_moves;
+    mutable size_type shifts;
+    mutable size_type max_shifts;
+#endif
 
-    empty_deleted_filter filter;
+
+    valid_entry_filter filter;
     hasher hash;
     key_equal eq;
 
     container_type container;
     info_container_type info_container;
-
-    // some stats.
-    size_t upsize_count;
-    size_t downsize_count;
-    mutable size_t reprobes;   // for use as temp variable
-    mutable size_t max_reprobes;
 
 public:
 
@@ -203,14 +269,11 @@ public:
 			float const & _min_load_factor = 0.4,
 			float const & _max_load_factor = 0.9) :
 			lsize(0), buckets(next_power_of_2(_capacity)), mask(buckets - 1),
-			container(buckets + info_empty), info_container(buckets + info_empty, info_empty),
-			upsize_count(0), downsize_count(0)
+#if defined (REPROBE_STAT)
+      upsize_count(0), downsize_count(0),
+#endif
+			container(buckets + info_empty), info_container(buckets + info_empty, info_empty)
 			{
-		// get the nearest power of 2 above specified capacity.
-		// buckets = next_power_of_2(_capacity);
-
-//		container.resize(buckets);
-//		info_container.resize(buckets, 0x40);
 		// set the min load and max load thresholds.  there should be a good separation so that when resizing, we don't encounter a resize immediately.
 		set_min_load_factor(_min_load_factor);
 		set_max_load_factor(_max_load_factor);
@@ -226,9 +289,7 @@ public:
 			float const & _max_load_factor = 0.9) :
 		hashmap_robinhood_doubling_offsets(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
 
-		for (auto it = begin; it != end; ++it) {
-			insert(value_type(*it));  //local insertion.  this requires copy construction...
-		}
+    insert(begin, end);
 	}
 
 	~hashmap_robinhood_doubling_offsets() {
@@ -294,17 +355,19 @@ public:
 
 
 
-	void print() const {
-		for (size_t i = 0; i < container.size(); ++i) {
-			std::cout << i << ": [" << container[i].first << "->" <<
-					container[i].second << "] info " <<
-					static_cast<size_t>(info_container[i]) <<
-					" offset = " <<
-					static_cast<size_t>(get_distance(info_container[i])) <<
-					" pos = " <<
-					(get_distance(info_container[i]) + i) << std::endl;
-		}
-	}
+  void print() const {
+    for (size_type i = 0; i < info_container.size(); ++i) {
+      std::cout << i << ": [" << container[i].first << "->" <<
+          container[i].second << "] info " <<
+          static_cast<size_t>(info_container[i]) <<
+          " bucket = ";
+      std::cout << i << " offset = " << get_offset(info_container[i]) <<
+          " pos = " << (i + get_distance(info_container[i])) <<
+          " empty? " << (is_empty(info_container[i]) ? "true" : "false");
+      std::cout << std::endl;
+    }
+  }
+
 
 	std::vector<std::pair<key_type, mapped_type> > to_vector() const {
 		std::vector<std::pair<key_type, mapped_type> > output(lsize);
@@ -351,87 +414,151 @@ public:
    * @details note that buckets > entries.
    */
   void rehash(size_type const & b) {
+
     // check it's power of 2
-    size_t n = next_power_of_2(b);
+    size_type n = next_power_of_2(b);
 
-#if defined(REPROBE_STAT)
-		if (n > buckets) {
-			++upsize_count;
-		}
-		else if (n < buckets) {
-			++downsize_count;
-		}
-#endif
+    if ((n != buckets) && (lsize < (max_load_factor * n))) {
 
-		if (n != buckets) {
-#if defined(REPROBE_STAT)
-			std::cout << "REHASH before copy lsize = " << lsize << " capacity = " << buckets << std::endl;
+      container_type tmp(n + info_empty);
+      info_container_type tmp_info(n + info_empty, info_empty);
 
-			// print();
-#endif
-			buckets = n;
-			mask = buckets - 1;
-			container_type tmp(buckets + info_empty);
-			info_container_type tmp_info(buckets + info_empty, info_empty);
-			container.swap(tmp);
-			info_container.swap(tmp_info);
+      if (lsize > 0) {
+        if (n > buckets) {
+          this->copy_upsize(tmp, tmp_info, n);
+    #if defined(REPROBE_STAT)
+          ++upsize_count;
+    #endif
+        } else {
+          this->copy_downsize(tmp, tmp_info, n);
+    #if defined(REPROBE_STAT)
+          ++downsize_count;
+    #endif
+        }
+      }
 
-	    if (lsize == 0) return;   // nothing to copy.
-	    lsize = 0;  // reset lsize since we will be inserting.
+      // new size and mask
+      buckets = n;
+      mask = n - 1;
 
-			min_load = static_cast<size_t>(static_cast<float>(buckets) * min_load_factor);
-			max_load = static_cast<size_t>(static_cast<float>(buckets) * max_load_factor);
+      min_load = static_cast<size_type>(static_cast<float>(n) * min_load_factor);
+      max_load = static_cast<size_type>(static_cast<float>(n) * max_load_factor);
 
-
-			copy(tmp, tmp_info);
-
-#if defined(REPROBE_STAT)
-			std::cout << "REHASH after copy lsize = " << lsize << " capacity = " << buckets << std::endl;
-      // print();
-#endif
-		}
-	}
-
+      // swap in.
+      container.swap(tmp);
+      info_container.swap(tmp_info);
+    }
+  }
 
 
 protected:
 
 
+  /**
+   *  @brief copy from hash table the supplied target (size should be already specified.)
+   *  @details  Note that we essentially are merging partitions from the source.
+   *
+   *        iterating over source means that when writing into target, we will need to shift the entire target container, potentially.
+   *
+   *        prob better to iterate over multiple partitions, so that target is filled sequentially.
+   *
+   *        figure out the scaling factor, and create an array to track iteration position as we go.   note that each may need to be at diff points...
+   *
+   */
+  void copy_downsize(container_type & target, info_container_type & target_info,
+                     size_type const & target_buckets) {
+    size_type m = target_buckets - 1;
+    assert((target_buckets & m) == 0);   // assert this is a power of 2.
+
+    bucket_id_type id;
+    size_t pos;
+    size_t endd;
+
+    // iterate through the entire input.
+    for (size_t i = 0; i < buckets; ++i) {
+      if (is_normal(info_container[i])) {
+        // get start and end of bucket.  exclusive end.
+        pos = i + static_cast<size_t>(get_distance(info_container[i]));
+        endd = i + 1 + static_cast<size_t>(get_distance(info_container[i + 1]));
+
+        // compute the new id from current bucket.  since downsize and power of 2, modulus would do.
+        id = i & m;
+
+        // do batch copy to bucket 'id', copy from pos to endd
+        insert_with_hint(target, target_info, id, container, info_container, pos, endd);
+
+      }  // else is empty, so continue.
+    }
+  }
+
+
+  /**
+  * @brief inserts a range into the current hash table.
+  * @details
+  * essentially splitting the source into multiple non-overlapping ranges.
+  *    each partition is filled nearly sequentially, so figure out the scaling factor, and create an array as large as the scaling factor.
+  *
+  */
+  void copy_upsize(container_type & target, info_container_type & target_info,
+                   size_type const & target_buckets) {
+    size_type m = target_buckets - 1;
+    assert((target_buckets & m) == 0);   // assert this is a power of 2.
+
+    bucket_id_type id, last;
+    size_t pos;
+    size_t endd;
+    last = 0;
+
+      for (size_t i = 0; i < buckets; ++i) {
+        if (is_normal(info_container[i])) {
+
+          // get start and end of bucket.  exclusive end.
+          pos = i + static_cast<size_t>(get_distance(info_container[i]));
+          endd = i + 1 + static_cast<size_t>(get_distance(info_container[i + 1]));
+
+
+          for (; pos < endd; ++pos) {
+            // compute the new id via hash.
+            id = hash(container[pos].first) & m;
+
+            last = insert_with_hint(target, target_info, id, last, container[pos]);
+          }
+        }  // else is empty, so continue.
+      }
+  }
+
+
 	/**
 	 * return the position in container where the current key is found.  if not found, max is returned.
 	 */
-	std::pair<size_type, size_type> find_pos(key_type const & k) const {
+	bucket_id_type find_pos_with_hint(key_type const & k, size_t const & bid) const {
+
+		assert(bid != bid_failed);
+
+		info_type offset = info_container[bid];
+		size_t start = bid + get_distance(offset);  // distance is at least 0, and definitely not empty
+
+		// no need to check for empty?  if i is empty, then this one should be.
+		// otherwise, we are checking distance so doesn't matter if empty.
 
 		// first get the bucket id
-		size_t i = hash(k) & mask;   // get bucket id
-		if (is_empty(info_container[i]) ) {
+		if (is_empty(offset) ) {
 			// std::cout << "Empty entry at " << i << " val " << static_cast<size_t>(info_container[i]) << std::endl;
-			return std::make_pair(i, std::numeric_limits<size_type>::max());  // empty BUCKET.  so done.
+			return make_missing_bucket_id(start, offset);
 		}
 
 		// get the next bucket id
-		size_t end = i+1;
-		// no need to check for empty.  if i is empty, then this one should be.
-		// otherwise, we are checking distance so doesn't matter if empty.
-
-		// now we scan through the current.
-		size_t start = i + get_distance(info_container[i]);  // distance is at least 0, and definitely not empty
-		end = end + get_distance(info_container[end]);   // distance is at least 0, and can be empty.
-		size_t result = std::numeric_limits<size_type>::max();
+		size_t end = bid + 1 + get_distance(info_container[bid + 1]);   // distance is at least 0, and can be empty.
 
 #if defined(REPROBE_STAT)
 		size_t reprobe = 0;
 #endif
-		for (; start != end; ) {
+		// now we scan through the current.
+		for (; start < end; ++start) {
 
 			if (eq(k, container[start].first)) {
-				result = start;
-
-///				std::cout << "FIND found " << k << " at " << start << std::endl;
-				break; //found it.
+				return make_existing_bucket_id(start, offset);
 			}
-
-			++start;
 
 #if defined(REPROBE_STAT)
 			++reprobe;
@@ -443,8 +570,167 @@ protected:
 		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
 #endif
 
-		return std::make_pair(i, result);
+		return make_missing_bucket_id(end, offset);
 	}
+
+
+	/**
+	 * @brief insert a single key-value pair into container at the desired position
+	 *
+	 * note that swap only occurs at bucket boundaries.
+	 *
+	 * return insertion position, and update id to end of
+			// insert if empty, or if reprobe distance is larger than current position's.  do this via swap.
+			// continue to probe if we swapped out a normal entry.
+			// this logic relies on choice of bits for empty entries.
+
+			// we want the reprobe distance to be larger than empty, so we need to make
+			// normal to have high bits 1 and empty 0.
+
+			// save the insertion position (or equal position) for the first insert or match, but be aware that after the swap
+			//  there will be other inserts or swaps. BUT NOT OTHER MATCH since this is a MAP.
+	 */
+	inline bucket_id_type insert_with_hint(container_type & target,
+			info_container_type & target_info,
+			bucket_id_type const & id, bucket_id_type const & last_insert_pos,
+			value_type const & v) {
+
+		assert(id != bid_failed);
+
+		info_type offset = info_container[id];
+
+		// handle target bucket first.
+		// then handle shifting.
+
+		// 4 cases:
+		// empty bucket, offset == 0        use this bucket. offset at original bucket converted to non-empty.  move vv in.  next bucket unchanged.  done
+		// empty bucket, offset > 0         use this bucket. offset at original bucket converted to non-empty.  swap vv in.  go to next bucket
+		// non empty bucket, offset == 0.   use next bucket. offset at original bucket not changed              swap vv in.  go to next bucket
+		// non empty bucket, offset > 0.    use next bucket. offset at original bucket not changed.             swap vv in.  go to next bucket
+
+		// first get the bucket id
+		if ( offset == info_empty ) {
+			container[id] = v;
+			info_container[id] = info_normal;
+
+			// std::cout << "Empty entry at " << i << " val " << static_cast<size_t>(info_container[i]) << std::endl;
+			return make_missing_bucket_id(id, offset);
+		}
+
+
+
+		size_t start = id + get_distance(offset);  // distance is at least 0, and definitely not empty
+
+		// no need to check for empty.  if i is empty, then this one should be.
+		// otherwise, we are checking distance so doesn't matter if empty.
+
+
+		// get the next bucket id
+		size_t end = bid + 1 + get_distance(info_container[bid + 1]);   // distance is at least 0, and can be empty.
+
+#if defined(REPROBE_STAT)
+		size_t reprobe = 0;
+#endif
+		// now we scan through the current.
+		for (; start < end; ++start) {
+
+			if (eq(k, container[start].first)) {
+				return make_existing_bucket_id(start, offset);
+			}
+
+#if defined(REPROBE_STAT)
+			++reprobe;
+#endif
+		}
+
+#if defined(REPROBE_STAT)
+		this->reprobes += reprobe;
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
+#endif
+
+		bucket_id_type bpos = find_pos_with_hint(v.first, id); // container insertion point.
+
+		if (exists(bpos)) {  // found it.  so no insert.
+	//      std::cout << "duplicate found at " << found << std::endl;
+	//      std::cout << "  existing at " << container[found].first << "->" << container[found].second << std::endl;
+	//      std::cout << "  inserting " << vv.first << "->" << vv.second << std::endl;
+		  return bpos;
+		}
+
+		// did not find, so insert.
+		++lsize;
+
+
+		// first swap in at start of bucket, then deal with the swapped.
+
+		// swap until empty info
+		// then insert into last empty,
+		// then update info until info_empty
+
+
+		// incrementally swap.
+		size_t target_bid = bid;
+		size_t target = get_pos(bpos);
+		// now iterate and try to swap, terminate when we've reached an empty slot that points to self.
+		while (info_container[target_bid] != info_empty) {
+		  if (is_normal(info_container[target_bid])) {
+			// swap for occupied buckets only
+			target = target_bid + get_distance(info_container[target_bid]);
+			::std::swap(container[target], vv);
+		  }
+
+		  // increment everyone's info except for the first one., but don't change the occupied bit.
+		  info_container[target_bid] += (target_bid == bid) ? 0 : 1;
+
+		  ++target_bid;
+
+		}
+
+		// reached end, insert last
+
+		found = target_bid + get_distance(info_container[target_bid]);
+		container[found] = std::move(vv);  // empty slot.
+		// if we are at the original bucket, then set it to normal (1 entry)
+
+		set_normal(info_container[bid]);  // head is always marked as occupied.
+		if (target_bid != bid) {  // tail, originally == empty
+		  ++info_container[target_bid];  // increment tail end if it's not same as head.
+		}
+
+		found = bid + get_distance(info_container[bid]);
+
+
+		return insert_pos;
+
+	}
+
+
+#if defined(REPROBE_STAT)
+	void reset_reprobe_stats() {
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+		this->moves = 0;
+		this->max_moves = 0;
+		this->shifts = 0;
+		this->max_shifts = 0;
+
+	}
+
+	void print_reprobe_stats(std::string const & operation, size_t input_size, size_t success_count) {
+		std::cout << "hash table stat: lsize " << lsize << " buckets " << buckets << std::endl;
+
+		std::cout << "hash table op stat: " << operation << ":" <<
+				"\tsuccess=" << success_count << "\ttotal=" << input_size << std::endl;
+
+		std::cout << "hash table reprobe stat: " << operation << ":" <<
+				"\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+				"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
+				"\tshift scanned max=" << static_cast<unsigned int>(this->max_shifts) << "\tshift scan total=" << this->shifts << std::endl;
+	}
+#endif
+
+
+
 
 	/**
 	 * return the next position in "container" that is empty - i.e. info has 0x80.
@@ -630,34 +916,6 @@ protected:
 		return i;
 	}
 
-	/**
-	 * @brief inserts a range into the current hash table.
-	 */
-	void copy(container_type const & tmp, info_container_type const & info_tmp) {
-
-//		size_t count = 0;
-
-#if defined(REPROBE_STAT)
-		this->reprobes = 0;
-		this->max_reprobes = 0;
-#endif
-
-
-		// insert using the iterators.
-		insert(const_iterator(tmp.cbegin(), info_tmp.cbegin(), info_tmp.cend(), filter),
-				const_iterator(tmp.cend(), info_tmp.cend(), filter));
-
-
-#if defined(REPROBE_STAT)
-		std::cout << "REHASH copy:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) <<
-				"\treprobe total=" << this->reprobes <<
-					"\ttotal=" << tmp.size() << "\tlsize=" << lsize <<
-					"\tbuckets=" << buckets <<std::endl;
-
-		this->reprobes = 0;
-		this->max_reprobes = 0;
-#endif
-	}
 
 
 public:
@@ -678,55 +936,55 @@ public:
 		size_type found;
 		std::tie(bid, found) = find_pos(vv.first); // container insertion point.
 
-    if (found != std::numeric_limits<size_type>::max()) {  // found it.  so no insert.
-//      std::cout << "duplicate found at " << found << std::endl;
-//      std::cout << "  existing at " << container[found].first << "->" << container[found].second << std::endl;
-//      std::cout << "  inserting " << vv.first << "->" << vv.second << std::endl;
-      return std::make_pair(iterator(container.begin() + found, info_container.begin()+ found, info_container.end(), filter), false);
-    }
+		if (found != std::numeric_limits<size_type>::max()) {  // found it.  so no insert.
+	//      std::cout << "duplicate found at " << found << std::endl;
+	//      std::cout << "  existing at " << container[found].first << "->" << container[found].second << std::endl;
+	//      std::cout << "  inserting " << vv.first << "->" << vv.second << std::endl;
+		  return std::make_pair(iterator(container.begin() + found, info_container.begin()+ found, info_container.end(), filter), false);
+		}
 
-    // did not find, so insert.
-    ++lsize;
+		// did not find, so insert.
+		++lsize;
 
-    // 4 cases:
-    // empty bucket, offset == 0        use this bucket. offset at original bucket converted to non-empty.  move vv in.  done
-    // empty bucket, offset > 0         use this bucket. offset at original bucket converted to non-empty.  swap vv in.  go to next bucket
-    // non empty bucket, offset == 0.   use next bucket. offset at original bucket not changed              swap vv in.  go to next bucket
-    // non empty bucket, offset > 0.    use next bucket. offset at original bucket not changed.             swap vv in.  go to next bucket
-
-
-    // first swap in at start of bucket, then deal with the swapped.
+		// 4 cases:
+		// empty bucket, offset == 0        use this bucket. offset at original bucket converted to non-empty.  move vv in.  done
+		// empty bucket, offset > 0         use this bucket. offset at original bucket converted to non-empty.  swap vv in.  go to next bucket
+		// non empty bucket, offset == 0.   use next bucket. offset at original bucket not changed              swap vv in.  go to next bucket
+		// non empty bucket, offset > 0.    use next bucket. offset at original bucket not changed.             swap vv in.  go to next bucket
 
 
-    // incrementally swap.
-    size_t target_bid = bid;
-    // now iterate and try to swap, terminate when we've reached an empty slot that points to self.
-    while (info_container[target_bid] != info_empty) {
-      if (is_normal(info_container[target_bid])) {
-        // swap for occupied buckets only
-        found = target_bid + get_distance(info_container[target_bid]);
-        ::std::swap(container[found], vv);
-      }
+		// first swap in at start of bucket, then deal with the swapped.
 
-      // increment everyone's info except for the first one., but don't change the occupied bit.
-      info_container[target_bid] += (target_bid == bid) ? 0 : 1;
 
-      ++target_bid;
+		// incrementally swap.
+		size_t target_bid = bid;
+		// now iterate and try to swap, terminate when we've reached an empty slot that points to self.
+		while (info_container[target_bid] != info_empty) {
+		  if (is_normal(info_container[target_bid])) {
+			// swap for occupied buckets only
+			found = target_bid + get_distance(info_container[target_bid]);
+			::std::swap(container[found], vv);
+		  }
 
-    }
+		  // increment everyone's info except for the first one., but don't change the occupied bit.
+		  info_container[target_bid] += (target_bid == bid) ? 0 : 1;
 
-    // reached end, insert last
+		  ++target_bid;
 
-    found = target_bid + get_distance(info_container[target_bid]);
-    container[found] = std::move(vv);  // empty slot.
-    // if we are at the original bucket, then set it to normal (1 entry)
+		}
 
-    set_normal(info_container[bid]);  // head is always marked as occupied.
-    if (target_bid != bid) {  // tail, originally == empty
-      ++info_container[target_bid];  // increment tail end if it's not same as head.
-    }
+		// reached end, insert last
 
-    found = bid + get_distance(info_container[bid]);
+		found = target_bid + get_distance(info_container[target_bid]);
+		container[found] = std::move(vv);  // empty slot.
+		// if we are at the original bucket, then set it to normal (1 entry)
+
+		set_normal(info_container[bid]);  // head is always marked as occupied.
+		if (target_bid != bid) {  // tail, originally == empty
+		  ++info_container[target_bid];  // increment tail end if it's not same as head.
+		}
+
+		found = bid + get_distance(info_container[bid]);
 		
 		return std::make_pair(iterator(container.begin() + found, info_container.begin() + found, info_container.end(), filter), true);
 
