@@ -392,10 +392,10 @@ public:
 	 * @brief reserve space for specified entries (below max load factor)
 	 */
   void reserve(size_type n) {
-    if (n > this->max_load) {   // if requested more than current max load, then we need to resize up.
+//    if (n > this->max_load) {   // if requested more than current max load, then we need to resize up.
       rehash(static_cast<size_type>(static_cast<float>(n) / this->max_load_factor));
       // rehash to the new size.    current bucket count should be less than next_power_of_2(n).
-    }  // do not resize down.  do so only when erase.
+//    }  // do not resize down.  do so only when erase.
   }
 
   /**
@@ -1426,7 +1426,7 @@ public:
       _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
       _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
 
-      counts[i] = exists(find_pos_with_hint((*it).first, id)) ? 1 : 0;
+      counts[i] = exists(find_pos_with_hint(*it, id)) ? 1 : 0;
     }
 
     for (Iter it = begin + block3_min; it != end; ++it, ++i) {
@@ -1436,7 +1436,7 @@ public:
       hash_pos = i & hashes_mask;
       id = hashes[hash_pos] & mask;  // target bucket id.
 
-      counts[i] = exists(find_pos_with_hint((*it).first, id)) ? 1 : 0;
+      counts[i] = exists(find_pos_with_hint(*it, id)) ? 1 : 0;
     }
 
 

@@ -89,7 +89,12 @@ TYPED_TEST_P(Hashtable_OARH_DO_NoncircTest, insert_partial)
 
 
    MAP test;
+
+   test.reserve(this->temp.size() * 2);
+
    test.insert(this->temp.begin(), this->temp.end());
+
+   test.reserve(test.size());
 
 //   test.print();
 
