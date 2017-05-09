@@ -942,13 +942,13 @@ public:
 
 	/// batch insert using sorting.  This is about 4x slower on core i5-4200U (haswell) than integrated batch insertion above, even just for sort.
 	template <typename LESS = ::std::less<key_type> >
-	void insert_sort(::std::vector<value_type> && input) {
+	void insert_sort(::std::vector<value_type> const & input) {
 
 	  throw ::std::logic_error("ERROR: DISABLED FOR NONCIRC VERSION");
 
 	}
 
-  void insert_shuffled(::std::vector<value_type> && input) {
+  void insert_shuffled(::std::vector<value_type> const & input) {
 
     throw ::std::logic_error("ERROR: DISABLED FOR NONCIRC VERSION");
 

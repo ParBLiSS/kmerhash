@@ -670,7 +670,9 @@ public:
 	/**
 	 * @brief insert a single key-value pair into container.
 	 */
-	std::pair<iterator, bool> insert(value_type && vv) {
+	std::pair<iterator, bool> insert(value_type const & v) {
+
+		value_type vv = v;
 
 		if (lsize >= max_load) {
 		  std::cout << "RESIZE lsize " << lsize << " max_load " << max_load << " new size " << (buckets << 1) << std::endl;
@@ -723,7 +725,7 @@ public:
     // reached end, insert last
 
     found = (target_bid + info_container[target_bid].get_offset()) & mask;
-    container[found] = std::move(vv);  // empty slot.
+    container[found] = vv;  // empty slot.
     // if we are at the original bucket, then set it to normal (1 entry)
 
     info_container[bid].set_normal();  // head is always marked as occupied.
@@ -737,7 +739,7 @@ public:
 
 	}
 
-	std::pair<iterator, bool> insert(key_type && key, mapped_type && val) {
+	std::pair<iterator, bool> insert(key_type const & key, mapped_type const & val) {
 		auto result = insert(std::make_pair(key, val));
 		return result;
 	}
@@ -756,7 +758,7 @@ public:
 		bool success;
 
 		for (auto it = begin; it != end; ++it) {
-			std::tie(dummy, success) = insert(std::move(value_type(*it)));  //local insertion.  this requires copy construction...
+			std::tie(dummy, success) = insert(value_type(*it));  //local insertion.  this requires copy construction...
 
 			if (success) {
 				++count;
@@ -779,7 +781,7 @@ public:
 
 
 	/// batch insert not using iterator
-	void insert(std::vector<value_type> && input) {
+	void insert(std::vector<value_type> const & input) {
 
 #if defined(REPROBE_STAT)
 		this->reprobes = 0;
@@ -788,7 +790,7 @@ public:
 		size_t count = 0;
 
 		for (size_t i = 0; i < input.size(); ++i) {
-			if ( insert(std::move(input[i])).second)   //local insertion.  this requires copy construction...
+			if ( insert(input[i]).second)   //local insertion.  this requires copy construction...
 				++count;
 		}
 
@@ -963,7 +965,7 @@ public:
 
 			// definitely wrapped around, so copy first entry to last
 			if (end > 0) {
-				container[buckets - 1] = std::move(container[0]);
+				container[buckets - 1] = container[0];
 
 				// now if there is still more, than do it
 				memmove(&(container[0]), &(container[1]), (end - 1) * sizeof(value_type));

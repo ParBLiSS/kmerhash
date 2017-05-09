@@ -33,8 +33,8 @@ endif(IS_DIRECTORY ${PROJECT_SOURCE_DIR}/test/unit)
 
 
 # EXECUTABLES
-add_executable(projection projection_lut.cpp)
-target_link_libraries(projection ${EXTRA_LIBS})
+#add_executable(projection projection_lut.cpp)
+#target_link_libraries(projection ${EXTRA_LIBS})
 
 
 endif(ENABLE_TESTING)

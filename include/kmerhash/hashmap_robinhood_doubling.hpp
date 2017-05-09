@@ -157,6 +157,9 @@ protected:
     		info = empty;  // nothing here.
     	}
 
+    	inline size_t get_offset() const {
+    		return info & dist_mask;
+    	}
     };
 
 
@@ -308,6 +311,8 @@ public:
 
 
 	void print() const {
+		std::cout << "buckets " << buckets << " lsize " << lsize << " max load factor " << max_load_factor << std::endl;
+
 		for (size_t i = 0; i < buckets; ++i) {
 			std::cout << i << ": [" << container[i].first << "->" <<
 					container[i].second << "] info " <<
@@ -367,6 +372,8 @@ public:
     // check it's power of 2
     size_t n = next_power_of_2(b);
 
+//    std::cout << std::endl << "REHASH " << b << std::endl;
+
 #if defined(REPROBE_STAT)
 		if (n > buckets) {
 			++upsize_count;
@@ -390,6 +397,9 @@ public:
       max_load = static_cast<size_t>(static_cast<float>(buckets) * max_load_factor);
 			copy(tmp.begin(), tmp.end(), tmp_info.begin());
 		}
+
+//	    std::cout << "REHASH DONE " << b << std::endl;
+
 	}
 
 
@@ -416,10 +426,10 @@ protected:
 		for (; it != end; ++it, ++iit) {
 			if ((*iit).is_normal()) {
 #if defined(REPROBE_STAT)
-				std::tie(dummy, success) = insert(::std::move(*it));
+				std::tie(dummy, success) = insert(*it);
 				if (success) ++count;
 #else
-				insert(::std::move(*it));
+				insert(*it);
 #endif
 			}
 		}
@@ -448,7 +458,7 @@ public:
 	 *
 	 * note that swap only occurs at bucket boundaries.
 	 */
-	std::pair<iterator, bool> insert(value_type && vv) {
+	std::pair<iterator, bool> insert(value_type const & v) {
 
 		unsigned char reprobe = info_type::normal;
 #if defined(REPROBE_STAT)
@@ -457,6 +467,8 @@ public:
 #endif
 		// first check if we need to resize.
 		if (lsize >= max_load) rehash(buckets << 1);
+
+		value_type vv = v;
 
 		// first get the bucket id
 		size_type i = hash(vv.first) & mask;  // target bucket id.
@@ -482,6 +494,9 @@ public:
 			// if current distance is larger than target's distance, (including empty cell), then swap.
 			assert(reprobe >= info_type::normal);  // if distance is over 128, then wrap around would get us less than normal.
 
+//			std::cout << " iter " << j << " reprobe " << static_cast<size_t>(reprobe) <<
+//					" id " << i << " info " << static_cast<size_t>(info_container[i].info) << std::endl;
+
 			if (reprobe > info_container[i].info) {
 				::std::swap(info_container[i].info, reprobe);
 
@@ -500,7 +515,7 @@ public:
 				// then decide what to do given the swapped out distance.
 				if (reprobe == info_type::empty) {  // previously it was empty,
 					// then we can simply set.
-					container[i] = std::move(vv);
+					container[i] = vv;
 					break;
 
 				} else {
@@ -547,7 +562,7 @@ public:
 
 	}
 
-	std::pair<iterator, bool> insert(key_type && key, mapped_type && val) {
+	std::pair<iterator, bool> insert(key_type const & key, mapped_type const & val) {
 		auto result = insert(std::make_pair(key, val));
 		return result;
 	}
@@ -566,11 +581,13 @@ public:
 		bool success;
 #endif
 
-		for (auto it = begin; it != end; ++it) {
+//		size_t i = 0;
+		for (auto it = begin; it != end; ++it) { //, ++i) {
 #if defined(REPROBE_STAT)
 			std::tie(dummy, success) =
 #endif
-					insert(std::move(value_type(*it)));  //local insertion.  this requires copy construction...
+//					std::cout << " element " << i;
+					insert(value_type(*it));  //local insertion.  this requires copy construction...
 
 #if defined(REPROBE_STAT)
 			if (success) {
@@ -597,7 +614,7 @@ public:
 
 
 	/// batch insert not using iterator
-	void insert(std::vector<value_type> && input) {
+	void insert(std::vector<value_type> const & input) {
 
 #if defined(REPROBE_STAT)
 		this->reprobes = 0;
@@ -613,7 +630,8 @@ public:
 #if defined(REPROBE_STAT)
 			std::tie(dummy, success) =
 #endif
-			insert(std::move(input[i]));   //local insertion.  this requires copy construction...
+//			std::cout << " element " << i;
+			insert(input[i]);   //local insertion.  this requires copy construction...
 
 #if defined(REPROBE_STAT)
 			if (success) {
@@ -639,7 +657,7 @@ public:
 
 
 	/// batch insert not using iterator
-	void insert_integrated(std::vector<value_type> && input) {
+	void insert_integrated(std::vector<value_type> const & input) {
 
 #if defined(REPROBE_STAT)
 		this->reprobes = 0;
@@ -649,10 +667,12 @@ public:
 		unsigned char probe_count = 0;
 		size_t move_count = 0;
 #endif
-		size_t count = 0;
 		unsigned char reprobe = info_type::normal;
 		size_t id;
 		size_type j;
+
+		value_type vv;
+		size_type insert_pos = std::numeric_limits<size_type>::max();
 
 		for (size_t i = 0; i < input.size(); ++i) {
 
@@ -665,37 +685,42 @@ public:
 			// first check if we need to resize.
 			if (lsize >= max_load) rehash(buckets << 1);
 
-			// first get the bucket id
-			id = hash(input[i].first) & mask;  // target bucket id.
+			vv = input[i];
+			insert_pos = std::numeric_limits<size_type>::max();
 
-			for (j = 0; j < buckets; ++j) {  // limit to 1 complete loop
+			// first get the bucket id
+			id = hash(vv.first) & mask;  // target bucket id.
+
+			for (j = 0; j < buckets; ++j, ++reprobe) {  // limit to 1 complete loop
 
 				// if current distance is larger than target's distance, (including empty cell), then swap.
 				assert(reprobe >= info_type::normal);  // if distance is over 128, then wrap around would get us less than normal.
+//				std::cout << " element i " << i << " iter " << j << " reprobe " << static_cast<size_t>(reprobe) <<
+//						" id " << id << " info " << static_cast<size_t>(info_container[id].info) << std::endl;
 
 				if (reprobe > info_container[id].info) {
-					::std::swap(info_container[id].info, reprobe);
 
+					::std::swap(info_container[id].info, reprobe);
+					if (insert_pos == std::numeric_limits<size_type>::max()) {
+						insert_pos = id;  // set insert_pos to first positin of insertion.
+						++lsize;
 #if defined(REPROBE_STAT)
-					if (probe_count == std::numeric_limits<unsigned char>::max()) {
-						// first insertion.
 						probe_count = j;
 					} else {
 						// subsequent "shifts" do not change insert_pos or success.
 						++move_count;
-					}
 #endif
+					}
 
 					// then decide what to do given the swapped out distance.
 					if (reprobe == info_type::empty) {  // previously it was empty,
 						// then we can simply set.
-						container[id] = std::move(input[i]);
-						++count;
+						container[id] = vv;
 						break;
 
 					} else {
 						// there was a real entry, so need to swap
-						::std::swap(container[id], input[i]);
+						::std::swap(container[id], vv);
 						// and continue
 					}
 
@@ -705,7 +730,7 @@ public:
 	//			  if (success)  std::cout << ".";
 
 					// same distance, then possibly same value.  let's check.
-					if (eq(container[id].first, input[i].first)) {  // note that a previously swapped vv would not match again and can be skipped.
+					if (eq(container[id].first, vv.first)) {  // note that a previously swapped vv would not match again and can be skipped.
 						// same, then we found it and need to return.
 #if defined(REPROBE_STAT)
 						probe_count = j;
@@ -715,9 +740,6 @@ public:
 
 				}  // note that it's not possible for a match to occur with shorter current reprobe distance -
 					// that would mean same element is hashed to multiple buckets.
-
-				// increment probe distance from assigned slot.
-				++reprobe;
 
 				// circular array.
 				id = (id+1) & mask;   // for bucket == 2^x, this acts like modulus.
@@ -733,7 +755,6 @@ public:
 	#endif
 
 		}
-		lsize += count;
 
 #if defined(REPROBE_STAT)
     std::cout << "lsize " << lsize << std::endl;
@@ -749,7 +770,7 @@ public:
 #endif
 
 
-		reserve(lsize);  // resize down as needed
+//		reserve(lsize);  // resize down as needed
 	}
 
 
@@ -757,7 +778,7 @@ public:
 
 	/// batch insert using sorting.  This is about 4x slower on core i5-4200U (haswell) than integrated batch insertion above, even just for sort.
 	template <typename LESS = ::std::less<key_type> >
-	void insert_sort(::std::vector<value_type> && input) {
+	void insert_sort(::std::vector<value_type> & input) {
 
 		assert(lsize == 0);   // currently only works with empty hashmap.
 
@@ -866,7 +887,7 @@ public:
 
 			}
 				info_container[pos] = dist;
-				container[pos] = std::move(input[i]);
+				container[pos] = input[i];
 		}
 		 lsize += input.size();
 #endif
@@ -900,7 +921,7 @@ public:
 
 
 	/// batch insert using extra memory and do shuffling
-	void insert_shuffled(::std::vector<value_type> && input) {
+	void insert_shuffled(::std::vector<value_type> & input) {
 
 		assert(lsize == 0);   // currently only works with empty hashmap.
 
@@ -1142,7 +1163,7 @@ public:
 				info_container[curr].info = next_info - 1;				
 
 				// and move the current value entry.
-				container[target] = std::move(container[curr]);
+				container[target] = container[curr];
 
 				++move_count;
 
@@ -1158,7 +1179,7 @@ public:
 
 		}
 		info_container[curr].info = info_type::empty;  // set last to empty.
-		container[target] = std::move(container[curr]);
+		container[target] = container[curr];
 		++move_count;
 
 #if defined(REPROBE_STAT)

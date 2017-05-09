@@ -366,7 +366,7 @@ protected:
 		auto iit = info_begin;
 		for (; it != end; ++it, ++iit) {
 			if ((*iit).is_normal()) {
-				count += copy_one(::std::move(*it), ::std::move(*iit));
+				count += copy_one(*it, *iit);
 			}
 		}
 
@@ -386,7 +386,7 @@ protected:
 	 * @details passed in info should have "normal" flag.
 	 * @return reprobe count
 	 */
-	size_type copy_one(value_type&& value, info_type&& info) {
+	size_type copy_one(value_type const & value, info_type const & info) {
 		size_type pos = hash(value.first) % buckets;
 		size_type i = pos;
 
@@ -424,7 +424,7 @@ public:
 	/**
 	 * @brief insert a single key-value pair into container.
 	 */
-	std::pair<iterator, bool> insert(key_type && key, mapped_type && val) {
+	std::pair<iterator, bool> insert(key_type const & key, mapped_type const & val) {
 
 #if defined(REPROBE_STAT)
 		size_type reprobe = 0;
@@ -507,8 +507,8 @@ public:
 
 	}
 
-	std::pair<iterator, bool> insert(value_type && vv) {
-		return insert(std::move(vv.first), std::move(vv.second));
+	std::pair<iterator, bool> insert(value_type const & vv) {
+		return insert(vv.first, vv.second);
 	}
 
 	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
@@ -541,7 +541,7 @@ public:
 		reserve(lsize);  // resize down as needed
 	}
 
-	void insert(std::vector<value_type> && input) {
+	void insert(std::vector<value_type> const & input) {
 
 #if defined(REPROBE_STAT)
 		this->reprobes = 0;
@@ -551,7 +551,7 @@ public:
 		size_t count = 0;
 
 		for (size_t i = 0; i < input.size(); ++i) {
-			if( insert(std::move(input[i])).second)  //local insertion.  this requires copy construction...
+			if( insert(input[i]).second)  //local insertion.  this requires copy construction...
 				++count;
 
 		}
