@@ -57,7 +57,7 @@ class Hashtable_OARHDO_PrefixTest : public ::testing::Test
     ::std::vector<std::pair<T, T>> temp;
 
 
-    size_t iters = 1024; //100000;  // 16
+    size_t iters = 100000;  // 16
     T min_val = 2;
     T max_val = ::std::numeric_limits<T>::max() - 2;
 
@@ -97,16 +97,19 @@ TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert)
 
   MAP test;
   // MAP test(this->iters);
+  test.reserve(this->temp.size() * 2);
    test.insert(this->temp.begin(), this->temp.end());
-	
+
+//   test.print();
+
    test.reserve(test.size());
 
-   test.print();
+//   test.print();
 
-      ::std::vector<::std::pair<TypeParam, TypeParam> > test_vals(test.to_vector());
-      ::std::vector<::std::pair<TypeParam, TypeParam> > gold_vals(this->gold.begin(), this->gold.end());
+   ::std::vector<::std::pair<TypeParam, TypeParam> > test_vals(test.to_vector());
+   ::std::vector<::std::pair<TypeParam, TypeParam> > gold_vals(this->gold.begin(), this->gold.end());
 
-      ASSERT_EQ(test_vals.size(), gold_vals.size());
+      EXPECT_EQ(test_vals.size(), gold_vals.size());
 
 //      for (size_t i = 0; i < test_vals.size(); ++i) {
 //        printf("before %ld->%ld\tinserted\t%ld->%ld\n", test_vals[i].first, test_vals[i].second, this->temp[i].first, this->temp[i].second);
@@ -121,26 +124,77 @@ TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert)
         return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
       } );
 
-      ASSERT_EQ(test_vals.size(), gold_vals.size());
+      EXPECT_EQ(test_vals.size(), gold_vals.size());
 
 
      same = ::std::equal(test_vals.begin(), test_vals.end(), gold_vals.begin());
+     //same &= ::std::equal(gold_vals.begin(), gold_vals.end(), test_vals.begin());
 
       if (!same) {
         for (size_t i = 0; i < gold_vals.size(); ++i) {
           if ((test_vals[i].first != gold_vals[i].first) ||
               (test_vals[i].second != gold_vals[i].second))
 
-          printf("%ld->%ld\t%ld->%ld, %ld\n",
+          printf("%lu->%lu\t%lu->%lu, %lu\n",
         		  test_vals[i].first, test_vals[i].second,
 				  gold_vals[i].first, gold_vals[i].second,
 			  gold_vals[i].first % (test.capacity()));
         }
       }
 
-      EXPECT_TRUE(same);
+      ASSERT_TRUE(same);
 }
 
+TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert_integrated)
+{
+  bool same = false;
+
+  using MAP = ::fsc::hashmap_robinhood_doubling_offsets<TypeParam, TypeParam>;
+
+  MAP test;
+  // MAP test(this->iters);
+   test.insert_integrated(this->temp);
+
+//   test.print();
+
+   ::std::vector<::std::pair<TypeParam, TypeParam> > test_vals(test.to_vector());
+   ::std::vector<::std::pair<TypeParam, TypeParam> > gold_vals(this->gold.begin(), this->gold.end());
+
+      EXPECT_EQ(test_vals.size(), gold_vals.size());
+
+//      for (size_t i = 0; i < test_vals.size(); ++i) {
+//        printf("before %ld->%ld\tinserted\t%ld->%ld\n", test_vals[i].first, test_vals[i].second, this->temp[i].first, this->temp[i].second);
+//      }
+
+      ::std::sort(test_vals.begin(), test_vals.end(),
+    		  [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const &y) {
+        return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
+      } );
+      ::std::sort(gold_vals.begin(), gold_vals.end(),
+    		  [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const &y) {
+        return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
+      } );
+
+      EXPECT_EQ(test_vals.size(), gold_vals.size());
+
+
+     same = ::std::equal(test_vals.begin(), test_vals.end(), gold_vals.begin());
+     //same &= ::std::equal(gold_vals.begin(), gold_vals.end(), test_vals.begin());
+
+      if (!same) {
+        for (size_t i = 0; i < gold_vals.size(); ++i) {
+          if ((test_vals[i].first != gold_vals[i].first) ||
+              (test_vals[i].second != gold_vals[i].second))
+
+          printf("%lu->%lu\t%lu->%lu, %lu\n",
+        		  test_vals[i].first, test_vals[i].second,
+				  gold_vals[i].first, gold_vals[i].second,
+			  gold_vals[i].first % (test.capacity()));
+        }
+      }
+
+      ASSERT_TRUE(same);
+}
 
 //TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, equal_range_partial)
 //{
@@ -208,8 +262,49 @@ TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, count)
    //MAP test(this->iters);
    test.insert(this->temp.begin(), this->temp.end());
 
-   test.reserve(test.size());
-   test.print();
+
+   ::std::vector<::std::pair<TypeParam, TypeParam> > test_vals(test.to_vector());
+   ::std::vector<::std::pair<TypeParam, TypeParam> > gold_vals(this->gold.begin(), this->gold.end());
+
+      EXPECT_EQ(test_vals.size(), gold_vals.size());
+
+//      for (size_t i = 0; i < test_vals.size(); ++i) {
+//        printf("before %ld->%ld\tinserted\t%ld->%ld\n", test_vals[i].first, test_vals[i].second, this->temp[i].first, this->temp[i].second);
+//      }
+
+      ::std::sort(test_vals.begin(), test_vals.end(),
+    		  [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const &y) {
+        return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
+      } );
+      ::std::sort(gold_vals.begin(), gold_vals.end(),
+    		  [](::std::pair<TypeParam, TypeParam> const & x, ::std::pair<TypeParam, TypeParam> const &y) {
+        return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
+      } );
+
+      EXPECT_EQ(test_vals.size(), gold_vals.size());
+
+  	bool same;
+
+     same = ::std::equal(test_vals.begin(), test_vals.end(), gold_vals.begin());
+     //same &= ::std::equal(gold_vals.begin(), gold_vals.end(), test_vals.begin());
+
+      if (!same) {
+        for (size_t i = 0; i < gold_vals.size(); ++i) {
+          if ((test_vals[i].first != gold_vals[i].first) ||
+              (test_vals[i].second != gold_vals[i].second))
+
+          printf("%lu->%lu\t%lu->%lu, %lu\n",
+        		  test_vals[i].first, test_vals[i].second,
+				  gold_vals[i].first, gold_vals[i].second,
+			  gold_vals[i].first % (test.capacity()));
+        }
+      }
+
+      ASSERT_TRUE(same);
+
+
+//   test.reserve(test.size());
+//   test.print();
 
 	   ::std::vector<::std::pair<TypeParam, TypeParam> > unique(this->temp.begin(), this->temp.end());
 	   std::sort(unique.begin(), unique.end(),
@@ -223,12 +318,11 @@ TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, count)
 	   unique.erase(newend, unique.end());
 
 
-	bool same;
 	size_t j = 0;
 	  for (auto i : unique) {
 		same = this->gold.count(i.first) == test.count(i.first);
 		
-		if (!same) std::cout << "count not same for entry " << j << " value " << i.first << std::endl; 
+		if (!same) std::cout << "count not same for entry " << j << " key " << i.first << std::endl;
 
 	EXPECT_EQ(this->gold.count(i.first), test.count(i.first));
 	++j;
@@ -237,6 +331,7 @@ TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, count)
 
 // now register the test cases
 REGISTER_TYPED_TEST_CASE_P(Hashtable_OARHDO_PrefixTest, insert,
+		insert_integrated,
 //		equal_range,
 		count);
 
@@ -327,6 +422,43 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
       ASSERT_EQ(test.size(), gold.size());
 
     }
+
+    template <bool canonical, typename Less, typename MAP, typename Kmer, typename Hash, typename Equal>
+    void map_insert_integrated(MAP & test,
+                    ::std::unordered_map<Kmer, uint32_t, Hash, Equal> & gold,
+                     ::std::vector<std::pair<Kmer, uint32_t> > & entries) {
+
+      test.clear();
+      gold.clear();
+      entries.clear();
+
+      if (canonical) {
+        entries.insert(entries.end(),
+                     CANONICAL_ITER(this->temp.begin(), ::bliss::kmer::transform::lex_less<Kmer>()),
+                     CANONICAL_ITER(this->temp.end(), ::bliss::kmer::transform::lex_less<Kmer>()));
+        gold.insert(entries.begin(), entries.end());
+        test.insert_integrated(entries);
+//        printf("canonical insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
+      } else {
+        entries.insert(entries.end(), this->temp.begin(), this->temp.end());
+        gold.insert(entries.begin(), entries.end());
+        test.insert_integrated(entries);
+        //        printf("raw insert.  sizes input %lu, test %lu, gold %lu\n", entries.size(), test.size(), gold.size());
+      }
+
+      // check unique items in list.
+      std::stable_sort(entries.begin(), entries.end(), Less());
+      auto new_end = std::unique(entries.begin(), entries.end(), Equal());
+      entries.erase(new_end, entries.end());
+
+//      std::cout << "gold size " << gold.size() <<" test size  " << test.size() << " entries " << entries.size() << std::endl;
+
+      ASSERT_EQ(gold.size(), entries.size());
+
+      ASSERT_EQ(test.size(), gold.size());
+
+    }
+
 
 //
 //    template <bool canonical, typename Less, typename MAP, typename Kmer, typename Hash, typename Equal>
@@ -491,6 +623,61 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 		ASSERT_TRUE(same);
     }
 
+    template <typename Kmer = T, bool canonical = false,
+    		template <typename> class Transform = ::bliss::transform::identity,
+			template <typename> class Hash = std::hash,
+			template <typename> class Equal = std::equal_to,
+			template <typename> class Less = std::less
+			>
+    void test_map_insert_integrated() {
+
+    	using THash = ::fsc::TransformedHash<Kmer, Hash, Transform>;
+    	using TLess = ::fsc::TransformedComparator<Kmer, Less, Transform>;
+    	using Equal1 = ::fsc::TransformedComparator<Kmer, Equal, Transform>;
+//    	using Equal2 = ::fsc::sparsehash::compare<Kmer, Equal, Transform>;
+
+
+    	auto test = make_kmer_map<Kmer, canonical, THash, Equal1>();
+		::std::unordered_map<Kmer, uint32_t, THash, Equal1> gold;
+		::std::vector<std::pair<Kmer, uint32_t> > entries;
+
+		this->map_insert_integrated<canonical, TLess>(test, gold, entries);
+
+//		test.print();
+
+		::std::vector<::std::pair<Kmer, uint32_t> > test_vals = test.to_vector();
+		::std::vector<::std::pair<Kmer, uint32_t> > gold_vals(gold.begin(), gold.end());
+
+
+		EXPECT_EQ(gold_vals.size(), test_vals.size());
+
+
+		::std::sort(test_vals.begin(), test_vals.end(), [](::std::pair<Kmer, uint32_t> const & x, ::std::pair<Kmer, uint32_t> const &y) {
+			return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
+		} );
+		::std::sort(gold_vals.begin(), gold_vals.end(), [](::std::pair<Kmer, uint32_t> const & x, ::std::pair<Kmer, uint32_t> const &y) {
+			return (x.first == y.first) ? (x.second < y.second) : (x.first < y.first);
+		} );
+
+		bool same = ::std::equal(test_vals.begin(), test_vals.end(), gold_vals.begin());
+
+	  if (!same) {
+		  std::cout << " test count " << test.size() << " gold count " << gold_vals.size() << std::endl;
+		  size_t min = std::min(test_vals.size(), gold_vals.size());
+		for (size_t i = 0; i < std::min(min, 100UL); ++i) {
+			std::cout << test_vals[i].first << "->" << test_vals[i].second << "\t" << gold_vals[i].first << "->" << gold_vals[i].second << std::endl;
+//		  printf("%ld->%ld\t%ld->%ld\n", test_vals[i].first, test_vals[i].second, gold_vals[i].first, gold_vals[i].second);
+		}
+		printf("\n...\n\n");
+		for (size_t i = min - std::min(100UL, min); i < min; ++i) {
+			std::cout << test_vals[i].first << "->" << test_vals[i].second << "\t" << gold_vals[i].first << "->" << gold_vals[i].second << std::endl;
+//		  printf("%ld->%ld\t%ld->%ld\n", test_vals[i].first, test_vals[i].second, gold_vals[i].first, gold_vals[i].second);
+		}
+	  }
+
+
+		ASSERT_TRUE(same);
+    }
 
 //    template <typename Kmer = T, bool canonical = false,
 //    		template <typename> class Transform = ::bliss::transform::identity,
@@ -849,7 +1036,12 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert)
 									  HASH_K, std::equal_to, std::less>();
 }
 
-
+TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert_integrated)
+{
+	this->template test_map_insert_integrated<TypeParam, false,
+									  ::bliss::transform::identity,
+									  HASH_K, std::equal_to, std::less>();
+}
 //TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_equal_range)
 //{
 //
@@ -879,6 +1071,12 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert)
 }
 
 
+TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert_integrated)
+{
+	this->template test_map_insert_integrated<TypeParam, true,
+									  ::bliss::transform::identity,
+									  HASH_K, std::equal_to, std::less>();
+}
 
 //TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_equal_range)
 //{
@@ -919,7 +1117,12 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert)
 //
 //  this->template test_map_insert<TypeParam, false, ((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) <= 1), THASH, EQUAL, LESS>();
 }
-
+TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_integrated)
+{
+	this->template test_map_insert_integrated<TypeParam, false,
+									  ::bliss::kmer::transform::lex_less,
+									  HASH_K, std::equal_to, std::less>();
+}
 
 //TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_equal_range)
 //{
@@ -1072,14 +1275,17 @@ REGISTER_TYPED_TEST_CASE_P(Hashmap_OA_RHDO_Prefix_KmerTest,
 		//						   bimolecule_multimap_equal_range,
 		//						   bimolecule_multimap_count,
 		                           single_map_insert,
+		                           single_map_insert_integrated,
 		//						   single_map_equal_range,
 								   single_map_count,
 								   single_map_erase,
 		                           canonical_map_insert,
+		                           canonical_map_insert_integrated,
 		//						   canonical_map_equal_range,
 								   canonical_map_count,
 								   canonical_map_erase,
 		                           bimolecule_map_insert,
+		                           bimolecule_map_insert_integrated,
 		//						   bimolecule_map_equal_range,
 								   bimolecule_map_count,
 								   bimolecule_map_erase

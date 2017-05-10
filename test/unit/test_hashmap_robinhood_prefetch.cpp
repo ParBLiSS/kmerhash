@@ -89,7 +89,12 @@ TYPED_TEST_P(Hashtable_OARH_PrefetchTest, insert_partial)
 
 
    MAP test;
+
+   test.reserve(this->temp.size() * 2);
+
    test.insert(this->temp.begin(), this->temp.end());
+
+   test.reserve(test.size());
 
       ::std::vector<::std::pair<TypeParam, TypeParam> > test_vals = test.to_vector();
       ::std::vector<::std::pair<TypeParam, TypeParam> > gold_vals(this->gold.begin(), this->gold.end());

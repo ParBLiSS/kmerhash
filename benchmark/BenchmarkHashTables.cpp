@@ -521,23 +521,23 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
         BL_BENCH_END(map, "insert", map.size());
     } else if (vector_mode == INDEX_MODE) {
         BL_BENCH_START(map);
-    	map.insert(std::move(input));
+    	map.insert(input);
         BL_BENCH_END(map, "v_insert", map.size());
 
     } else if (vector_mode == INTEGRATED_MODE) {
         BL_BENCH_START(map);
-    	map.insert_integrated(std::move(input));
+    	map.insert_integrated(input);
         BL_BENCH_END(map, "insert_integrated", map.size());
 
     } else if (vector_mode == SORT_MODE) {
     	std::cout << "WARNING: SORTING ONLY, NO INSERTION.  4x slower on i5-4300U hashwell with 10M DNA 31-mers even without insertion." << std::endl;
         BL_BENCH_START(map);
-    	map.insert_sort(std::move(input));
+    	map.insert_sort(input);
         BL_BENCH_END(map, "insert_sorted", map.size());
     } else if (vector_mode == SHUFFLE_MODE) {
     	std::cout << "WARNING: SHUFFLING ONLY, NO INSERTION.  2x slower on i5-4300U hashwell with 10M DNA 31-mers, even without insertion." << std::endl;
         BL_BENCH_START(map);
-    	map.insert_shuffled(std::move(input));
+    	map.insert_shuffled(input);
         BL_BENCH_END(map, "insert_shuffled", map.size());
     } else {
         BL_BENCH_START(map);
@@ -546,30 +546,30 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
     }
   }
 
-//  BL_BENCH_START(map);
-//  size_t result = 0;
-//  size_t i = 0;
-//  size_t max = count / query_frac;
-//  for (; i < max; ++i) {
-//    auto iter = map.find(query[i]);
-//    result ^= (*iter).second;
-//  }
-//  BL_BENCH_END(map, "find", result);
-//
-//  BL_BENCH_START(map);
-//  auto counts = map.count(query.begin(), query.end());
-//  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-//  BL_BENCH_END(map, "count", result);
+  BL_BENCH_START(map);
+  size_t result = 0;
+  size_t i = 0;
+  size_t max = count / query_frac;
+  for (; i < max; ++i) {
+    auto iter = map.find(query[i]);
+    result ^= (*iter).second;
+  }
+  BL_BENCH_END(map, "find", result);
 
-//  BL_BENCH_START(map);
-//  result = map.erase(query.begin(), query.end());
-//  BL_BENCH_END(map, "erase", result);
-//
-//
-//  BL_BENCH_START(map);
-//  counts = map.count(query.begin(), query.end());
-//  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-//  BL_BENCH_END(map, "count2", result);
+  BL_BENCH_START(map);
+  auto counts = map.count(query.begin(), query.end());
+  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+  BL_BENCH_END(map, "count", result);
+
+  BL_BENCH_START(map);
+  result = map.erase(query.begin(), query.end());
+  BL_BENCH_END(map, "erase", result);
+
+
+  BL_BENCH_START(map);
+  counts = map.count(query.begin(), query.end());
+  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+  BL_BENCH_END(map, "count2", result);
 
 
   BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
@@ -607,7 +607,7 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 
     if (vector_mode == INDEX_MODE) {
         BL_BENCH_START(map);
-    	map.insert(std::move(input));
+    	map.insert(input);
         BL_BENCH_END(map, "v_insert", map.size());
 
     } else {
@@ -617,30 +617,30 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
     }
   }
 
-//  BL_BENCH_START(map);
-//  size_t result = 0;
-//  size_t i = 0;
-//  size_t max = count / query_frac;
-//  for (; i < max; ++i) {
-//    auto iter = map.find(query[i]);
-//    result ^= (*iter).second;
-//  }
-//  BL_BENCH_END(map, "find", result);
-//
-//  BL_BENCH_START(map);
-//  auto counts = map.count(query.begin(), query.end());
-//  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-//  BL_BENCH_END(map, "count", result);
+  BL_BENCH_START(map);
+  size_t result = 0;
+  size_t i = 0;
+  size_t max = count / query_frac;
+  for (; i < max; ++i) {
+    auto iter = map.find(query[i]);
+    result ^= (*iter).second;
+  }
+  BL_BENCH_END(map, "find", result);
 
-//  BL_BENCH_START(map);
-//  result = map.erase(query.begin(), query.end());
-//  BL_BENCH_END(map, "erase", result);
-//
-//
-//  BL_BENCH_START(map);
-//  counts = map.count(query.begin(), query.end());
-//  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-//  BL_BENCH_END(map, "count2", result);
+  BL_BENCH_START(map);
+  auto counts = map.count(query.begin(), query.end());
+  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+  BL_BENCH_END(map, "count", result);
+
+  BL_BENCH_START(map);
+  result = map.erase(query.begin(), query.end());
+  BL_BENCH_END(map, "erase", result);
+
+
+  BL_BENCH_START(map);
+  counts = map.count(query.begin(), query.end());
+  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+  BL_BENCH_END(map, "count2", result);
 
 
   BL_BENCH_REPORT_MPI_NAMED(map, name, comm);

@@ -390,10 +390,10 @@ public:
 	 * @brief reserve space for specified entries (below max load factor)
 	 */
   void reserve(size_type n) {
-    if (n > this->max_load) {   // if requested more than current max load, then we need to resize up.
+//    if (n > this->max_load) {   // if requested more than current max load, then we need to resize up.
       rehash(static_cast<size_type>(static_cast<float>(n) / this->max_load_factor));
       // rehash to the new size.    current bucket count should be less than next_power_of_2(n).
-    }  // do not resize down.  do so only when erase.
+//    }  // do not resize down.  do so only when erase.
   }
 
   /**
@@ -942,13 +942,13 @@ public:
 
 	/// batch insert using sorting.  This is about 4x slower on core i5-4200U (haswell) than integrated batch insertion above, even just for sort.
 	template <typename LESS = ::std::less<key_type> >
-	void insert_sort(::std::vector<value_type> && input) {
+	void insert_sort(::std::vector<value_type> const & input) {
 
 	  throw ::std::logic_error("ERROR: DISABLED FOR NONCIRC VERSION");
 
 	}
 
-  void insert_shuffled(::std::vector<value_type> && input) {
+  void insert_shuffled(::std::vector<value_type> const & input) {
 
     throw ::std::logic_error("ERROR: DISABLED FOR NONCIRC VERSION");
 
