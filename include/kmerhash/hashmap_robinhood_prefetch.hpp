@@ -1480,6 +1480,179 @@ public:
 
 	}
 
+
+
+
+  template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
+    typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
+  std::vector<value_type> find(Iter begin, Iter end) {
+    size_t total = std::distance(begin, end);
+
+    ::std::vector<value_type> counts;
+    counts.reserve(total);
+
+#if defined(REPROBE_STAT)
+    reset_reprobe_stats();
+#endif
+
+    bucket_id_type id, id_la;
+    bucket_id_type found;
+
+    // USE power of 2 look ahead...
+
+    // prefetch.
+    // allocate a circular buffer of size 64 (8 cache lines)
+      size_t *hashes = (size_t *)(malloc(LOOK_AHEAD * sizeof(size_t)));
+      info_type hash_pos = 0;
+
+      // first preload LOOK_AHEAD number of items.
+      size_t block1_max = std::min(static_cast<size_t>(LOOK_AHEAD), total);  // if fewer than LOOK_AHEAD, no point in using?
+      size_t block2_max = (total > LOOK_AHEAD) ? (total - LOOK_AHEAD) : 0;  // if fewer than LOOK_AHEAD, no block 2.
+      size_t block3_min = block2_max;  // may not need to allocate this...
+
+      // try _MM_HINT_NT and _MM_HINT_T0.  try simple loop first.
+
+      // ====  prefetch.  also save the hash function.
+      size_t i = 0;
+      for (Iter it = begin; it != begin + block1_max; ++it, ++i) {
+        // compute hash and store it.
+        hashes[i] = hash((*it).first);  // no need to prefetch here - sequential access.
+
+        id = hashes[i] & mask;  //
+
+        // prefetch info container
+        _mm_prefetch(&(info_container[id]), _MM_HINT_T0);
+        // prefetch container
+        _mm_prefetch(&(container[id]), _MM_HINT_NTA);
+      }
+
+    size_t hashes_mask = LOOK_AHEAD - 1;
+
+    // iterate based on size between rehashes
+    i = 0;
+    for (Iter it = begin, it2 = begin + block1_max; it != begin + block2_max; ++it, ++it2, ++i) {
+
+      // === same code as in insert(1)..
+
+      // first get the bucket id
+      hash_pos = i & hashes_mask;
+      id = hashes[hash_pos] & mask;  // target bucket id.
+
+      //=== prefetch
+      hashes[hash_pos] = hash((*it2).first);
+      id_la = hashes[hash_pos] & mask;
+      _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
+      _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
+
+      found = find_pos_with_hint((*it).first, id);
+      if (exists(found)) counts.emplace_back(container[get_bucket_id(found)]);
+    }
+
+    for (Iter it = begin + block3_min; it != end; ++it, ++i) {
+      // === same code as in insert(1)..
+
+      // first get the bucket id
+      hash_pos = i & hashes_mask;
+      id = hashes[hash_pos] & mask;  // target bucket id.
+
+      found = find_pos_with_hint((*it).first, id);
+      if (exists(found)) counts.emplace_back(container[get_bucket_id(found)]);
+    }
+
+#if defined(REPROBE_STAT)
+    print_reprobe_stats("COUNT ITER", std::distance(begin, end), counts.size());
+#endif
+
+    free(hashes);
+    return counts;
+  }
+
+
+  template <typename Iter, typename std::enable_if<std::is_constructible<key_type,
+    typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
+  std::vector<value_type> find(Iter begin, Iter end) {
+    size_t total = std::distance(begin, end);
+
+    ::std::vector<value_type> counts;
+    counts.reserve(total);
+
+#if defined(REPROBE_STAT)
+    reset_reprobe_stats();
+#endif
+
+    bucket_id_type id, id_la;
+    bucket_id_type found;
+
+    // USE power of 2 look ahead...
+
+    // prefetch.
+    // allocate a circular buffer of size 64 (8 cache lines)
+      size_t *hashes = (size_t *)(malloc(LOOK_AHEAD * sizeof(size_t)));
+      info_type hash_pos = 0;
+
+      // first preload LOOK_AHEAD number of items.
+      size_t block1_max = std::min(static_cast<size_t>(LOOK_AHEAD), total);  // if fewer than LOOK_AHEAD, no point in using?
+      size_t block2_max = (total > LOOK_AHEAD) ? (total - LOOK_AHEAD) : 0;  // if fewer than LOOK_AHEAD, no block 2.
+      size_t block3_min = block2_max;  // may not need to allocate this...
+
+      // try _MM_HINT_NT and _MM_HINT_T0.  try simple loop first.
+
+      // ====  prefetch.  also save the hash function.
+      size_t i = 0;
+      for (Iter it = begin; it != begin + block1_max; ++it, ++i) {
+        // compute hash and store it.
+        hashes[i] = hash(*it);  // no need to prefetch here - sequential access.
+
+        id = hashes[i] & mask;  //
+
+        // prefetch info container
+        _mm_prefetch(&(info_container[id]), _MM_HINT_T0);
+        // prefetch container
+        _mm_prefetch(&(container[id]), _MM_HINT_NTA);
+      }
+
+    size_t hashes_mask = LOOK_AHEAD - 1;
+
+    // iterate based on size between rehashes
+    i = 0;
+    for (Iter it = begin, it2 = begin + block1_max; it != begin + block2_max; ++it, ++it2, ++i) {
+
+      // === same code as in insert(1)..
+
+      // first get the bucket id
+      hash_pos = i & hashes_mask;
+      id = hashes[hash_pos] & mask;  // target bucket id.
+
+      //=== prefetch
+      hashes[hash_pos] = hash(*it2);
+      id_la = hashes[hash_pos] & mask;
+      _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
+      _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
+
+      found = find_pos_with_hint(*it, id);
+      if (exists(found)) counts.emplace_back(container[get_bucket_id(found)]);
+    }
+
+    for (Iter it = begin + block3_min; it != end; ++it, ++i) {
+      // === same code as in insert(1)..
+
+      // first get the bucket id
+      hash_pos = i & hashes_mask;
+      id = hashes[hash_pos] & mask;  // target bucket id.
+
+      found = find_pos_with_hint(*it, id);
+      if (exists(found)) counts.emplace_back(container[get_bucket_id(found)]);
+    }
+
+#if defined(REPROBE_STAT)
+    print_reprobe_stats("COUNT ITER", std::distance(begin, end), counts.size());
+#endif
+
+    free(hashes);
+    return counts;
+  }
+
+
 	/**
 	 * @brief.  updates current value.  behaves like insert, but overwrites the exists.
 	 */

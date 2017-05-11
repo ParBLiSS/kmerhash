@@ -17,7 +17,7 @@
 
 // include google test
 #include <gtest/gtest.h>
-#include "kmerhash/hashmap_robinhood_offsets3.hpp"
+#include "kmerhash/hashmap_robinhood_offsets_prefetch.hpp"
 
 #include <string>
 #include <unordered_map>

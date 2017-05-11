@@ -15,7 +15,7 @@
  */
 
 /*
- * hashtable_OA_RH_do_prefix.hpp
+ * hashmap_robinhood_offsets_prefetch.hpp
  *
  *  Created on: Feb 27, 2017
  *      Author: tpan
@@ -23,8 +23,8 @@
  *  for robin hood hashing
  */
 
-#ifndef KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS3_HPP_
-#define KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS3_HPP_
+#ifndef KMERHASH_HASHMAP_ROBINHOOD_OFFSETS_PREFETCH_HPP_
+#define KMERHASH_HASHMAP_ROBINHOOD_OFFSETS_PREFETCH_HPP_
 
 #include <vector>   // for vector.
 #include <type_traits> // for is_constructible
@@ -33,10 +33,12 @@
 
 #include "kmerhash/aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
 #include "kmerhash/math_utils.hpp"
+#include "mmintrin.h"
 
 //#define REPROBE_STAT
 
 // should be easier for prefetching
+#define LOOK_AHEAD 32
 
 namespace fsc {
 
@@ -208,8 +210,8 @@ protected:
     using bucket_id_type = size_t;
 //    static constexpr bucket_id_type bid_pos_mask = ~(static_cast<bucket_id_type>(0)) >> 9;   // lower 55 bits set.
 //    static constexpr bucket_id_type bid_pos_exists = 1UL << 55;  // 56th bit set.
-      static const bucket_id_type bid_pos_mask = ~(static_cast<bucket_id_type>(0)) >> 1;   // lower 63 bits set.
-      static const bucket_id_type bid_pos_exists = 1ULL << 63;  // 64th bit set.
+      static constexpr bucket_id_type bid_pos_mask = ~(static_cast<bucket_id_type>(0)) >> 1;   // lower 63 bits set.
+      static constexpr bucket_id_type bid_pos_exists = 1ULL << 63;  // 64th bit set.
 //    static constexpr bucket_id_type bid_info_mask = static_cast<bucket_id_type>(info_mask) << 56;   // lower 55 bits set.
 //    static constexpr bucket_id_type bid_info_empty = static_cast<bucket_id_type>(info_empty) << 56;  // 56th bit set.
 
@@ -225,9 +227,9 @@ protected:
     }
     inline bucket_id_type make_existing_bucket_id(size_t & pos) const { //, info_type const & info) const {
       //      return make_missing_bucket_id(pos, info) | bid_pos_exists;
-      // return static_cast<bucket_id_type>(*pos) | bid_pos_exists;
-      reinterpret_cast<uint32_t*>(&pos)[1] |= 0x80000000U;
-      return static_cast<bucket_id_type>(pos);
+      return static_cast<bucket_id_type>(pos) | bid_pos_exists;
+//      reinterpret_cast<uint32_t*>(&pos)[1] |= 0x80000000U;
+//      return static_cast<bucket_id_type>(pos);
     }
 
     // NOT USED
@@ -272,6 +274,14 @@ protected:
 
 
     //=========  end BUCKET_ID_TYPE definitions.
+
+
+	// =========  prefetch constants.
+  static constexpr uint32_t info_per_cacheline = 64 / sizeof(info_type);
+  static constexpr uint32_t value_per_cacheline = 64 / sizeof(value_type);
+  static constexpr uint32_t info_prefetch_iters = (LOOK_AHEAD + info_per_cacheline - 1) / info_per_cacheline;
+  static constexpr uint32_t value_prefetch_iters = (LOOK_AHEAD + value_per_cacheline - 1) / value_per_cacheline;
+	// =========  END prefetech constants.
 
 
     size_t lsize;
@@ -513,8 +523,8 @@ protected:
    *        figure out the scaling factor, and create an array to track iteration position as we go.   note that each may need to be at diff points...
    *
    */
-  void copy_downsize(container_type & target, info_container_type & target_info,
-                     size_type const & target_buckets) {
+  void copy_downsize_prefetch(container_type & target, info_container_type & target_info,
+                      size_type const & target_buckets) {
     size_type m = target_buckets - 1;
     assert((target_buckets & m) == 0);   // assert this is a power of 2.
 
@@ -522,79 +532,99 @@ protected:
     size_t pos;
     size_t endd;
 
-//    std::cout << "RESIZE DOWN " << target_buckets << std::endl;
+    //    std::cout << "RESIZE DOWN " << target_buckets << std::endl;
 
-    std::vector<size_t> offsets(target_buckets, 0);
-    size_t iterations = buckets / target_buckets;
+    size_t new_start = 0, new_end = 0;
+    size_t blocks = buckets / target_buckets;
+    size_t bl;
 
-    // initialize as size storage for now.
-    std::fill(target_info.begin(), target_info.begin() + target_buckets, 0);
 
-    // compute the sizes of the new bucket first.  can go in target_info for now.
-    for (size_t it = 0; it < iterations; ++it) {
-    	for (bid = 0; bid < target_buckets; ++bid, ++id) {
-    		if (is_normal(info_container[id])) {
-    			target_info[bid] += get_distance(info_container[id + 1]) + 1 - get_distance(info_container[id]);
-    		}
-    	}
+    //prefetch only if target_buckets is larger than LOOK_AHEAD
+    size_t next_info_prefetch_bid;
+    size_t next_value_prefetch_bid;
+    if (target_buckets > (2 * LOOK_AHEAD)) {
+      for (bl = 0; bl < blocks; ++bl) {
+        // prefetch 2*LOOK_AHEAD of the info_container.
+        for (bid = 0; bid <= (2 * LOOK_AHEAD); bid += info_per_cacheline) {
+          _mm_prefetch(&(info_container[bid + bl * target_buckets]), _MM_HINT_T0);
+        }
+        next_info_prefetch_bid = bid;
+        // for now, also prefetch 2 * LOOK_AHEAD number of entries from the container
+        for (bid = 0; bid <= LOOK_AHEAD; bid += value_per_cacheline) {
+          _mm_prefetch(&(container[bid + bl * target_buckets]), _MM_HINT_T0);
+        }
+        // save position
+        next_value_prefetch_bid = bid;
+        // rest of the 2*LOOK_AHEAD - this is just to be sure that the region in container between LOOK_AHEAD and info_container[LOOK_AHEAD] (the offset) is covered.
+        for (; bid <= (2*LOOK_AHEAD); bid += value_per_cacheline) {
+          _mm_prefetch(&(container[bid + bl * target_buckets]), _MM_HINT_T0);
+        }
+
+        // NEED TO Prefetch for write.
+
+      }
     }
 
-    // then get the EXCLUSIVE prefix sum.  in vector of size_t
-    offsets[0] = 0;
-    for (bid = 0; bid < m; ++bid) {
-    	offsets[bid + 1] = std::max(offsets[bid] + target_info[bid], bid + 1);  // empty slot points to self, and nonempty still need to advance..
+    // iterate over all matching blocks.  fill one target bucket at a time and immediately fill the target info.
+    info_type prefetched_info;
+    for (bid = 0; bid < target_buckets; ++bid) {
+      // starting offset is maximum of bid and prev offset.
+      new_start = std::max(bid, new_end);
+      new_end = new_start;
+
+      // prefetch info_container at 2 LOOK_AHEAD ahead.
+      if (next_info_prefetch_bid < target_buckets) {
+        for (bl = 0; bl < blocks; ++bl) {
+          _mm_prefetch(&(info_container[next_info_prefetch_bid + bl * target_buckets]), _MM_HINT_T0);
+        }
+        next_info_prefetch_bid += info_per_cacheline;
+      }
+      // prefetch container 1 LOOK_AHEAD ahead, and only if info_container indicates content.
+      if (next_value_prefetch_bid < target_buckets) {
+        for (bl = 0; bl < blocks; ++bl) {
+          prefetched_info = info_container[next_value_prefetch_bid + bl * target_buckets];
+          if (is_normal(prefetched_info)) _mm_prefetch(&(container[get_distance(prefetched_info)]), _MM_HINT_T0);
+        }
+      }
+
+
+      for (bl = 0; bl < blocks; ++bl) {
+        id = bid + bl * target_buckets;
+
+        if (is_normal(info_container[id])) {
+          // get the range
+          pos = id + get_distance(info_container[id]);
+          endd = id + 1 + get_distance(info_container[id + 1]);
+
+          // copy the range.
+          //				std::cout << " copy from " << pos << " to " << new_end << " length " << (endd - pos) << std::endl;
+          memmove(&(target[new_end]), &(container[pos]), sizeof(value_type) * (endd - pos));
+
+          new_end += (endd - pos);
+
+          //				if (bid == target_buckets - 1)
+          //					std::cout << " last: " << bid << " from id " << id << " old " << pos << "-" << endd << " new " << new_start << "-" << new_end << std::endl;
+        }
+      }
+
+      // offset - current bucket id.
+      target_info[bid] = ((new_end - new_start) == 0 ? info_empty : info_normal) + new_start - bid;
+      //		if (bid == target_buckets - 1)
+      //			std::cout << " info: " << bid << " from id " << id << " info " << static_cast<size_t>(target_info[bid]) << std::endl;
     }
+    // adjust the first padding target info.
+    //    if ((new_end - new_start) > 0) target_info[target_buckets] = info_empty + new_end - target_buckets;
+    //    else target_info[target_buckets] = target_info[target_buckets - 1] - 1;
 
-    // then copy to the right positions, using the offsets to keep track.
-    id = 0;
-    for (size_t it = 0; it < iterations; ++it) {
-    	for (bid = 0; bid < target_buckets; ++bid, ++id) {
-    		if (is_normal(info_container[id])) {
-    			// get the range
-    			pos = id + get_distance(info_container[id]);
-    			endd = id + 1 + get_distance(info_container[id + 1]);
-
-    			// copy the range.
-    			memmove(&(target[offsets[bid]]), &(container[pos]), sizeof(value_type) * (endd - pos));
-
-    			// adjust the offset
-    			offsets[bid] += endd - pos;
-    		}
-    	}
-    }
-
-    // and setup the target_info offsets.  offsets now have inclusive prefix sum
-    target_info[0] = target_info[0] == 0 ? info_empty : info_normal;
-    for (bid = 1; bid < target_buckets; ++bid) {
-    	// offsets - target_info gets back the exclusive scan.  offsets[bid] is pos bucket end from 0.  need offset from start of bucket, so
-    	// subtract count (in target_info[bid], gives position of bucket start from 0), and subtract bid (gives offset from bid.)
-    	target_info[bid] = (target_info[bid] == 0 ? info_empty : info_normal) + static_cast<info_type>(offsets[bid] - bid - static_cast<size_t>(target_info[bid]));
-    }
+    //	std::cout << " info: " << (target_buckets - 1) << " info " << static_cast<size_t>(target_info[target_buckets - 1]) << " entry " << target[target_buckets - 1].first << std::endl;
     // adjust the target_info at the end, in the padding region.
-    for (bid = target_buckets; bid < offsets[target_buckets - 1]; ++bid) {
-    	target_info[bid] = target_info[bid - 1] - 1;
-    	set_empty(target_info[bid]);
+    for (bid = target_buckets; bid < new_end; ++bid) {
+      new_start = std::max(bid, new_end);  // fixed new_end.  get new start.
+      // if last one is not empty, then first padding position is same distance with
+      target_info[bid] = info_empty + new_start - bid;
+      //		std::cout << " info: " << bid << " info " << static_cast<size_t>(target_info[bid]) << " entry " << target[bid].first << std::endl;
     }
 
-
-//    // iterate through the entire input.
-//    for (size_t i = 0; i < buckets; ++i) {
-//      if (is_normal(info_container[i])) {  // copy bucket ranges for non-empty buckets.
-//    	  //doing a range allows memcpy, or at least to skip rehash.
-//        // get start and end of bucket.  exclusive end.
-//        pos = i + static_cast<size_t>(get_distance(info_container[i]));
-//        endd = i + 1 + static_cast<size_t>(get_distance(info_container[i + 1]));
-//
-//        // compute the new id from current bucket.  since downsize and power of 2, modulus would do.
-//        id = i & m;
-//
-//        // do batch copy to bucket 'id', copy from pos to endd.  the shifting may be compacting out empty spaces.
-//        if ((endd - pos) > 1) copy_with_hint(target, target_info, id, container, pos, endd);
-//        else copy_with_hint(target, target_info, id, container[pos]);
-//
-//      }  // else is empty, so continue.
-//    }
-//    std::cout << "RESIZE DOWN DONE " << target_buckets << std::endl;
   }
   void copy_downsize2(container_type & target, info_container_type & target_info,
                      size_type const & target_buckets) {
@@ -614,69 +644,49 @@ protected:
     // iterate over all matching blocks.  fill one target bucket at a time and immediately fill the target info.
     size_t bl;
     for (bid = 0; bid < target_buckets; ++bid) {
-		// starting offset is maximum of bid and prev offset.
-		new_start = std::max(bid, new_end);
-		new_end = new_start;
+    // starting offset is maximum of bid and prev offset.
+    new_start = std::max(bid, new_end);
+    new_end = new_start;
 
-		for (bl = 0; bl < blocks; ++bl) {
-			id = bid + bl * target_buckets;
+    for (bl = 0; bl < blocks; ++bl) {
+      id = bid + bl * target_buckets;
 
 
-			if (is_normal(info_container[id])) {
-				// get the range
-				pos = id + get_distance(info_container[id]);
-				endd = id + 1 + get_distance(info_container[id + 1]);
+      if (is_normal(info_container[id])) {
+        // get the range
+        pos = id + get_distance(info_container[id]);
+        endd = id + 1 + get_distance(info_container[id + 1]);
 
-				// copy the range.
-//				std::cout << " copy from " << pos << " to " << new_end << " length " << (endd - pos) << std::endl;
-				memmove(&(target[new_end]), &(container[pos]), sizeof(value_type) * (endd - pos));
+        // copy the range.
+//        std::cout << " copy from " << pos << " to " << new_end << " length " << (endd - pos) << std::endl;
+        memmove(&(target[new_end]), &(container[pos]), sizeof(value_type) * (endd - pos));
 
-				new_end += (endd - pos);
+        new_end += (endd - pos);
 
-//				if (bid == target_buckets - 1)
-//					std::cout << " last: " << bid << " from id " << id << " old " << pos << "-" << endd << " new " << new_start << "-" << new_end << std::endl;
-			}
-    	}
+//        if (bid == target_buckets - 1)
+//          std::cout << " last: " << bid << " from id " << id << " old " << pos << "-" << endd << " new " << new_start << "-" << new_end << std::endl;
+      }
+      }
 
-		// offset - current bucket id.
-		target_info[bid] = ((new_end - new_start) == 0 ? info_empty : info_normal) + new_start - bid;
-//		if (bid == target_buckets - 1)
-//			std::cout << " info: " << bid << " from id " << id << " info " << static_cast<size_t>(target_info[bid]) << std::endl;
+    // offset - current bucket id.
+    target_info[bid] = ((new_end - new_start) == 0 ? info_empty : info_normal) + new_start - bid;
+//    if (bid == target_buckets - 1)
+//      std::cout << " info: " << bid << " from id " << id << " info " << static_cast<size_t>(target_info[bid]) << std::endl;
     }
     // adjust the first padding target info.
 //    if ((new_end - new_start) > 0) target_info[target_buckets] = info_empty + new_end - target_buckets;
 //    else target_info[target_buckets] = target_info[target_buckets - 1] - 1;
 
-//	std::cout << " info: " << (target_buckets - 1) << " info " << static_cast<size_t>(target_info[target_buckets - 1]) << " entry " << target[target_buckets - 1].first << std::endl;
+//  std::cout << " info: " << (target_buckets - 1) << " info " << static_cast<size_t>(target_info[target_buckets - 1]) << " entry " << target[target_buckets - 1].first << std::endl;
     // adjust the target_info at the end, in the padding region.
     for (bid = target_buckets; bid < new_end; ++bid) {
-    	new_start = std::max(bid, new_end);  // fixed new_end.  get new start.
-    	// if last one is not empty, then first padding position is same distance with
-    	target_info[bid] = info_empty + new_start - bid;
-//		std::cout << " info: " << bid << " info " << static_cast<size_t>(target_info[bid]) << " entry " << target[bid].first << std::endl;
+      new_start = std::max(bid, new_end);  // fixed new_end.  get new start.
+      // if last one is not empty, then first padding position is same distance with
+      target_info[bid] = info_empty + new_start - bid;
+//    std::cout << " info: " << bid << " info " << static_cast<size_t>(target_info[bid]) << " entry " << target[bid].first << std::endl;
     }
 
-
-//    // iterate through the entire input.
-//    for (size_t i = 0; i < buckets; ++i) {
-//      if (is_normal(info_container[i])) {  // copy bucket ranges for non-empty buckets.
-//    	  //doing a range allows memcpy, or at least to skip rehash.
-//        // get start and end of bucket.  exclusive end.
-//        pos = i + static_cast<size_t>(get_distance(info_container[i]));
-//        endd = i + 1 + static_cast<size_t>(get_distance(info_container[i + 1]));
-//
-//        // compute the new id from current bucket.  since downsize and power of 2, modulus would do.
-//        id = i & m;
-//
-//        // do batch copy to bucket 'id', copy from pos to endd.  the shifting may be compacting out empty spaces.
-//        if ((endd - pos) > 1) copy_with_hint(target, target_info, id, container, pos, endd);
-//        else copy_with_hint(target, target_info, id, container[pos]);
-//
-//      }  // else is empty, so continue.
-//    }
-//    std::cout << "RESIZE DOWN DONE " << target_buckets << std::endl;
   }
-
 
 
 
@@ -1119,89 +1129,6 @@ protected:
 	}
 
 
-//	/**
-//	 * insert multiple positions at the same time.
-//	 *
-//	 * no repeats in sstart to send, and between input and target.
-//	 *
-//	 * shift the current bucket and insert at front of bucket.
-//	 */
-//	inline void copy_with_hint(container_type & target,
-//			info_container_type & target_info,
-//			size_t const & id,
-//			container_type const & source,
-//			size_t const & sstart, size_t const & send) {
-//
-//      BROKEN.
-//
-//		assert(id < buckets);
-//
-//		if (sstart == send) return;
-//
-//		size_t count = send - sstart;
-//
-//		// get the starting position
-//		info_type info = target_info[id];
-//		set_normal(target_info[id]);   // if empty, change it.  if normal, same anyways.
-//
-//		// get the range for this bucket.
-//		size_t start = id + get_distance(info);
-//
-//		// scan for the next X number of empty positions
-//		size_t end = id + 1 + get_distance(target_info[id + 1]);
-//		std::vector<size_t> empties;
-//		empties.reserve(count);
-//		size_t c = 0;
-//		for (; (end < target_info.size()) && (c < count);) {
-//			if (target_info[end] == info_empty) {
-//				empties.emplace_back(end);
-//
-//				std::cout << "from id " << id << " moving " << count << " empty at " << end << std::endl;
-//				++c;
-//			}
-//			// can skip ahead with target_info[end]
-//			end += std::max(get_distance(target_info[end]), static_cast<info_type>(1));  // by at least 1.
-//		}
-//
-//		assert(empties.size() == count);
-//
-//		// now compact backwards.  first do the container via MEMMOVE
-//		int i = count - 1;
-//		end = empties[i];
-//		size_t next;
-//		for (; i > 0; --i) {
-//			next = empties[i - 1];
-//
-//			std::cout << " moving " << next << " to " << end << " with i " << i << std::endl;
-//
-//			memmove(&(target[next + 1 + count - i]), &(target[next + 1]), sizeof(value_type) * (end - next - 1));
-//			// and increment the infos.
-//			for (size_t j = next + 1; j <= end; ++j) {
-//				target_info[j] += count - i;
-//			}
-//
-//			end = next;
-//		}
-//		// can potentially be optimized to use only swap, if distance is long enough.
-//		memmove(&(target[start + count]), &(target[start]), sizeof(value_type) * (end - start));
-//		// and increment the infos from id+1 to first empty entry.
-//		for (size_t j = id + 1; j <= end; ++j) {
-//			target_info[j] += count;
-//		}
-//
-//		// now copy in.
-//		memmove(&(target[end]), &(source[sstart]), sizeof(value_type) * count);
-//
-//#if defined(REPROBE_STAT)
-//		this->shifts += (end - start);
-//		this->max_shifts = std::max(this->max_shifts, (end - start));
-//		this->moves += (end - start);
-//		this->max_moves = std::max(this->max_moves, (end - start));
-//#endif
-//
-//		return;
-//	}
-
 
 
 #if defined(REPROBE_STAT)
@@ -1319,18 +1246,54 @@ public:
 		reset_reprobe_stats();
 		size_type before = lsize;
 #endif
-		bucket_id_type id;
+		bucket_id_type id, bid, bid1;
+
+		size_t ii;
+
+		std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+
+    //prefetch only if target_buckets is larger than LOOK_AHEAD
+		size_t max_prefetch2 = std::min(info_container.size(), static_cast<size_t>(2 * LOOK_AHEAD));
+    // prefetch 2*LOOK_AHEAD of the info_container.
+    for (ii = 0; ii < max_prefetch2; ++ii) {
+      hashes[ii] = hash(input[ii].first);
+      // prefetch the info_container entry for ii.
+      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+
+      // prefetch container as well - would be NEAR but may not be exact.
+      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+    }
 
 		// iterate based on size between rehashes
-		for (size_t i = 0; i < input.size(); ++i) {
+    constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
+		for (size_t i = 0, i1 = LOOK_AHEAD, i2 = 2*LOOK_AHEAD; i < input.size(); ++i, ++i1, ++i2) {
 
 			// === same code as in insert(1)..
 
 			// first check if we need to resize.
-			if (lsize >= max_load) rehash(buckets << 1);
+			if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
 			// first get the bucket id
-			id = hash(input[i].first) & mask;  // target bucket id.
+			id = hashes[i & hash_mask] & mask;  // target bucket id.
+
+			// prefetch info_container.
+			if (i2 < input.size()) {
+			  ii = i2 & hash_mask;
+			  hashes[ii] = hash(input[i2].first);
+	      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+			}
+			// prefetch container
+      if (i1 < input.size()) {
+        bid = hashes[i1 & hash_mask] & mask;
+        if (is_normal(info_container[bid])) {
+          bid1 = bid + 1 + get_distance(info_container[bid + 1]);
+          bid += get_distance(info_container[bid]);
+
+          for (size_t j = bid; j < bid1; ++j) {
+            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+          }
+        }
+      }
 
 			if (missing(insert_with_hint(container, info_container, id, input[i])))
 				++lsize;
@@ -1494,19 +1457,57 @@ public:
 #if defined(REPROBE_STAT)
 		reset_reprobe_stats();
 #endif
+
+    std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+
+    //prefetch only if target_buckets is larger than LOOK_AHEAD
+    size_t ii = 0;
+    // prefetch 2*LOOK_AHEAD of the info_container.
+    for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
+      hashes[ii] = hash((*it).first);
+      // prefetch the info_container entry for ii.
+      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+
+      // prefetch container as well - would be NEAR but may not be exact.
+      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+    }
+
+    size_t total = std::distance(begin, end);
 		::std::vector<size_type> counts;
-		counts.reserve(std::distance(begin, end));
+		counts.reserve(total);
 
-		size_t id;
-		key_type k;
+		size_t id, bid, bid1;
 		bucket_id_type found;
+		Iter it2 = begin;
+		std::advance(it2, 2 * LOOK_AHEAD);
+		    size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
+		    constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
 
-		for (auto it = begin; it != end; ++it) {
+		for (auto it = begin; it != end; ++it, ++it2, ++i, ++i1, ++i2) {
 
-			k = (*it).first;
-			id = hash(k) & mask;
+      // first get the bucket id
+      id = hashes[i & hash_mask] & mask;  // target bucket id.
 
-			found = find_pos_with_hint(k, id);
+      // prefetch info_container.
+      if (i2 < total) {
+        ii = i2 & hash_mask;
+        hashes[ii] = hash((*it2).first);
+        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+      }
+      // prefetch container
+      if (i1 < total) {
+        bid = hashes[i1 & hash_mask] & mask;
+        if (is_normal(info_container[bid])) {
+          bid1 = bid + 1 + get_distance(info_container[bid + 1]);
+          bid += get_distance(info_container[bid]);
+
+          for (size_t j = bid; j < bid1; ++j) {
+            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+          }
+        }
+      }
+
+			found = find_pos_with_hint((*it).first, id);
 
 			counts.emplace_back(exists(found));
 		}
@@ -1524,23 +1525,61 @@ public:
 #if defined(REPROBE_STAT)
 		reset_reprobe_stats();
 #endif
-		::std::vector<size_type> counts;
-		counts.reserve(std::distance(begin, end));
+    std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+
+    //prefetch only if target_buckets is larger than LOOK_AHEAD
+    size_t ii = 0;
+    // prefetch 2*LOOK_AHEAD of the info_container.
+    for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
+      hashes[ii] = hash(*it);
+      // prefetch the info_container entry for ii.
+      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+
+      // prefetch container as well - would be NEAR but may not be exact.
+      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+    }
 
 
-		size_t id;
-		key_type k;
-		bucket_id_type found;
+    size_t total = std::distance(begin, end);
+    ::std::vector<size_type> counts;
+    counts.reserve(total);
 
-		for (auto it = begin; it != end; ++it) {
+    size_t id, bid, bid1;
+    bucket_id_type found;
+    Iter it2 = begin;
+    std::advance(it2, 2 * LOOK_AHEAD);
+        size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
+        constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
 
-			k = *it;
-			id = hash(k) & mask;
+    for (auto it = begin; it != end; ++it, ++it2, ++i, ++i1, ++i2) {
 
-			found = find_pos_with_hint(k, id);
+      // first get the bucket id
+      id = hashes[i & hash_mask] & mask;  // target bucket id.
 
-			counts.emplace_back(exists(found));
-		}
+      // prefetch info_container.
+      if (i2 < total) {
+        ii = i2 & hash_mask;
+        hashes[ii] = hash(*it2);
+        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+      }
+      // prefetch container
+      if (i1 < total) {
+        bid = hashes[i1 & hash_mask] & mask;
+        if (is_normal(info_container[bid])) {
+          bid1 = bid + 1 + get_distance(info_container[bid + 1]);
+          bid += get_distance(info_container[bid]);
+
+          for (size_t j = bid; j < bid1; ++j) {
+            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+          }
+        }
+      }
+
+      found = find_pos_with_hint(*it, id);
+
+      counts.emplace_back(exists(found));
+    }
+
 
 #if defined(REPROBE_STAT)
 		print_reprobe_stats("COUNT iter", std::distance(begin, end), (lsize - before));
@@ -1579,6 +1618,144 @@ public:
 
 	}
 
+  template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
+    typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
+  std::vector<value_type> find(Iter begin, Iter end) {
+#if defined(REPROBE_STAT)
+    reset_reprobe_stats();
+#endif
+
+    std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+
+    //prefetch only if target_buckets is larger than LOOK_AHEAD
+    size_t ii = 0;
+    // prefetch 2*LOOK_AHEAD of the info_container.
+    for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
+      hashes[ii] = hash((*it).first);
+      // prefetch the info_container entry for ii.
+      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+
+      // prefetch container as well - would be NEAR but may not be exact.
+      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+    }
+
+
+    size_t total = std::distance(begin, end);
+    ::std::vector<value_type> counts;
+    counts.reserve(total);
+
+    size_t id, bid, bid1;
+    bucket_id_type found;
+    Iter it2 = begin;
+    std::advance(it2, 2 * LOOK_AHEAD);
+        size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
+        constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
+
+    for (auto it = begin; it != end; ++it, ++it2, ++i, ++i1, ++i2) {
+
+      // first get the bucket id
+      id = hashes[i & hash_mask] & mask;  // target bucket id.
+
+      // prefetch info_container.
+      if (i2 < total) {
+        ii = i2 & hash_mask;
+        hashes[ii] = hash((*it2).first);
+        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+      }
+      // prefetch container
+      if (i1 < total) {
+        bid = hashes[i1 & hash_mask] & mask;
+        if (is_normal(info_container[bid])) {
+          bid1 = bid + 1 + get_distance(info_container[bid + 1]);
+          bid += get_distance(info_container[bid]);
+
+          for (size_t j = bid; j < bid1; ++j) {
+            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+          }
+        }
+      }
+
+      found = find_pos_with_hint((*it).first, id);
+
+      counts.emplace_back(container[get_pos(found)]);
+    }
+
+#if defined(REPROBE_STAT)
+    print_reprobe_stats("COUNT iter", std::distance(begin, end), (lsize - before));
+#endif
+    return counts;
+  }
+
+
+  template <typename Iter, typename std::enable_if<std::is_constructible<key_type,
+    typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
+  std::vector<value_type> find(Iter begin, Iter end) {
+#if defined(REPROBE_STAT)
+    reset_reprobe_stats();
+#endif
+    std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+
+    //prefetch only if target_buckets is larger than LOOK_AHEAD
+    size_t ii = 0;
+    // prefetch 2*LOOK_AHEAD of the info_container.
+    for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
+      hashes[ii] = hash(*it);
+      // prefetch the info_container entry for ii.
+      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+
+      // prefetch container as well - would be NEAR but may not be exact.
+      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+    }
+
+
+    size_t total = std::distance(begin, end);
+    ::std::vector<value_type> counts;
+    counts.reserve(total);
+
+    size_t id, bid, bid1;
+    bucket_id_type found;
+    Iter it2 = begin;
+    std::advance(it2, 2 * LOOK_AHEAD);
+        size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
+        constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
+
+    for (auto it = begin; it != end; ++it, ++it2, ++i, ++i1, ++i2) {
+
+      // first get the bucket id
+      id = hashes[i & hash_mask] & mask;  // target bucket id.
+
+      // prefetch info_container.
+      if (i2 < total) {
+        ii = i2 & hash_mask;
+        hashes[ii] = hash(*it2);
+        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+      }
+      // prefetch container
+      if (i1 < total) {
+        bid = hashes[i1 & hash_mask] & mask;
+        if (is_normal(info_container[bid])) {
+          bid1 = bid + 1 + get_distance(info_container[bid + 1]);
+          bid += get_distance(info_container[bid]);
+
+          for (size_t j = bid; j < bid1; ++j) {
+            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+          }
+        }
+      }
+
+      found = find_pos_with_hint(*it, id);
+
+      counts.emplace_back(container[get_pos(found)]);
+    }
+
+
+#if defined(REPROBE_STAT)
+    print_reprobe_stats("COUNT iter", std::distance(begin, end), (lsize - before));
+#endif
+    return counts;
+  }
+
+
 	/**
 	 * @brief.  updates current value.  behaves like insert, but overwrites the exists.
 	 */
@@ -1611,8 +1788,7 @@ protected:
 	/**
 	 * @brief erases a key.  performs backward shift.  swap at bucket boundaries only.
 	 */
-	size_type erase_and_compact(key_type const & k) {
-		size_t bid = hash(k) & mask;
+	size_type erase_and_compact(key_type const & k, bucket_id_type const & bid) {
 		bucket_id_type found = find_pos_with_hint(k, bid);  // get the matching position
 
 		if (missing(found)) {
@@ -1663,7 +1839,9 @@ protected:
 	#if defined(REPROBE_STAT)
 			reset_reprobe_stats();
 	#endif
-			size_t erased = erase_and_compact(k);
+	    size_t bid = hash(k) & mask;
+
+			size_t erased = erase_and_compact(k, bid);
 
 	#if defined(REPROBE_STAT)
 			print_reprobe_stats("ERASE 1", 1, erased);
@@ -1680,11 +1858,58 @@ protected:
 			reset_reprobe_stats();
 	#endif
 
-			size_type before = lsize;
+      size_type before = lsize;
 
-			for (auto it = begin; it != end; ++it) {
-				erase_and_compact((*it).first);
-			}
+	    std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+
+	    //prefetch only if target_buckets is larger than LOOK_AHEAD
+	    size_t ii = 0;
+	    // prefetch 2*LOOK_AHEAD of the info_container.
+	    for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
+	      hashes[ii] = hash((*it).first);
+	      // prefetch the info_container entry for ii.
+	      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+
+	      // prefetch container as well - would be NEAR but may not be exact.
+	      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+	    }
+
+	    size_t total = std::distance(begin, end);
+
+	    size_t id, bid, bid1;
+	    bucket_id_type found;
+	    Iter it2 = begin;
+	    std::advance(it2, 2 * LOOK_AHEAD);
+	        size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
+	        constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
+
+	    for (auto it = begin; it != end; ++it, ++it2, ++i, ++i1, ++i2) {
+
+	      // first get the bucket id
+	      id = hashes[i & hash_mask] & mask;  // target bucket id.
+
+	      // prefetch info_container.
+	      if (i2 < total) {
+	        ii = i2 & hash_mask;
+	        hashes[ii] = hash((*it2).first);
+	        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+	      }
+	      // prefetch container
+	      if (i1 < total) {
+	        bid = hashes[i1 & hash_mask] & mask;
+	        if (is_normal(info_container[bid])) {
+	          bid1 = bid + 1 + get_distance(info_container[bid + 1]);
+	          bid += get_distance(info_container[bid]);
+
+	          for (size_t j = bid; j < bid1; ++j) {
+	            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+	          }
+	        }
+	      }
+
+	      erase_and_compact((*it).first, id);
+	    }
+
 
 	#if defined(REPROBE_STAT)
 			print_reprobe_stats("ERASE PAIR ITER", std::distance(begin, end), before - lsize);
@@ -1700,11 +1925,58 @@ protected:
 			reset_reprobe_stats();
 	#endif
 
-			size_type before = lsize;
+      size_type before = lsize;
 
-			for (auto it = begin; it != end; ++it) {
-				erase_and_compact(*it);
-			}
+      std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+
+      //prefetch only if target_buckets is larger than LOOK_AHEAD
+      size_t ii = 0;
+      // prefetch 2*LOOK_AHEAD of the info_container.
+      for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
+        hashes[ii] = hash(*it);
+        // prefetch the info_container entry for ii.
+        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+
+        // prefetch container as well - would be NEAR but may not be exact.
+        _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+      }
+
+      size_t total = std::distance(begin, end);
+
+      size_t id, bid, bid1;
+      bucket_id_type found;
+      Iter it2 = begin;
+      std::advance(it2, 2 * LOOK_AHEAD);
+      size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
+      constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
+
+      for (auto it = begin; it != end; ++it, ++it2, ++i, ++i1, ++i2) {
+
+        // first get the bucket id
+        id = hashes[i & hash_mask] & mask;  // target bucket id.
+
+        // prefetch info_container.
+        if (i2 < total) {
+          ii = i2 & hash_mask;
+          hashes[ii] = hash(*it2);
+          _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+        }
+        // prefetch container
+        if (i1 < total) {
+          bid = hashes[i1 & hash_mask] & mask;
+          if (is_normal(info_container[bid])) {
+            bid1 = bid + 1 + get_distance(info_container[bid + 1]);
+            bid += get_distance(info_container[bid]);
+
+            for (size_t j = bid; j < bid1; ++j) {
+              _mm_prefetch(&(container[j]), _MM_HINT_T0);
+            }
+          }
+        }
+
+        erase_and_compact(*it, id);
+      }
+
 
 	#if defined(REPROBE_STAT)
 			print_reprobe_stats("ERASE KEY ITER", std::distance(begin, end), before - lsize);
@@ -1719,7 +1991,7 @@ protected:
 
 			size_type res = erase_no_resize(k);
 
-	//		if (lsize < min_load) rehash(buckets >> 1);
+			if (lsize < min_load) rehash(buckets >> 1);
 
 			return res;
 		}
@@ -1729,7 +2001,7 @@ protected:
 
 			size_type erased = erase_no_resize(begin, end);
 
-	//		if (lsize < min_load) reserve(lsize);
+			if (lsize < min_load) reserve(lsize);
 
 			return erased;
 		}
@@ -1746,16 +2018,24 @@ constexpr typename hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Alloc
 //template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
 //constexpr typename hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bid_failed;
 template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
-const typename hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bid_pos_mask;
+constexpr typename hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bid_pos_mask;
 template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
-const typename hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bid_pos_exists;
+constexpr typename hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bid_pos_exists;
 //template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
 //constexpr typename hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bid_info_mask;
 //template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
 //constexpr typename hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bid_info_empty;
+template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
+constexpr uint32_t hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::info_per_cacheline;
+template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
+constexpr uint32_t hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::value_per_cacheline;
+template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
+constexpr uint32_t hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::info_prefetch_iters;
+template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
+constexpr uint32_t hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::value_prefetch_iters;
 
 
 #undef REPROBE_STAT
 
 }  // namespace fsc
-#endif /* KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS_HPP_ */
+#endif /* KMERHASH_HASHMAP_ROBINHOOD_OFFSETS_PREFETCH_HPP_ */

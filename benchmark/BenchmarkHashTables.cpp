@@ -31,7 +31,9 @@
 // experimental
 #include "kmerhash/hashmap_robinhood_noncircular3.hpp"
 //#include "kmerhash/experimental/hashmap_robinhood_doubling_memmove.hpp"
-#include "kmerhash/experimental/hashmap_robinhood_doubling_offsets2.hpp"
+//#include "kmerhash/experimental/hashmap_robinhood_doubling_offsets2.hpp"
+#include "kmerhash/hashmap_robinhood_offsets_prefetch.hpp"
+
 #include "kmerhash/hashmap_robinhood_prefetch.hpp"
 
 #include "common/kmer.hpp"
@@ -149,32 +151,31 @@ void benchmark_unordered_map(std::string name, size_t const count, size_t const 
 
   BL_BENCH_START(map);
   size_t result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    auto iters = map.equal_range(query[i]);
-    for (auto it = iters.first; it != iters.second; ++it)
-      result ^= it->second;
+  for (auto q : query) {
+    auto iters = map.equal_range(q);
+    if (iters.first != iters.second) ++result;
   }
   BL_BENCH_END(map, "find", result);
 
   BL_BENCH_START(map);
   result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    result += map.count(query[i]);
+  for (auto q : query) {
+    result += map.count(q);
   }
   BL_BENCH_END(map, "count", result);
 
 
   BL_BENCH_START(map);
   result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    result += map.erase(query[i]);
+  for (auto q : query) {
+     result += map.erase(q);
   }
   BL_BENCH_END(map, "erase", result);
 
   BL_BENCH_START(map);
   result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    result += map.count(query[i]);
+  for (auto q : query) {
+    result += map.count(q);
   }
   BL_BENCH_END(map, "count2", result);
 
@@ -221,17 +222,17 @@ void benchmark_densehash_map(std::string name, size_t const count,  size_t const
 
   BL_BENCH_START(map);
   size_t result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    auto iters = map.equal_range(query[i]);
-    for (auto it = iters.first; it != iters.second; ++it)
-      result ^= it->second;
+  for (auto q : query) {
+    auto iters = map.equal_range(q);
+    if (iters.first != iters.second)
+      ++result;
   }
   BL_BENCH_END(map, "find", result);
 
   BL_BENCH_START(map);
   result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    result += map.count(query[i]);
+  for (auto q : query) {
+    result += map.count(q);
   }
   BL_BENCH_END(map, "count", result);
 
@@ -246,8 +247,8 @@ void benchmark_densehash_map(std::string name, size_t const count,  size_t const
 
   BL_BENCH_START(map);
   result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    result += map.count(query[i]);
+  for (auto q : query) {
+    result += map.count(q);
   }
   BL_BENCH_END(map, "count2", result);
 
@@ -294,17 +295,16 @@ void benchmark_densehash_full_map(std::string name, size_t const count,  size_t 
 
   BL_BENCH_START(map);
   size_t result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    auto iters = map.equal_range(query[i]);
-    for (auto it = iters.first; it != iters.second; ++it)
-      result ^= (*it).second;
+  for (auto q : query) {
+    auto iters = map.equal_range(q);
+    if (iters.first != iters.second) ++result;
   }
   BL_BENCH_END(map, "find", result);
 
   BL_BENCH_START(map);
   result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    result += map.count(query[i]);
+  for (auto q : query) {
+    result += map.count(q);
   }
   BL_BENCH_END(map, "count", result);
 
@@ -319,8 +319,8 @@ void benchmark_densehash_full_map(std::string name, size_t const count,  size_t 
 
   BL_BENCH_START(map);
   result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    result += map.count(query[i]);
+  for (auto q : query) {
+    result += map.count(q);
   }
   BL_BENCH_END(map, "count2", result);
 
@@ -445,25 +445,24 @@ void benchmark_google_densehash_map(std::string name, size_t const count,  size_
 
   BL_BENCH_START(map);
   size_t result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    auto iters = map.equal_range(query[i]);
-    for (auto it = iters.first; it != iters.second; ++it)
-      result ^= it->second;
+  for (auto q : query) {
+    auto iters = map.equal_range(q);
+    if (iters.first != iters.second) ++result;
   }
   BL_BENCH_END(map, "find", result);
 
   BL_BENCH_START(map);
   result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    result += map.count(query[i]);
+  for (auto q : query) {
+    result += map.count(q);
   }
   BL_BENCH_END(map, "count", result);
 
   BL_BENCH_START(map);
   //result = map.erase(query.begin(), query.end());
   result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    result += map.erase(query[i]);
+  for (auto q : query) {
+    result += map.erase(q);
   }
   map.resize(0);
   BL_BENCH_END(map, "erase", result);
@@ -471,8 +470,8 @@ void benchmark_google_densehash_map(std::string name, size_t const count,  size_
 
   BL_BENCH_START(map);
   result = 0;
-  for (size_t i = 0, max = count / query_frac; i < max; ++i) {
-    result += map.count(query[i]);
+  for (auto q : query) {
+    result += map.count(q);
   }
   BL_BENCH_END(map, "count2", result);
 
@@ -547,29 +546,23 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
   }
 
   BL_BENCH_START(map);
-  size_t result = 0;
-  size_t i = 0;
-  size_t max = count / query_frac;
-  for (; i < max; ++i) {
-    auto iter = map.find(query[i]);
-    result ^= (*iter).second;
-  }
-  BL_BENCH_END(map, "find", result);
+  auto finds = map.find(query.begin(), query.end());
+  BL_BENCH_END(map, "find", finds.size());
 
   BL_BENCH_START(map);
   auto counts = map.count(query.begin(), query.end());
-  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-  BL_BENCH_END(map, "count", result);
+  //result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+  BL_BENCH_END(map, "count", counts.size());
 
   BL_BENCH_START(map);
-  result = map.erase(query.begin(), query.end());
+  size_t result = map.erase(query.begin(), query.end());
   BL_BENCH_END(map, "erase", result);
 
 
   BL_BENCH_START(map);
   counts = map.count(query.begin(), query.end());
-  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-  BL_BENCH_END(map, "count2", result);
+  //result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+  BL_BENCH_END(map, "count2", counts.size());
 
 
   BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
@@ -619,18 +612,16 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 
   BL_BENCH_START(map);
   size_t result = 0;
-  size_t i = 0;
-  size_t max = count / query_frac;
-  for (; i < max; ++i) {
-    auto iter = map.find(query[i]);
-    result ^= (*iter).second;
+  for (auto q : query) {
+    auto iter = map.find(q);
+    if (iter != map.end()) ++result;
   }
   BL_BENCH_END(map, "find", result);
 
   BL_BENCH_START(map);
   auto counts = map.count(query.begin(), query.end());
-  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-  BL_BENCH_END(map, "count", result);
+  //result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+  BL_BENCH_END(map, "count", counts.size());
 
   BL_BENCH_START(map);
   result = map.erase(query.begin(), query.end());
@@ -639,8 +630,8 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 
   BL_BENCH_START(map);
   counts = map.count(query.begin(), query.end());
-  result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
-  BL_BENCH_END(map, "count2", result);
+  //result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+  BL_BENCH_END(map, "count2", counts.size());
 
 
   BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
@@ -959,20 +950,20 @@ int main(int argc, char** argv) {
 	  if (dna == DNA_TYPE) {
 		  if (full) {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling, FullKmer, size_t>("hashmap_robinhood_doubling_Full", count, repeat_rate, query_frac, batch_mode, comm);
+			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, FullKmer, size_t>("hashmap_robinhood_doubling_Full", count, repeat_rate, query_frac, batch_mode, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_Full", count, comm);
 		  } else {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling, Kmer, size_t>("hashmap_robinhood_doubling_DNA", count, repeat_rate, query_frac, batch_mode, comm);
+			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, Kmer, size_t>("hashmap_robinhood_doubling_DNA", count, repeat_rate, query_frac, batch_mode, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_DNA", count, comm);
 		  }
 	  } else if (dna == DNA5_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling, DNA5Kmer, size_t>("hashmap_robinhood_doubling_DNA5", count, repeat_rate, query_frac, batch_mode, comm);
+		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, DNA5Kmer, size_t>("hashmap_robinhood_doubling_DNA5", count, repeat_rate, query_frac, batch_mode, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_DNA5", count, comm);
 	  } else if (dna == DNA16_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling, DNA16Kmer, size_t>("hashmap_robinhood_doubling_DNA16", count, repeat_rate, query_frac, batch_mode, comm);
+		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, DNA16Kmer, size_t>("hashmap_robinhood_doubling_DNA16", count, repeat_rate, query_frac, batch_mode, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_DNA16", count, comm);
 	  } else {
 
@@ -1013,20 +1004,20 @@ int main(int argc, char** argv) {
 	  if (dna == DNA_TYPE) {
 		  if (full) {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, FullKmer, size_t>("hashmap_robinhood_doubling_offsets_Full", count, repeat_rate, query_frac, batch_mode, comm);
+			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, FullKmer, size_t>("hashmap_robinhood_doubling_offsets_Full", count, repeat_rate, query_frac, batch_mode, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_Full", count, comm);
 		  } else {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA", count, repeat_rate, query_frac, batch_mode, comm);
+			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA", count, repeat_rate, query_frac, batch_mode, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA", count, comm);
 		  }
 	  } else if (dna == DNA5_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, DNA5Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA5", count, repeat_rate, query_frac, batch_mode, comm);
+		  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, DNA5Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA5", count, repeat_rate, query_frac, batch_mode, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA5", count, comm);
 	  } else if (dna == DNA16_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_offsets, DNA16Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA16", count, repeat_rate, query_frac, batch_mode, comm);
+		  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, DNA16Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA16", count, repeat_rate, query_frac, batch_mode, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA16", count, comm);
 	  } else {
 
