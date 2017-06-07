@@ -546,18 +546,18 @@ protected:
       for (bl = 0; bl < blocks; ++bl) {
         // prefetch 2*LOOK_AHEAD of the info_container.
         for (bid = 0; bid <= (2 * LOOK_AHEAD); bid += info_per_cacheline) {
-          _mm_prefetch(&(info_container[bid + bl * target_buckets]), _MM_HINT_T0);
+          _mm_prefetch((const char *)&(info_container[bid + bl * target_buckets]), _MM_HINT_T0);
         }
         next_info_prefetch_bid = bid;
         // for now, also prefetch 2 * LOOK_AHEAD number of entries from the container
         for (bid = 0; bid <= LOOK_AHEAD; bid += value_per_cacheline) {
-          _mm_prefetch(&(container[bid + bl * target_buckets]), _MM_HINT_T0);
+          _mm_prefetch((const char *)&(container[bid + bl * target_buckets]), _MM_HINT_T0);
         }
         // save position
         next_value_prefetch_bid = bid;
         // rest of the 2*LOOK_AHEAD - this is just to be sure that the region in container between LOOK_AHEAD and info_container[LOOK_AHEAD] (the offset) is covered.
         for (; bid <= (2*LOOK_AHEAD); bid += value_per_cacheline) {
-          _mm_prefetch(&(container[bid + bl * target_buckets]), _MM_HINT_T0);
+          _mm_prefetch((const char *)&(container[bid + bl * target_buckets]), _MM_HINT_T0);
         }
 
         // NEED TO Prefetch for write.
@@ -575,7 +575,7 @@ protected:
       // prefetch info_container at 2 LOOK_AHEAD ahead.
       if (next_info_prefetch_bid < target_buckets) {
         for (bl = 0; bl < blocks; ++bl) {
-          _mm_prefetch(&(info_container[next_info_prefetch_bid + bl * target_buckets]), _MM_HINT_T0);
+          _mm_prefetch((const char *)&(info_container[next_info_prefetch_bid + bl * target_buckets]), _MM_HINT_T0);
         }
         next_info_prefetch_bid += info_per_cacheline;
       }
@@ -583,7 +583,7 @@ protected:
       if (next_value_prefetch_bid < target_buckets) {
         for (bl = 0; bl < blocks; ++bl) {
           prefetched_info = info_container[next_value_prefetch_bid + bl * target_buckets];
-          if (is_normal(prefetched_info)) _mm_prefetch(&(container[get_distance(prefetched_info)]), _MM_HINT_T0);
+          if (is_normal(prefetched_info)) _mm_prefetch((const char *)&(container[get_distance(prefetched_info)]), _MM_HINT_T0);
         }
       }
 
@@ -1258,10 +1258,10 @@ public:
     for (ii = 0; ii < max_prefetch2; ++ii) {
       hashes[ii] = hash(input[ii].first);
       // prefetch the info_container entry for ii.
-      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 
       // prefetch container as well - would be NEAR but may not be exact.
-      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
     }
 
 		// iterate based on size between rehashes
@@ -1280,7 +1280,7 @@ public:
 			if (i2 < input.size()) {
 			  ii = i2 & hash_mask;
 			  hashes[ii] = hash(input[i2].first);
-	      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+	      _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 			}
 			// prefetch container
       if (i1 < input.size()) {
@@ -1290,7 +1290,7 @@ public:
           bid += get_distance(info_container[bid]);
 
           for (size_t j = bid; j < bid1; ++j) {
-            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+            _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
           }
         }
       }
@@ -1466,10 +1466,10 @@ public:
     for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
       hashes[ii] = hash((*it).first);
       // prefetch the info_container entry for ii.
-      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 
       // prefetch container as well - would be NEAR but may not be exact.
-      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
     }
 
     size_t total = std::distance(begin, end);
@@ -1492,7 +1492,7 @@ public:
       if (i2 < total) {
         ii = i2 & hash_mask;
         hashes[ii] = hash((*it2).first);
-        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
       }
       // prefetch container
       if (i1 < total) {
@@ -1502,7 +1502,7 @@ public:
           bid += get_distance(info_container[bid]);
 
           for (size_t j = bid; j < bid1; ++j) {
-            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+            _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
           }
         }
       }
@@ -1533,10 +1533,10 @@ public:
     for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
       hashes[ii] = hash(*it);
       // prefetch the info_container entry for ii.
-      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 
       // prefetch container as well - would be NEAR but may not be exact.
-      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
     }
 
 
@@ -1560,7 +1560,7 @@ public:
       if (i2 < total) {
         ii = i2 & hash_mask;
         hashes[ii] = hash(*it2);
-        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
       }
       // prefetch container
       if (i1 < total) {
@@ -1570,7 +1570,7 @@ public:
           bid += get_distance(info_container[bid]);
 
           for (size_t j = bid; j < bid1; ++j) {
-            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+            _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
           }
         }
       }
@@ -1633,10 +1633,10 @@ public:
     for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
       hashes[ii] = hash((*it).first);
       // prefetch the info_container entry for ii.
-      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 
       // prefetch container as well - would be NEAR but may not be exact.
-      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
     }
 
 
@@ -1660,7 +1660,7 @@ public:
       if (i2 < total) {
         ii = i2 & hash_mask;
         hashes[ii] = hash((*it2).first);
-        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
       }
       // prefetch container
       if (i1 < total) {
@@ -1670,7 +1670,7 @@ public:
           bid += get_distance(info_container[bid]);
 
           for (size_t j = bid; j < bid1; ++j) {
-            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+            _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
           }
         }
       }
@@ -1701,10 +1701,10 @@ public:
     for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
       hashes[ii] = hash(*it);
       // prefetch the info_container entry for ii.
-      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 
       // prefetch container as well - would be NEAR but may not be exact.
-      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
     }
 
 
@@ -1728,7 +1728,7 @@ public:
       if (i2 < total) {
         ii = i2 & hash_mask;
         hashes[ii] = hash(*it2);
-        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
       }
       // prefetch container
       if (i1 < total) {
@@ -1738,7 +1738,7 @@ public:
           bid += get_distance(info_container[bid]);
 
           for (size_t j = bid; j < bid1; ++j) {
-            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+            _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
           }
         }
       }
@@ -1868,10 +1868,10 @@ protected:
 	    for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
 	      hashes[ii] = hash((*it).first);
 	      // prefetch the info_container entry for ii.
-	      _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+	      _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 
 	      // prefetch container as well - would be NEAR but may not be exact.
-	      _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+	      _mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
 	    }
 
 	    size_t total = std::distance(begin, end);
@@ -1892,7 +1892,7 @@ protected:
 	      if (i2 < total) {
 	        ii = i2 & hash_mask;
 	        hashes[ii] = hash((*it2).first);
-	        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+	        _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 	      }
 	      // prefetch container
 	      if (i1 < total) {
@@ -1902,7 +1902,7 @@ protected:
 	          bid += get_distance(info_container[bid]);
 
 	          for (size_t j = bid; j < bid1; ++j) {
-	            _mm_prefetch(&(container[j]), _MM_HINT_T0);
+	            _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
 	          }
 	        }
 	      }
@@ -1935,10 +1935,10 @@ protected:
       for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
         hashes[ii] = hash(*it);
         // prefetch the info_container entry for ii.
-        _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 
         // prefetch container as well - would be NEAR but may not be exact.
-        _mm_prefetch(&(container[hashes[ii] & mask]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
       }
 
       size_t total = std::distance(begin, end);
@@ -1959,7 +1959,7 @@ protected:
         if (i2 < total) {
           ii = i2 & hash_mask;
           hashes[ii] = hash(*it2);
-          _mm_prefetch(&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+          _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
         }
         // prefetch container
         if (i1 < total) {
@@ -1969,7 +1969,7 @@ protected:
             bid += get_distance(info_container[bid]);
 
             for (size_t j = bid; j < bid1; ++j) {
-              _mm_prefetch(&(container[j]), _MM_HINT_T0);
+              _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
             }
           }
         }

@@ -48,6 +48,10 @@
 #include "utils/benchmark_utils.hpp"
 #include "utils/transform_utils.hpp"
 
+#ifdef VTUNE_ANALYSIS
+#include <ittnotify.h>
+#endif
+
 // comparison of some hash tables.  note that this is not exhaustive and includes only the well tested ones and my own.  not so much
 // the one-off ones people wrote.
 // see http://preshing.com/20110603/hash-table-performance-tests/  - suggests google sparsehash dense, and Judy array
@@ -514,6 +518,9 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
     });
     BL_BENCH_END(map, "generate input", input.size());
 
+#ifdef VTUNE_ANALYSIS
+        __itt_resume();
+#endif
     if (vector_mode == ITER_MODE) {
         BL_BENCH_START(map);
     	map.insert(input.begin(), input.end());
@@ -543,6 +550,9 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
     	map.insert(input.begin(), input.end());
         BL_BENCH_END(map, "insert", map.size());
     }
+#ifdef VTUNE_ANALYSIS
+        __itt_pause();
+#endif
   }
 
   BL_BENCH_START(map);
@@ -598,6 +608,9 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
     });
     BL_BENCH_END(map, "generate input", input.size());
 
+#ifdef VTUNE_ANALYSIS
+        __itt_resume();
+#endif
     if (vector_mode == INDEX_MODE) {
         BL_BENCH_START(map);
     	map.insert(input);
@@ -608,6 +621,9 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
     	map.insert(input.begin(), input.end());
         BL_BENCH_END(map, "insert", map.size());
     }
+#ifdef VTUNE_ANALYSIS
+        __itt_pause();
+#endif
   }
 
   BL_BENCH_START(map);
@@ -796,7 +812,9 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, int> parse_cmdline(int 
 
 
 int main(int argc, char** argv) {
-
+#ifdef VTUNE_ANALYSIS
+    __itt_pause();
+#endif
 	int map = ROBINHOOD_TYPE;
 	int dna = DNA_TYPE;
 	bool canonical = false;

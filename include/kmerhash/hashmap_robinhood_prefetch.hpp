@@ -746,7 +746,7 @@ public:
 
 	/// batch insert not using iterator
 	void insert(std::vector<value_type> const & input) {
-
+        printf("batch insert not using iterator\n");
 #if defined(REPROBE_STAT)
 		reset_reprobe_stats();
 		size_type before = lsize;
@@ -776,11 +776,11 @@ public:
         id = hashes[i] & mask;  //
 
         // prefetch info container
-        _mm_prefetch(&(info_container[id]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
         // prefetch container
-        _mm_prefetch(&(container[id]), _MM_HINT_NTA);
+        _mm_prefetch((const char *)&(container[id]), _MM_HINT_NTA);
         // adding a second does not help/
-        // _mm_prefetch(&(container[id + (64 / sizeof(value_type))]), _MM_HINT_T0);
+        // _mm_prefetch((const char *)&(container[id + (64 / sizeof(value_type))]), _MM_HINT_T0);
 
       }
 
@@ -801,10 +801,10 @@ public:
       //=== prefetch
       hashes[hash_pos] = hash(input[i + LOOK_AHEAD].first);
       id_la = hashes[hash_pos] & mask;
-      _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
-      _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
+      _mm_prefetch((const char *)&(info_container[id_la]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(container[id_la]), _MM_HINT_NTA);
       // adding a second does not help/
-      //_mm_prefetch(&(container[id_la + (64 / sizeof(value_type))]), _MM_HINT_T0);
+      //_mm_prefetch((const char *)&(container[id_la + (64 / sizeof(value_type))]), _MM_HINT_T0);
 
 			if (missing(insert_with_hint(container, info_container, id, id, input[i])))
 				++lsize;
@@ -875,11 +875,11 @@ public:
         id = hashes[j] & mask;  //
 
         // prefetch info container
-        _mm_prefetch(&(info_container[id]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
         // prefetch container
-        _mm_prefetch(&(container[id]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(container[id]), _MM_HINT_T0);
         // adding a second does not help/
-        //_mm_prefetch(&(container[id + (64 / sizeof(value_type))]), _MM_HINT_NTA);
+        //_mm_prefetch((const char *)&(container[id + (64 / sizeof(value_type))]), _MM_HINT_NTA);
 
       }
 
@@ -905,9 +905,9 @@ public:
       //=== prefetch
       hashes[hash_pos] = hash(input[j + LOOK_AHEAD].first);
       id_la = hashes[hash_pos] & mask;
-      _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
-      _mm_prefetch(&(container[id_la]), _MM_HINT_T0);
-      //_mm_prefetch(&(container[id_la + (64 / sizeof(value_type))]), _MM_HINT_NTA);
+      _mm_prefetch((const char *)&(info_container[id_la]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(container[id_la]), _MM_HINT_T0);
+      //_mm_prefetch((const char *)&(container[id_la + (64 / sizeof(value_type))]), _MM_HINT_NTA);
 
       //==== now do some work to insert.
       // first get the bucket id
@@ -948,7 +948,7 @@ public:
 
           // prefetch container.
           for (size_t l = sizeof(value_type); l <= 64; l += sizeof(value_type)) {
-            _mm_prefetch(&(container[i + l]), _MM_HINT_T0);
+            _mm_prefetch((const char *)&(container[i + l]), _MM_HINT_T0);
           }
 
 
@@ -1099,7 +1099,7 @@ public:
 
               // prefetch container.
               for (size_t l = sizeof(value_type); l <= 64; l += sizeof(value_type)) {
-                _mm_prefetch(&(container[i + l]), _MM_HINT_T0);
+                _mm_prefetch((const char *)&(container[i + l]), _MM_HINT_T0);
               }
 
       #if defined(REPROBE_STAT)
@@ -1325,9 +1325,9 @@ public:
         id = hashes[i] & mask;  //
 
         // prefetch info container
-        _mm_prefetch(&(info_container[id]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
         // prefetch container
-        _mm_prefetch(&(container[id]), _MM_HINT_NTA);
+        _mm_prefetch((const char *)&(container[id]), _MM_HINT_NTA);
       }
 
     size_t hashes_mask = LOOK_AHEAD - 1;
@@ -1345,8 +1345,8 @@ public:
       //=== prefetch
       hashes[hash_pos] = hash((*it2).first);
       id_la = hashes[hash_pos] & mask;
-      _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
-      _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
+      _mm_prefetch((const char *)&(info_container[id_la]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(container[id_la]), _MM_HINT_NTA);
 
       counts[i] = exists(find_pos_with_hint((*it).first, id)) ? 1 : 0;
     }
@@ -1403,9 +1403,9 @@ public:
         id = hashes[i] & mask;  //
 
         // prefetch info container
-        _mm_prefetch(&(info_container[id]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
         // prefetch container
-        _mm_prefetch(&(container[id]), _MM_HINT_NTA);
+        _mm_prefetch((const char *)&(container[id]), _MM_HINT_NTA);
       }
 
     size_t hashes_mask = LOOK_AHEAD - 1;
@@ -1423,8 +1423,8 @@ public:
       //=== prefetch
       hashes[hash_pos] = hash(*it2);
       id_la = hashes[hash_pos] & mask;
-      _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
-      _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
+      _mm_prefetch((const char *)&(info_container[id_la]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(container[id_la]), _MM_HINT_NTA);
 
       counts[i] = exists(find_pos_with_hint(*it, id)) ? 1 : 0;
     }
@@ -1521,9 +1521,9 @@ public:
         id = hashes[i] & mask;  //
 
         // prefetch info container
-        _mm_prefetch(&(info_container[id]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
         // prefetch container
-        _mm_prefetch(&(container[id]), _MM_HINT_NTA);
+        _mm_prefetch((const char *)&(container[id]), _MM_HINT_NTA);
       }
 
     size_t hashes_mask = LOOK_AHEAD - 1;
@@ -1541,8 +1541,8 @@ public:
       //=== prefetch
       hashes[hash_pos] = hash((*it2).first);
       id_la = hashes[hash_pos] & mask;
-      _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
-      _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
+      _mm_prefetch((const char *)&(info_container[id_la]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(container[id_la]), _MM_HINT_NTA);
 
       found = find_pos_with_hint((*it).first, id);
       if (exists(found)) counts.emplace_back(container[get_bucket_id(found)]);
@@ -1606,9 +1606,9 @@ public:
         id = hashes[i] & mask;  //
 
         // prefetch info container
-        _mm_prefetch(&(info_container[id]), _MM_HINT_T0);
+        _mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
         // prefetch container
-        _mm_prefetch(&(container[id]), _MM_HINT_NTA);
+        _mm_prefetch((const char *)&(container[id]), _MM_HINT_NTA);
       }
 
     size_t hashes_mask = LOOK_AHEAD - 1;
@@ -1626,8 +1626,8 @@ public:
       //=== prefetch
       hashes[hash_pos] = hash(*it2);
       id_la = hashes[hash_pos] & mask;
-      _mm_prefetch(&(info_container[id_la]), _MM_HINT_T0);
-      _mm_prefetch(&(container[id_la]), _MM_HINT_NTA);
+      _mm_prefetch((const char *)&(info_container[id_la]), _MM_HINT_T0);
+      _mm_prefetch((const char *)&(container[id_la]), _MM_HINT_NTA);
 
       found = find_pos_with_hint(*it, id);
       if (exists(found)) counts.emplace_back(container[get_bucket_id(found)]);
