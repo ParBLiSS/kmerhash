@@ -164,16 +164,6 @@ endif()
 OPTION(BUILD_SHARED_LIBS "Build shared libraries (.dll/.so) instead of static ones (.lib/.a)" ON)
 
 
-OPTION(REPORT_REPROBES "Report reprobe counts" ON)
-function(update_reprobe_reporting varname cacheaccess varval) 
-	if (REPORT_REPROBES)
-	    add_definitions(-DREPROBE_STAT)
-	endif(REPORT_REPROBES)
-endfunction(update_reprobe_reporting varname cacheaccess varval)
-variable_watch(REPORT_REPROBES update_reprobe_reporting)
-
-
-
 ###### Extra compiler flags and prettifying.
 OPTION(COMPILER_EXTRA_WARNINGS "EXTRA COMPILATION OPTIONS" OFF)
 CMAKE_DEPENDENT_OPTION(COMPILER_WARNINGS_ENABLE_EXTRA "Enable compiler to generate extra warnings?" OFF "COMPILER_EXTRA_WARNINGS" OFF)
@@ -184,89 +174,89 @@ include("${PROJECT_SOURCE_DIR}/cmake/GCCFilter.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/CompilerProfiling.cmake")
 
 ###### LOGGING ENGINE configuration
-SET(LOGGER_VERBOSITY "WARNING" CACHE STRING "Logger verbosity.  Valid entries are ERROR, WARNING, INFO, DEBUG, TRACE.  Each level includes all levels with smaller value")  
-#function(update_logger_verbosity varname cacheaccess varval) 
-#    SET(LOGGER_VERBOSITY_DEFINE "#define LOGGER_VERBOSITY BLISS_LOGGER_VERBOSITY_${LOGGER_VERBOSITY}")
-#endfunction(update_logger_verbosity varname cacheaccess varval)
-#variable_watch(LOGGER_VERBOSITY update_logger_verbosity)
+SET(LOGGER_VERBOSITY "WARNING" CACHE STRING "Logger verbosity.  Each level includes PREVIOUS levels. ERROR is most terse.  TRACE is most verbose")  
+set_property(CACHE LOGGER_VERBOSITY PROPERTY STRINGS ERROR WARNING INFO DEBUG TRACE)
+
+set(LOG_ENGINE "PRINTF" CACHE STRING "choose a logging engine.")
+set_property(CACHE LOG_ENGINE PROPERTY STRINGS NO_LOG PRINTF)
 
 function(update_logging_engine varname cacheaccess varval) 
-#       message(STATUS "${varname} changed to ${varval} with unhandled access: ${cacheaccess}.")
-
-
-    if (${cacheaccess} STREQUAL READ_ACCESS AND
-        ${varname} STREQUAL USE_OPENMP)
-
-            
-        if (USE_OPENMP)
-
-            # restrict log engine to no_log or printf
-            if (LOG_ENGINE STREQUAL "NO_LOG" OR
-                LOG_ENGINE STREQUAL "PRINTF")
-                
-                set(LOG_ENGINE ${LOG_ENGINE} CACHE STRING
-                "choose a logging engine.  options are NO_LOG PRINTF." FORCE)
-                
-            else (LOG_ENGINE STREQUAL "NO_LOG" OR
-                LOG_ENGINE STREQUAL "PRINTF")
-
-#                message(STATUS "OMP ENABLED.  Default Log Engine set to NO_LOG")
-                
-                set(LOG_ENGINE "PRINTF" CACHE STRING
-                "choose a logging engine.  options are NO_LOG PRINTF." FORCE)
-                
-            endif (LOG_ENGINE STREQUAL "NO_LOG" OR
-                LOG_ENGINE STREQUAL "PRINTF")
-            
-        else (USE_OPENMP)
-            # OMP debugging is not on.  so log engine choice depends on whether boost logging is enabled.
-        
-          if (LOG_ENGINE STREQUAL "NO_LOG" OR
-                LOG_ENGINE STREQUAL "CERR" OR
-                LOG_ENGINE STREQUAL "PRINTF" OR
-                LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
-                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
-                
-                
-            set(LOG_ENGINE ${LOG_ENGINE} CACHE STRING
-            "choose a logging engine.  options are NO_LOG PRINTF CERR BOOST_TRIVIAL BOOST_CUSTOM." FORCE)
-          else (LOG_ENGINE STREQUAL "NO_LOG" OR
-                LOG_ENGINE STREQUAL "CERR" OR
-                LOG_ENGINE STREQUAL "PRINTF" OR
-                LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
-                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
-                
-#                message(STATUS "OMP DISABLED.  Default Log Engine set to NO_LOG")
-                
-            set(LOG_ENGINE "NO_LOG" CACHE STRING
-            "choose a logging engine.  options are NO_LOG PRINTF CERR BOOST_TRIVIAL BOOST_CUSTOM." FORCE)
-          endif (LOG_ENGINE STREQUAL "NO_LOG" OR
-                LOG_ENGINE STREQUAL "CERR" OR
-                LOG_ENGINE STREQUAL "PRINTF" OR
-                LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
-                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
-
-        endif(USE_OPENMP)
-
-    else(${cacheaccess} STREQUAL READ_ACCESS AND
-
-
-
-
-    
-        ${varname} STREQUAL USE_OPENMP)
-        
-       message(WARNING "${varname} changed to ${varval} with unhandled access: ${cacheaccess}.")
-        
-    endif(${cacheaccess} STREQUAL READ_ACCESS AND
-        ${varname} STREQUAL USE_OPENMP)
-        
+##       message(STATUS "${varname} changed to ${varval} with unhandled access: ${cacheaccess}.")
+#
+#
+#    if (${cacheaccess} STREQUAL READ_ACCESS AND
+#        ${varname} STREQUAL USE_OPENMP)
+#
+#            
+#        if (USE_OPENMP)
+#
+#            # restrict log engine to no_log or printf
+#            if (LOG_ENGINE STREQUAL "NO_LOG" OR
+#                LOG_ENGINE STREQUAL "PRINTF")
+#                
+#                set(LOG_ENGINE ${LOG_ENGINE} CACHE STRING
+#                "choose a logging engine.  options are NO_LOG PRINTF." FORCE)
+#                
+#            else (LOG_ENGINE STREQUAL "NO_LOG" OR
+#                LOG_ENGINE STREQUAL "PRINTF")
+#
+##                message(STATUS "OMP ENABLED.  Default Log Engine set to NO_LOG")
+#                
+#                set(LOG_ENGINE "PRINTF" CACHE STRING
+#                "choose a logging engine.  options are NO_LOG PRINTF." FORCE)
+#                
+#            endif (LOG_ENGINE STREQUAL "NO_LOG" OR
+#                LOG_ENGINE STREQUAL "PRINTF")
+#            
+#        else (USE_OPENMP)
+#            # OMP debugging is not on.  so log engine choice depends on whether boost logging is enabled.
+#        
+#          if (LOG_ENGINE STREQUAL "NO_LOG" OR
+#                LOG_ENGINE STREQUAL "CERR" OR
+#                LOG_ENGINE STREQUAL "PRINTF" OR
+#                LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
+#                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
+#                
+#                
+#            set(LOG_ENGINE ${LOG_ENGINE} CACHE STRING
+#            "choose a logging engine.  options are NO_LOG PRINTF CERR BOOST_TRIVIAL BOOST_CUSTOM." FORCE)
+#          else (LOG_ENGINE STREQUAL "NO_LOG" OR
+#                LOG_ENGINE STREQUAL "CERR" OR
+#                LOG_ENGINE STREQUAL "PRINTF" OR
+#                LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
+#                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
+#                
+##                message(STATUS "OMP DISABLED.  Default Log Engine set to NO_LOG")
+#                
+#            set(LOG_ENGINE "NO_LOG" CACHE STRING
+#            "choose a logging engine.  options are NO_LOG PRINTF CERR BOOST_TRIVIAL BOOST_CUSTOM." FORCE)
+#          endif (LOG_ENGINE STREQUAL "NO_LOG" OR
+#                LOG_ENGINE STREQUAL "CERR" OR
+#                LOG_ENGINE STREQUAL "PRINTF" OR
+#                LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
+#                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
+#
+#        endif(USE_OPENMP)
+#
+#    else(${cacheaccess} STREQUAL READ_ACCESS AND
+#
+#
+#
+#
+#    
+#        ${varname} STREQUAL USE_OPENMP)
+#        
+#       message(WARNING "${varname} changed to ${varval} with unhandled access: ${cacheaccess}.")
+#        
+#    endif(${cacheaccess} STREQUAL READ_ACCESS AND
+#        ${varname} STREQUAL USE_OPENMP)
+#        
         
     # set the log engine in the logger_config.hpp file.
     set(LOGGER_DEFINE "#define USE_LOGGER BLISS_LOGGING_${LOG_ENGINE}")
 
 endfunction(update_logging_engine varname cacheaccess varval)
-
+variable_watch(LOG_ENGINE update_logging_engine)
 
 
 # if OMP_DEBUGGING is enabled, default(none) is set in the omp pragmas.   this means that only NO_LOG and PRINTF logging are compatible.
@@ -285,55 +275,55 @@ endif(OPENMP_STRICT_SCOPING)
 ###### External Library Settings
 #### Boost Library
 #set(EXTRA_LIBS pthread)
-if (LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
-                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
-    set(Boost_USE_MULTITHREADED ON)
-    set(Boost_ADDITIONAL_VERSIONS "1.54" "1.54.0")
-    set(Boost_DETAILED_FAILURE_MSG ON)
-    find_path(BOOST_ROOT NAMES include/boost/circular_buffer.hpp
-      HINTS /usr /usr/local /usr/local/share /opt/local ENV BOOST_HOME
-      DOC "path to Boost root directory")
-    # must specify the components otherwise it's a header only usage
-    find_package(Boost REQUIRED COMPONENTS system program_options log)
-    if (Boost_FOUND)
-      include_directories( ${Boost_INCLUDE_DIRS} )
-      link_directories( ${Boost_LIBRARY_DIRS} )
-      set(EXTRA_LIBS ${EXTRA_LIBS} ${Boost_LIBRARIES})
-      add_definitions(-DBOOST_LOG_DYN_LINK)
-    else(Boost_FOUND)
-      unset(Boost_USE_MULTITHREADED)
-      unset(Boost_ADDITIONAL_VERSIONS)
-      unset(Boost_DETAILED_FAILURE_MSG)
-      unset(BOOST_ROOT CACHE)
-
-        set(LOG_ENGINE "PRINTF" CACHE STRING
-            "choose a logging engine.  options are NO_LOG PRINTF CERR BOOST_TRIVIAL BOOST_CUSTOM." FORCE)
-        message(WARNING "Did not find boost.  Default Log Engine set to PRINTF")
-        
-        set(LOGGER_DEFINE "#define USE_LOGGER BLISS_LOGGING_${LOG_ENGINE}")
-
-    endif(Boost_FOUND)
-    
-    # need this flag for boost log
-else(LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
-                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
-    unset(Boost_USE_MULTITHREADED)
-    unset(Boost_ADDITIONAL_VERSIONS)
-    unset(Boost_DETAILED_FAILURE_MSG)
-    unset(Boost_FOUND)
-    unset(BOOST_ROOT CACHE)
-    unset(Boost_DIR CACHE)
-    unset(Boost_INCLUDE_DIR CACHE)
-    unset(Boost_LIBRARY_DIR CACHE)
-    unset(Boost_LOG_LIBRARY_DEBUG CACHE)
-    unset(Boost_LOG_LIBRARY_RELEASE CACHE)
-    unset(Boost_PROGRAM_OPTIONS_LIBRARY_DEBUG CACHE)
-    unset(Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE CACHE)
-    unset(Boost_SYSTEM_LIBRARY_DEBUG CACHE)
-    unset(Boost_SYSTEM_LIBRARY_RELEASE CACHE)
-
-endif(LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
-                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
+#if (LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
+#                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
+#    set(Boost_USE_MULTITHREADED ON)
+#    set(Boost_ADDITIONAL_VERSIONS "1.54" "1.54.0")
+#    set(Boost_DETAILED_FAILURE_MSG ON)
+#    find_path(BOOST_ROOT NAMES include/boost/circular_buffer.hpp
+#      HINTS /usr /usr/local /usr/local/share /opt/local ENV BOOST_HOME
+#      DOC "path to Boost root directory")
+#    # must specify the components otherwise it's a header only usage
+#    find_package(Boost REQUIRED COMPONENTS system program_options log)
+#    if (Boost_FOUND)
+#      include_directories( ${Boost_INCLUDE_DIRS} )
+#      link_directories( ${Boost_LIBRARY_DIRS} )
+#      set(EXTRA_LIBS ${EXTRA_LIBS} ${Boost_LIBRARIES})
+#      add_definitions(-DBOOST_LOG_DYN_LINK)
+#    else(Boost_FOUND)
+#      unset(Boost_USE_MULTITHREADED)
+#      unset(Boost_ADDITIONAL_VERSIONS)
+#      unset(Boost_DETAILED_FAILURE_MSG)
+#      unset(BOOST_ROOT CACHE)
+#
+#        set(LOG_ENGINE "PRINTF" CACHE STRING
+#            "choose a logging engine.  options are NO_LOG PRINTF CERR BOOST_TRIVIAL BOOST_CUSTOM." FORCE)
+#        message(WARNING "Did not find boost.  Default Log Engine set to PRINTF")
+#        
+#        set(LOGGER_DEFINE "#define USE_LOGGER BLISS_LOGGING_${LOG_ENGINE}")
+#
+#    endif(Boost_FOUND)
+#    
+#    # need this flag for boost log
+#else(LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
+#                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
+#    unset(Boost_USE_MULTITHREADED)
+#    unset(Boost_ADDITIONAL_VERSIONS)
+#    unset(Boost_DETAILED_FAILURE_MSG)
+#    unset(Boost_FOUND)
+#    unset(BOOST_ROOT CACHE)
+#    unset(Boost_DIR CACHE)
+#    unset(Boost_INCLUDE_DIR CACHE)
+#    unset(Boost_LIBRARY_DIR CACHE)
+#    unset(Boost_LOG_LIBRARY_DEBUG CACHE)
+#    unset(Boost_LOG_LIBRARY_RELEASE CACHE)
+#    unset(Boost_PROGRAM_OPTIONS_LIBRARY_DEBUG CACHE)
+#    unset(Boost_PROGRAM_OPTIONS_LIBRARY_RELEASE CACHE)
+#    unset(Boost_SYSTEM_LIBRARY_DEBUG CACHE)
+#    unset(Boost_SYSTEM_LIBRARY_RELEASE CACHE)
+#
+#endif(LOG_ENGINE STREQUAL "BOOST_TRIVIAL" OR
+#                LOG_ENGINE STREQUAL "BOOST_CUSTOM")
 
 
 #### MPI
@@ -395,7 +385,7 @@ endif(OPENMP_FOUND)
 
 CMAKE_DEPENDENT_OPTION(USE_OPENMP "Build with OpenMP support" ON
                         "OPENMP_FOUND" OFF)
-variable_watch(USE_OPENMP update_logging_engine)
+#variable_watch(USE_OPENMP update_logging_engine)
 
 if (USE_OPENMP)
     # add OpenMP flags to compiler flags
@@ -438,112 +428,127 @@ if(DOXYGEN_FOUND)
 endif(DOXYGEN_FOUND)
 
 
+############### TESTING
+#  organization:  3 levels:  benchmark (coarse grain), profile (fine grain), debug (include coverage and sanitizer).  profile and debug are mutually exclusive.
+### executable option organization:
+# build_applications - useful applications
+# build_tests -  both can be on.
+# BUILD_BENCHMARKS - enables benchmark reporting at application level
+### code analysis
+# enable_code_analysis - mutually exclusive options
+#	enable_profiling - mutually exclusive options
+#		enable_vtune_profiling
+#	enable_coverage
+#	enable_sanitizer
+
+###### EXECUTABLE CATEGORIES
+
+# Check if the user want to build sample applications
+OPTION(BUILD_APPLICATIONS "whether sample applications should be built" ON)
+OPTION(BUILD_TESTS "whether unit tests should be built" ON)
+OPTION(BUILD_BENCHMARKS "whether benchmarking tests should be built" ON)
 
 
-###### TESTING
+###### CODE ANALYSIS FLAGS.  TODO: sanitizer flags for icc?  profiling flags for icc?
+set(CODE_ANALYSIS_TYPE "disabled" CACHE STRING "Enable different testing mechanisms including coverage, sanitizers, and profiling")
+set_property(CACHE CODE_ANALYSIS_TYPE PROPERTY STRINGS disabled profiling coverage sanitizer)
 
-OPTION(ENABLE_TESTING "Enable different testing mechanisms including coverage, thread and address sanitizers, relacy, and google test" OFF)
+set(ENABLE_CODE_ANALYSIS OFF CACHE INTERNAL "enabling code analysis")
+set(ENABLE_PROFILING OFF CACHE INTERNAL "enabling profiling")	
+set(ENABLE_COVERAGE OFF CACHE INTERNAL "enabling coverage")
+set(ENABLE_SANITIZER OFF CACHE INTERNAL "enabling sanitizer")
+set(SANITIZER_STYLE "${${SANITIZER_STYLE}}" CACHE INTERNAL "Disabled Sanitizer.")
 
-# ----------------------------------------------------------------------------
-# Include profiling?
-# Default: NO
-# ----------------------------------------------------------------------------
-CMAKE_DEPENDENT_OPTION(ENABLE_PROFILING "Enable profiling in the GCC compiler (Add flags: -g -pg)" OFF "ENABLE_TESTING" OFF)
 
-# Profiling?
-if(ENABLE_PROFILING)
-  add_definitions(-pg -g)
+find_library(VTUNE_LIB NAMES libittnotify.a HINTS /opt/intel/parallel_studio_xe_2017.3.053/vtune_amplifier_xe_2017/lib64)
+if (NOT ${VTUNE_LIB} STREQUAL "VTUNE_LIB-NOTFOUND")
+	get_filename_component(VTUNE_DIR ${VTUNE_LIB} PATH) # lib path
+	get_filename_component(VTUNE_DIR ${VTUNE_DIR} PATH) # root path.
 else()
-  # Remove unreferenced functions: function level linking
-  if(NOT APPLE)
-    add_definitions(-ffunction-sections)
-  endif()
+	set(VTUNE_DIR "")
 endif()
+message(STATUS "vtune found at ${VTUNE_DIR}, ${VTUNE_LIB}")
 
-CMAKE_DEPENDENT_OPTION(ENABLE_COVERAGE "Enable Code Coverage Reporting" OFF
-                        "ENABLE_TESTING;SUPPORTS_COVERAGE" OFF)
-CMAKE_DEPENDENT_OPTION(ENABLE_SANITIZER "Enable Sanitizer.  Choose via SANITIZER_STYLE" OFF
-                        "ENABLE_TESTING;SUPPORTS_SANITIZER" OFF)
+function(update_analysis_options varname cacheaccess varval) 
 
-
-## LOGGING ENGINE configuration
-#function(update_test_options varname cacheaccess varval) 
-##       message(STATUS "${varname} changed to ${varval} with unhandled access: ${cacheaccess}.")
-#
-#
-#    if (${cacheaccess} STREQUAL READ_ACCESS AND
-#        ${varname} STREQUAL ENABLE_TESTING)
-#
-#            
-#        if (ENABLE_TESTING)
-#            if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
-#              set(ENABLE_COVERAGE ${ENABLE_COVERAGE} CACHE BOOL "Enable Code Coverage reporting" FORCE)
-#              set(ENABLE_SANITIZER ${ENABLE_SANITIZER} CACHE BOOL "Enable Sanitizer.  Choose via SANITIZER_STYLE" FORCE)              
-#            elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-#              set(ENABLE_COVERAGE ${ENABLE_COVERAGE} CACHE BOOL "Enable Code Coverage reporting" FORCE)
-#              set(ENABLE_SANITIZER ${ENABLE_SANITIZER} CACHE BOOL "Enable Sanitizer.  Choose via SANITIZER_STYLE" FORCE)
-#            else()
-#              set(ENABLE_COVERAGE OFF CACHE INTERNAL "DISABLE Code Coverage Reporting because we are using Intel Compiler - don't know profiling options." FORCE) 
-#              set(ENABLE_SANITIZER OFF CACHE INTERNAL "Disabled Sanitizer as we are using Intel compiler." FORCE)
-#            endif()
-#            
-#        else()
-#              set(ENABLE_COVERAGE OFF CACHE INTERNAL "DISABLE Code Coverage Reporting as testing is turned off." FORCE) 
-#              set(ENABLE_SANITIZER OFF CACHE INTERNAL "Disabled Sanitizer as testing is turned off." FORCE)
-#        endif()
-#
-#        if (ENABLE_SANITIZER)
-#            set(SANITIZER_STYLE ${SANITIZER_STYLE} CACHE STRING "Any Compiler supported Sanitizer style.  e.g. thread, address" FORCE)
-#        else()
-#            set(SANITIZER_STYLE "" CACHE INTERNAL "Disabled Sanitizer as we are NOT enabling sanitizer." FORCE)
-#        endif()
-#            
-#                
-#
-#
-#    else(${cacheaccess} STREQUAL READ_ACCESS AND
-#        ${varname} STREQUAL ENABLE_TESTING)
-#        
-#       message(WARNING "${varname} changed to ${varval} with unhandled access: ${cacheaccess}.")
-#        
-#    endif(${cacheaccess} STREQUAL READ_ACCESS AND
-#        ${varname} STREQUAL ENABLE_TESTING)
-#                
-#endfunction(update_test_options varname cacheaccess varval)
-## Testing can be turned off: (for now the default is: ON)
-#variable_watch(ENABLE_TESTING update_test_options)
-
-# LOGGING ENGINE configuration
-function(update_sanitizer_options varname cacheaccess varval) 
-#       message(STATUS "${varname} changed to ${varval} with unhandled access: ${cacheaccess}.")
-
+	message(STATUS "changing ${varname} with value ${varval}")
 
     if (${cacheaccess} STREQUAL READ_ACCESS AND
-        ${varname} STREQUAL ENABLE_SANITIZER)
-
+        ${varname} STREQUAL CODE_ANALYSIS_TYPE)
             
-        if (${varval})
-            set(SANITIZER_STYLE ${SANITIZER_STYLE} CACHE STRING "Any Compiler supported Sanitizer style.  e.g. thread, address" FORCE)
-        else(${varval})
-            set(SANITIZER_STYLE "" CACHE INTERNAL "Disabled Sanitizer as we are NOT enabling sanitizer." FORCE)
-        endif(${varval})
-            
-    else(${cacheaccess} STREQUAL READ_ACCESS AND
-        ${varname} STREQUAL ENABLE_SANITIZER)
+        set(ENABLE_CODE_ANALYSIS ON CACHE INTERNAL "enabling code analysis")
+        set(ENABLE_PROFILING OFF CACHE INTERNAL "enabling profiling")	
+        set(ENABLE_COVERAGE OFF CACHE INTERNAL "enabling coverage")
+        set(ENABLE_SANITIZER OFF CACHE INTERNAL "enabling sanitizer")
+        set(SANITIZER_STYLE "${${SANITIZER_STYLE}}" CACHE INTERNAL "Disabled Sanitizer.")
         
-       message(WARNING "${varname} changed to ${varval} with unhandled access: ${cacheaccess}.")
+        if (${varval} STREQUAL "disabled")
+	        set(ENABLE_CODE_ANALYSIS OFF CACHE INTERNAL "enabling code analysis")
+        elseif (${varval} STREQUAL "profiling")
+	        set(ENABLE_PROFILING ON CACHE INTERNAL "enabling profiling")			
+			OPTION(ENABLE_VTUNE_PROFILING "Turn on vtune specific profiling flags" OFF)
+        elseif (${varval} STREQUAL "coverage")
+	        if (SUPPORTS_COVERAGE)
+		        set(ENABLE_COVERAGE ON CACHE INTERNAL "enabling coverage")
+	        endif(SUPPORTS_COVERAGE)
+        elseif (${varval} STREQUAL "sanitizer")
+	        if (SUPPORTS_SANITIZER)
+	            set(ENABLE_SANITIZER ON CACHE INTERNAL "enabling sanitizer")
+	            set(SANITIZER_STYLE "address" CACHE STRING "Any Compiler supported Sanitizer style.  e.g. thread, address" FORCE)
+				set_property(CACHE SANITIZER_STYLE PROPERTY STRINGS thread address)
+	            
+	        endif(SUPPORTS_SANITIZER)
+        else()
+            set(ENABLE_CODE_ANALYSIS OFF CACHE INTERNAL "enabling code analysis")	
         
+            message(SEND_ERROR "Unknown code analysis type: ${varval}")
+        endif()
+                    
     endif(${cacheaccess} STREQUAL READ_ACCESS AND
-        ${varname} STREQUAL ENABLE_SANITIZER)
+        ${varname} STREQUAL CODE_ANALYSIS_TYPE)
                 
-endfunction(update_sanitizer_options varname cacheaccess varval)
-variable_watch(ENABLE_SANITIZER update_sanitizer_options)
+endfunction(update_analysis_options varname cacheaccess varval)
+variable_watch(CODE_ANALYSIS_TYPE update_analysis_options)
+
+# NOT SURE WHY, BUT REMOVING THESE CAUSES THE VARIABLES NOT TO BE SET CORRECTLY.
+message(STATUS "Code Analysis type = ${CODE_ANALYSIS_TYPE}")
+message(STATUS "Code Analysis status = ${ENABLE_CODE_ANALYSIS}")
+message(STATUS "sanitizer status = ${ENABLE_SANITIZER}")
+message(STATUS "profiler status = ${ENABLE_PROFILING}")
+message(STATUS "coverage status = ${ENABLE_COVERAGE}")
+
+###### SUPPORTING FUNCTIONS.
+
+# code analysis configuration
+
+              
+#### COMPILER based Profiling?
+if(ENABLE_PROFILING)
+#  add_definitions(-pg -g)
+#else()
+#  # Remove unreferenced functions: function level linking
+#  if(NOT APPLE)
+#    add_definitions(-ffunction-sections)
+#  endif()
+
+# VTUNE profiling
+if (ENABLE_VTUNE_PROFILING)
+	add_definitions(-DVTUNE_ANALYSIS)
+	include_directories("${VTUNE_DIR}/include")
+else(ENABLE_VTUNE_PROFILING)
+	add_definitions(-pg -g)
+endif(ENABLE_VTUNE_PROFILING)
+
+endif()
 
 
+# Reprobe configuration.
+CMAKE_DEPENDENT_OPTION(REPORT_REPROBES "Report reprobe counts.  Only when ENABLE_PROFILING is set to off" OFF "NOT ENABLE_PROFILING" OFF)
+if (REPORT_REPROBES)
+    add_definitions(-DREPROBE_STAT)
+endif(REPORT_REPROBES)
 
-###### Google test library
-# require "git submodule init" and "git submodule update"
-if (ENABLE_TESTING)
+
 
     if (ENABLE_COVERAGE)
       # set flags for coverage test
@@ -560,13 +565,18 @@ if (ENABLE_TESTING)
       set(CMAKE_STATIC_LINKER_FLAGS "${CMAKE_STATIC_LINKER_FLAGS} --coverage -g")
     endif()
 
+
+
+###### Google test library
+# require "git submodule init" and "git submodule update"
+if (BUILD_TESTS)
+
   # GTEST use of pthreads does not appear to mix well with openmp code.
 #  if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     #clang compile with gtest have trouble with pthreads.
 #    add_definitions(-DGTEST_HAS_PTHREAD=0)
 #  endif()
   
-
   message(STATUS "Testing enabled")
   # include/load the Google Test framework
 #  set_property(DIRECTORY ${EXT_PROJECTS_DIR}/gtest APPEND PROPERTY CMAKE_CXX_FLAGS -fPIC)
@@ -583,47 +593,37 @@ if (ENABLE_TESTING)
   set(TEST_BINARY_OUTPUT_DIR ${CMAKE_BINARY_DIR}/test)
   #   set path for output of test reports (XML format)
   set(TEST_XML_OUTPUT_DIR ${CMAKE_BINARY_DIR}/Testing)
+endif(BUILD_TESTS)
 
-endif(ENABLE_TESTING)
 
-OPTION(ENABLE_BENCHMARKING "Enable benchmarking." OFF)
+
 # set here since timer needs to have this defined allways.
-if (ENABLE_BENCHMARKING)
+if (BUILD_BENCHMARKS)
   SET(BL_BENCHMARK 1)
-else(ENABLE_BENCHMARKING)
+else(BUILD_BENCHMARKS)
   SET(BL_BENCHMARK 0)
-endif(ENABLE_BENCHMARKING)
+endif(BUILD_BENCHMARKS)
 
 CMAKE_DEPENDENT_OPTION(ENABLE_TIME_BENCHMARK "Enable Time Benchmarking" ON
-                        "ENABLE_BENCHMARKING" OFF)
+                        "BUILD_BENCHMARKS" OFF)
 if (ENABLE_TIME_BENCHMARK)
   SET(BL_BENCHMARK_TIME 1)
 else(ENABLE_TIME_BENCHMARK)
   SET(BL_BENCHMARK_TIME 0)
 endif(ENABLE_TIME_BENCHMARK)
 CMAKE_DEPENDENT_OPTION(ENABLE_MEMUSE_BENCHMARK "Enable Memory Usage Benchmarking" ON
-                        "ENABLE_BENCHMARKING" OFF)
+                        "BUILD_BENCHMARKS" OFF)
 if (ENABLE_MEMUSE_BENCHMARK)
   SET(BL_BENCHMARK_MEM 1)
 else(ENABLE_MEMUSE_BENCHMARK)
   SET(BL_BENCHMARK_MEM 0)
 endif(ENABLE_MEMUSE_BENCHMARK)
   
-# Check if the user want to build test applications
-CMAKE_DEPENDENT_OPTION(BUILD_TEST_APPLICATIONS "Inform whether test applications should be built" ON
-                        "ENABLE_TESTING" OFF)
-# Check if the user want to build sample applications
-OPTION(BUILD_EXAMPLE_APPLICATIONS "Inform whether sample applications should be built" OFF)
 
 
 
-###### Executable and Libraries
-# Save libs and executables in the same place
-set(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/lib CACHE PATH "Output directory for libraries" )
-set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/bin CACHE PATH "Output directory for applications" )
-
-
-if (ENABLE_TESTING)
+                        
+if (BUILD_TESTS)
   function(kmerhash_add_test module_name module_link)
     # set the name for the test target and executable
     set(test_target_name test-${module_name})
@@ -658,50 +658,6 @@ if (ENABLE_TESTING)
     # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
     add_test(NAME ${test_target_name} WORKING_DIRECTORY ${TEST_BINARY_OUTPUT_DIR} COMMAND ${test_target_name} ARGS "--gtest_output=xml:${TEST_XML_OUTPUT_DIR}/gtest/${test_target_name}.xml")
   endfunction(kmerhash_add_test)
-
-if (BL_BENCHMARK)
-
-  function(kmerhash_add_benchmark module_name module_link)
-    # set the name for the test target and executable
-    set(test_target_name benchmark-${module_name})
-    # add all give files
-    message(STATUS "adding gtest benchmark ${test_target_name} with files ${ARGN}") 
-
-    add_executable(${test_target_name} ${ARGN})
-    
-    # add the googletest dependency
-    # commented out because there is no googletest dependency    add_dependencies(${test_target_name} googletest)
-    # set binary output path for tests
-    set_target_properties(${test_target_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_BINARY_OUTPUT_DIR})
-
-    # disable pthreads for benchmark applications
-	set_target_properties(${test_target_name} PROPERTIES COMPILE_FLAGS -DGTEST_HAS_PTHREAD=0)
-
-    # link test with gtest_main
-    target_link_libraries(${test_target_name} gtest_main)
-
-    # all the extra libs
-    target_link_libraries(${test_target_name} ${EXTRA_LIBS})
-
-    # link to the tested module (but only if that module produces a linkable
-    # library)
-    if (module_link)
-        target_link_libraries(${test_target_name} ${module_name})
-    endif (module_link)
-    
-    # if code coverage is to be determined: link with gcov
-    if (ENABLE_COVERAGE)
-      target_link_libraries(${test_target_name} gcov)
-    endif(ENABLE_COVERAGE)
-
-
-    # generate google test XML results, to be parsed by Jenkins
-    # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
-    add_test(NAME ${test_target_name} WORKING_DIRECTORY ${TEST_BINARY_OUTPUT_DIR} COMMAND ${test_target_name} ARGS "--gtest_output=xml:${TEST_XML_OUTPUT_DIR}/gtest/${test_target_name}.xml")
-  endfunction(kmerhash_add_benchmark)
-
-endif(BL_BENCHMARK)
-
 
 
   function(kmerhash_add_mpi_test module_name module_link)
@@ -843,8 +799,57 @@ endif(BL_BENCHMARK)
   endfunction(kmerhash_add_metaprog_test)
   
 
-endif (ENABLE_TESTING)
+endif (BUILD_TESTS)
 
+
+if (BUILD_BENCHMARKS)
+
+  function(kmerhash_add_benchmark module_name module_link)
+    # set the name for the test target and executable
+    set(test_target_name benchmark-${module_name})
+    # add all give files
+    message(STATUS "adding gtest benchmark ${test_target_name} with files ${ARGN}") 
+
+    add_executable(${test_target_name} ${ARGN})
+    
+    # add the googletest dependency
+    # commented out because there is no googletest dependency    add_dependencies(${test_target_name} googletest)
+    # set binary output path for tests
+    set_target_properties(${test_target_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TEST_BINARY_OUTPUT_DIR})
+
+    # disable pthreads for benchmark applications
+	set_target_properties(${test_target_name} PROPERTIES COMPILE_FLAGS -DGTEST_HAS_PTHREAD=0)
+
+    # link test with gtest_main
+    target_link_libraries(${test_target_name} gtest_main)
+
+    # all the extra libs
+    target_link_libraries(${test_target_name} ${EXTRA_LIBS})
+
+    # link to the tested module (but only if that module produces a linkable
+    # library)
+    if (module_link)
+        target_link_libraries(${test_target_name} ${module_name})
+    endif (module_link)
+    
+    # if code coverage is to be determined: link with gcov
+    if (ENABLE_COVERAGE)
+      target_link_libraries(${test_target_name} gcov)
+    endif(ENABLE_COVERAGE)
+
+
+    # generate google test XML results, to be parsed by Jenkins
+    # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
+    add_test(NAME ${test_target_name} WORKING_DIRECTORY ${TEST_BINARY_OUTPUT_DIR} COMMAND ${test_target_name} ARGS "--gtest_output=xml:${TEST_XML_OUTPUT_DIR}/gtest/${test_target_name}.xml")
+  endfunction(kmerhash_add_benchmark)
+
+endif(BUILD_BENCHMARKS)
+
+
+###### Executable and Libraries
+# Save libs and executables in the same place
+set(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/lib CACHE PATH "Output directory for libraries" )
+set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/bin CACHE PATH "Output directory for applications" )
 
 
 # configure a header file to pass some of the CMake settings to the source code

@@ -4,7 +4,7 @@ include("${PROJECT_SOURCE_DIR}/cmake/ExtraWarnings.cmake")
 
 
 
-if (ENABLE_TESTING)
+if (BUILD_TESTS)
 
 
 
@@ -37,6 +37,6 @@ endif(IS_DIRECTORY ${PROJECT_SOURCE_DIR}/test/unit)
 #target_link_libraries(projection ${EXTRA_LIBS})
 
 
-endif(ENABLE_TESTING)
+endif(BUILD_TESTS)
 
 

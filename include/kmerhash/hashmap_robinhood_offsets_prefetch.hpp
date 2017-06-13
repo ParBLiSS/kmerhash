@@ -858,7 +858,7 @@ protected:
 
 #if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
 #endif
 
     return make_missing_bucket_id(start);
@@ -1036,7 +1036,7 @@ protected:
 
 #if defined(REPROBE_STAT)
 		this->reprobes += reprobe;
-		this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
 #endif
 		}
 
@@ -1382,7 +1382,7 @@ public:
 
 	#if defined(REPROBE_STAT)
 			this->reprobes += reprobe;
-			this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(reprobe));
+			this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
 	#endif
 
 				if (found) continue;   // skip the remaining.
@@ -1513,7 +1513,7 @@ public:
 		}
 
 #if defined(REPROBE_STAT)
-		print_reprobe_stats("COUNT iter", std::distance(begin, end), (lsize - before));
+		print_reprobe_stats("COUNT iter", std::distance(begin, end), counts);
 #endif
 		return counts;
 	}
@@ -1582,7 +1582,7 @@ public:
 
 
 #if defined(REPROBE_STAT)
-		print_reprobe_stats("COUNT iter", std::distance(begin, end), (lsize - before));
+		print_reprobe_stats("COUNT iter", std::distance(begin, end), counts.size());
 #endif
 		return counts;
 	}
@@ -1681,7 +1681,7 @@ public:
     }
 
 #if defined(REPROBE_STAT)
-    print_reprobe_stats("COUNT iter", std::distance(begin, end), (lsize - before));
+    print_reprobe_stats("COUNT iter", std::distance(begin, end), counts);
 #endif
     return counts;
   }
@@ -1750,7 +1750,7 @@ public:
 
 
 #if defined(REPROBE_STAT)
-    print_reprobe_stats("COUNT iter", std::distance(begin, end), (lsize - before));
+    print_reprobe_stats("COUNT iter", std::distance(begin, end), counts.size());
 #endif
     return counts;
   }

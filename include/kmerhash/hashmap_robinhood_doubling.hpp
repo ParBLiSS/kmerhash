@@ -666,6 +666,7 @@ public:
 		this->max_moves = 0;
 		unsigned char probe_count = 0;
 		size_t move_count = 0;
+		size_t before = lsize;
 #endif
 		unsigned char reprobe = info_type::normal;
 		size_t id;
@@ -761,7 +762,7 @@ public:
 
     std::cout << "INSERT_I batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
     		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
-					"\tvalid=" << count << "\ttotal=" << input.size() <<
+					"\tvalid=" << (lsize - before) << "\ttotal=" << input.size() <<
 					"\tbuckets=" << buckets <<std::endl;
 		this->reprobes = 0;
 		this->max_reprobes = 0;

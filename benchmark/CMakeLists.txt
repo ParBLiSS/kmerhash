@@ -2,37 +2,27 @@ set(TEST_NAME kmerhash_test_apps)
 include("${PROJECT_SOURCE_DIR}/cmake/Sanitizer.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/ExtraWarnings.cmake")
 
-if(ENABLE_TESTING)
-
-
-endif(ENABLE_TESTING)
+if(BUILD_TESTS)
+endif(BUILD_TESTS)
 
 
 
 
-if (BL_BENCHMARK)
-
-include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/tclap-1.2.1/include")
+if (BUILD_BENCHMARKS)
 
 
 # EXECUTABLES
 #include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/tommyds")
 add_executable(benchmark_hashtables BenchmarkHashTables.cpp)
 target_link_libraries(benchmark_hashtables ${EXTRA_LIBS})
+message(STATUS "VTUNE_ANALYSIS set to ${VTUNE_ANALYSIS}")
 
-
-endif(BL_BENCHMARK)
-
-if (BUILD_TEST_APPLICATIONS)
-
-
-
-
-
-if (USE_OPENMP)
-
-
-endif(USE_OPENMP)
+if (ENABLE_VTUNE_PROFILING)
+	ADD_LIBRARY(ittnotify STATIC IMPORTED)
+	SET_TARGET_PROPERTIES(ittnotify PROPERTIES
+	    IMPORTED_LOCATION ${VTUNE_LIB})
+	target_link_libraries(benchmark_hashtables ittnotify dl)
+endif(ENABLE_VTUNE_PROFILING)
 
 
 
@@ -51,8 +41,9 @@ endif(Boost_FOUND)
 add_executable(test_prealloc test_prealloc.cpp)
 target_link_libraries(test_prealloc ${EXTRA_LIBS})
 
+endif(BUILD_BENCHMARKS)
 
+if (BUILD_APPLICATIONS)
 
-
-endif(BUILD_TEST_APPLICATIONS)
+endif(BUILD_APPLICATIONS)
 
