@@ -733,7 +733,7 @@ protected:
     			// figure out which block it is in.
     			bl = id / buckets;
 
-    			// count.
+    			// count.  at least the bucket id + 1, or last insert target position + 1.
     			offsets[bl + 1] = std::max(offsets[bl + 1], id) + 1;
     		}
     	}
@@ -1064,8 +1064,8 @@ protected:
 			++(target_info[i]);
 		}
 #if defined(REPROBE_STAT)
-		this->shifts += (end - next);
-		this->max_shifts = std::max(this->max_shifts, (end - next));
+		this->shifts += (end - id);
+		this->max_shifts = std::max(this->max_shifts, (end - id));
 		this->moves += (end - next);
 		this->max_moves = std::max(this->max_moves, (end - next));
 #endif
@@ -1117,8 +1117,8 @@ protected:
 			++(target_info[i]);
 		}
 #if defined(REPROBE_STAT)
-		this->shifts += (end - next);
-		this->max_shifts = std::max(this->max_shifts, (end - next));
+		this->shifts += (end - id);
+		this->max_shifts = std::max(this->max_shifts, (end - id));
 		this->moves += (end - next);
 		this->max_moves = std::max(this->max_moves, (end - next));
 #endif
@@ -1411,8 +1411,8 @@ public:
 			++lsize;
 
 	#if defined(REPROBE_STAT)
-			this->shifts += (end - next);
-			this->max_shifts = std::max(this->max_shifts, (end - next));
+			this->shifts += (end - id);
+			this->max_shifts = std::max(this->max_shifts, (end - id));
 			this->moves += (end - next);
 			this->max_moves = std::max(this->max_moves, (end - next));
 	#endif
@@ -1513,7 +1513,7 @@ public:
 		}
 
 #if defined(REPROBE_STAT)
-		print_reprobe_stats("COUNT iter", std::distance(begin, end), counts);
+		print_reprobe_stats("COUNT ITER PAIR", std::distance(begin, end), counts);
 #endif
 		return counts;
 	}
@@ -1582,7 +1582,7 @@ public:
 
 
 #if defined(REPROBE_STAT)
-		print_reprobe_stats("COUNT iter", std::distance(begin, end), counts.size());
+		print_reprobe_stats("COUNT ITER KEY", std::distance(begin, end), counts.size());
 #endif
 		return counts;
 	}
@@ -1591,8 +1591,15 @@ public:
 	 * @brief find the iterator for a key
 	 */
 	iterator find(key_type const & k) {
+#if defined(REPROBE_STAT)
+    reset_reprobe_stats();
+#endif
 
 		bucket_id_type idx = find_pos(k);
+
+#if defined(REPROBE_STAT)
+    print_reprobe_stats("FIND 1 KEY", 1, ( exists(idx) ? 1: 0));
+#endif
 
 		if (exists(idx))
       return iterator(container.begin() + get_pos(idx), info_container.begin()+ get_pos(idx),
@@ -1606,8 +1613,15 @@ public:
 	 * @brief find the iterator for a key
 	 */
 	const_iterator find(key_type const & k) const {
+#if defined(REPROBE_STAT)
+    reset_reprobe_stats();
+#endif
 
 		bucket_id_type idx = find_pos(k);
+
+#if defined(REPROBE_STAT)
+    print_reprobe_stats("FIND 1 KEY", 1, ( exists(idx) ? 1: 0));
+#endif
 
 		if (exists(idx))
       return const_iterator(container.cbegin() + get_pos(idx), info_container.cbegin()+ get_pos(idx),
@@ -1681,7 +1695,7 @@ public:
     }
 
 #if defined(REPROBE_STAT)
-    print_reprobe_stats("COUNT iter", std::distance(begin, end), counts);
+    print_reprobe_stats("FIND ITER PAIR", std::distance(begin, end), counts);
 #endif
     return counts;
   }
@@ -1750,7 +1764,7 @@ public:
 
 
 #if defined(REPROBE_STAT)
-    print_reprobe_stats("COUNT iter", std::distance(begin, end), counts.size());
+    print_reprobe_stats("FIND ITER PAIR", std::distance(begin, end), counts.size());
 #endif
     return counts;
   }
@@ -1825,6 +1839,14 @@ protected:
 			for (size_t i = bid1; i < end; ++i ) {
 				--(info_container[i]);
 			}
+
+#if defined(REPROBE_STAT)
+    this->shifts += (end - bid1);
+    this->max_shifts = std::max(this->max_shifts, (end - bid1));
+    this->moves += (end - pos1);
+    this->max_moves = std::max(this->max_moves, (end - pos1));
+#endif
+
 		return 1;
 
 	}
@@ -1912,7 +1934,7 @@ protected:
 
 
 	#if defined(REPROBE_STAT)
-			print_reprobe_stats("ERASE PAIR ITER", std::distance(begin, end), before - lsize);
+			print_reprobe_stats("ERASE ITER PAIR", std::distance(begin, end), before - lsize);
 	#endif
 			return before - lsize;
 		}
@@ -1979,7 +2001,7 @@ protected:
 
 
 	#if defined(REPROBE_STAT)
-			print_reprobe_stats("ERASE KEY ITER", std::distance(begin, end), before - lsize);
+			print_reprobe_stats("ERASE ITER KEY", std::distance(begin, end), before - lsize);
 	#endif
 			return before - lsize;
 		}
@@ -2034,8 +2056,6 @@ constexpr uint32_t hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Alloc
 template <typename Key, typename T, typename Hash, typename Equal, typename Allocator >
 constexpr uint32_t hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::value_prefetch_iters;
 
-
-#undef REPROBE_STAT
 
 }  // namespace fsc
 #endif /* KMERHASH_HASHMAP_ROBINHOOD_OFFSETS_PREFETCH_HPP_ */

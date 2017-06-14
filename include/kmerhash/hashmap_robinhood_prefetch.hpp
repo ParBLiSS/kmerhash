@@ -1362,7 +1362,7 @@ public:
     }
 
 #if defined(REPROBE_STAT)
-		print_reprobe_stats("COUNT ITER", std::distance(begin, end), counts.size());
+		print_reprobe_stats("COUNT ITER KEY", std::distance(begin, end), counts.size());
 #endif
 
 		free(hashes);
@@ -1442,7 +1442,7 @@ public:
 
 
 #if defined(REPROBE_STAT)
-		print_reprobe_stats("COUNT ITER", std::distance(begin, end), counts.size());
+		print_reprobe_stats("COUNT ITER KEY", std::distance(begin, end), counts.size());
 #endif
 		free(hashes);
 
@@ -1560,7 +1560,7 @@ public:
     }
 
 #if defined(REPROBE_STAT)
-    print_reprobe_stats("COUNT ITER", std::distance(begin, end), counts.size());
+    print_reprobe_stats("FIND ITER PAIR", std::distance(begin, end), counts.size());
 #endif
 
     free(hashes);
@@ -1645,7 +1645,7 @@ public:
     }
 
 #if defined(REPROBE_STAT)
-    print_reprobe_stats("COUNT ITER", std::distance(begin, end), counts.size());
+    print_reprobe_stats("FIND ITER KEY", std::distance(begin, end), counts.size());
 #endif
 
     free(hashes);
@@ -1734,7 +1734,7 @@ protected:
 				// store the curr position as the next target of move.
 				target = curr;
 
-#if defined(REPRoBE_STAT)
+#if defined(REPROBE_STAT)
 				++move_count;
 #endif
 			}
@@ -1755,8 +1755,8 @@ protected:
 
 		this->moves += move_count;
 		this->max_moves = std::max(this->max_moves, move_count);
-		this->shifts += curr - found;
-		this->max_shifts = std::max(this->max_shifts, curr - found);
+		this->shifts += curr - get_bucket_id(found);
+		this->max_shifts = std::max(this->max_shifts, curr - get_bucket_id(found));
 #endif
 		return 1;
 	}
@@ -1792,7 +1792,7 @@ public:
 		}
 
 #if defined(REPROBE_STAT)
-		print_reprobe_stats("ERASE PAIR ITER", std::distance(begin, end), before - lsize);
+		print_reprobe_stats("ERASE ITER PAIR", std::distance(begin, end), before - lsize);
 #endif
 		return before - lsize;
 	}
@@ -1812,7 +1812,7 @@ public:
 		}
 
 #if defined(REPROBE_STAT)
-		print_reprobe_stats("ERASE KEY ITER", std::distance(begin, end), before - lsize);
+		print_reprobe_stats("ERASE ITER KEY", std::distance(begin, end), before - lsize);
 #endif
 		return before - lsize;
 	}
@@ -1824,7 +1824,7 @@ public:
 
 		size_type res = erase_no_resize(k);
 
-//		if (lsize < min_load) rehash(buckets >> 1);
+		if (lsize < min_load) rehash(buckets >> 1);
 
 		return res;
 	}
@@ -1834,7 +1834,7 @@ public:
 
 		size_type erased = erase_no_resize(begin, end);
 
-//		if (lsize < min_load) reserve(lsize);
+		if (lsize < min_load) reserve(lsize);
 
 		return erased;
 	}

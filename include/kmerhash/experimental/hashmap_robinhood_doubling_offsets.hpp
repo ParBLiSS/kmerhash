@@ -1112,7 +1112,6 @@ public:
 
 };
 
-#undef REPROBE_STAT
 
 }  // namespace fsc
 #endif /* KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS_HPP_ */

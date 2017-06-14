@@ -1755,7 +1755,5 @@ const typename hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator
 //constexpr typename hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bucket_id_type hashmap_robinhood_doubling_offsets<Key, T, Hash, Equal, Allocator>::bid_info_empty;
 
 
-#undef REPROBE_STAT
-
 }  // namespace fsc
 #endif /* KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_OFFSETS_HPP_ */
