@@ -847,12 +847,16 @@ protected:
 		for (; start < end; ++start) {
 
 			if (eq(k, container[start].first)) {
+#if defined(REPROBE_STAT)
+    this->reprobes += reprobe;
+    this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
+#endif
 //				return make_existing_bucket_id(start, offset);
 	        return make_existing_bucket_id(start);
 			}
 
 #if defined(REPROBE_STAT)
-			++reprobe;
+      ++reprobe;
 #endif
 		}
 
@@ -1025,6 +1029,10 @@ protected:
 				if (eq(v.first, target[i].first)) {
 					// check if value and what's in container match.
 //					std::cout << "EXISTING.  " << v.first << ", " << target[i].first << std::endl;
+#if defined(REPROBE_STAT)
+    this->reprobes += reprobe;
+    this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
+#endif
 
 				  //return make_existing_bucket_id(i, info);
           return make_existing_bucket_id(i);
