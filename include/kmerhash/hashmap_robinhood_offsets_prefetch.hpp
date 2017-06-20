@@ -1440,16 +1440,21 @@ public:
 	template <typename LESS = ::std::less<key_type> >
 	void insert_sort(::std::vector<value_type> const & input) {
 
-
+	  if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+	    std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+	  } else {
+      std::cout << "STATUS: container alignment on value boundary" << std::endl;
+	  }
 		//    throw ::std::logic_error("ERROR: DISABLED FOR NONCIRC VERSION");
 
 		#if defined(REPROBE_STAT)
 		    reset_reprobe_stats();
 		    size_type before = lsize;
 		#endif
-		    bucket_id_type id, bid, bid1;
+		    bucket_id_type id, bid1, bid;
 
 		    size_t ii;
+		    size_t hash_val;
 
 		    std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
 
@@ -1457,12 +1462,14 @@ public:
 		    size_t max_prefetch2 = std::min(info_container.size(), static_cast<size_t>(2 * LOOK_AHEAD));
 		    // prefetch 2*LOOK_AHEAD of the info_container.
 		    for (ii = 0; ii < max_prefetch2; ++ii) {
-		      hashes[ii] = hash(input[ii].first);
+		      hash_val = hash(input[ii].first);
+		      hashes[ii] = hash_val;
+		      id = hash_val & mask;
 		      // prefetch the info_container entry for ii.
-		      _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+		      _mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
 
 		      // prefetch container as well - would be NEAR but may not be exact.
-		      _mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
+		      _mm_prefetch((const char *)&(container[id]), _MM_HINT_T0);
 		    }
 
 		    // iterate based on size between rehashes
@@ -1470,38 +1477,73 @@ public:
 		    size_t max2 = (input.size() > (2*LOOK_AHEAD)) ? input.size() - (2*LOOK_AHEAD) : 0;
 		    size_t max1 = (input.size() > LOOK_AHEAD) ? input.size() - LOOK_AHEAD : 0;
 		    size_t i = 0, i1 = LOOK_AHEAD, i2 = 2*LOOK_AHEAD;
-		    for (; i < max2; ++i, ++i1, ++i2) {
 
-		      // === same code as in insert(1)..
+		    size_t avail, to_insert, lmax;
 
-		      // first check if we need to resize.
-		      if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
+		    while (to_insert > 0) {
 
-		      // first get the bucket id
-		      id = hashes[i & hash_mask] & mask;  // target bucket id.
+		      std::cout << "checking if rehash needed.  i = " << i << std::endl;
 
-		      // prefetch info_container.
-		      ii = i2 & hash_mask;
-		      hashes[ii] = hash(input[i2].first);
-		      _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+          // first check if we need to resize.
+		      if (lsize >= max_load) {
+		        rehash(buckets << 1);
 
-		      // prefetch container
-		      bid = hashes[i1 & hash_mask] & mask;
-		      if (is_normal(info_container[bid])) {
-		        bid1 = bid + 1 + get_distance(info_container[bid + 1]);
-		        bid += get_distance(info_container[bid]);
-
-		        for (size_t j = bid; j < bid1; ++j) {   // skipping by cacheline increases cache misses.
-		          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+            std::cout << "rehashed.  size = " << buckets << std::endl;
+		        if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type))  > 0) {
+		          std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+		        } else {
+		          std::cout << "STATUS: container alignment on value boundary" << std::endl;
 		        }
+
+//
+//		        max_prefetch2 = std::min(buckets, static_cast<size_t>(2 * LOOK_AHEAD));
+//		        // prefetch 2*LOOK_AHEAD of the info_container.
+//		        for (ii = 0; ii < max_prefetch2; ++ii) {
+//		          // prefetch the info_container entry for ii.
+//		          _mm_prefetch((const char *)&(info_container[hashes[(i2 + ii) & hash_mask] & mask]), _MM_HINT_T0);
+//
+//		          // prefetch container as well - would be NEAR but may not be exact.
+//		          _mm_prefetch((const char *)&(container[hashes[(i2 + ii) & hash_mask] & mask]), _MM_HINT_T0);
+//		        }
+
 		      }
 
-		      if (missing(insert_with_hint(container, info_container, id, input[i])))
-		        ++lsize;
+	        to_insert = max2 - i;
+	        lmax = i + std::min(max_load - lsize, to_insert);
 
-		//      std::cout << "insert vec lsize " << lsize << std::endl;
+
+          for (; i < lmax; ++i, ++i1, ++i2) {
+
+            // first get the bucket id
+            id = hashes[i & hash_mask] & mask;  // target bucket id.
+
+            // prefetch info_container.
+            hash_val = hash(input[i2].first);
+            hashes[i2 & hash_mask] = hash_val;
+            _mm_prefetch((const char *)&(info_container[hash_val & mask]), _MM_HINT_T0);
+
+            // prefetch container
+            bid = hashes[i1 & hash_mask] & mask;
+            if (is_normal(info_container[bid])) {
+              bid1 = bid + 1;
+              bid += get_distance(info_container[bid]);
+              bid1 += get_distance(info_container[bid1]);
+
+              for (size_t j = bid; j < bid1; ++j) {   // skipping by cacheline increases cache misses.
+                _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+              }
+            }
+
+            if (missing(insert_with_hint(container, info_container, id, input[i])))
+              ++lsize;
+
+      //      std::cout << "insert vec lsize " << lsize << std::endl;
+
+          }
 
 		    }
+        //if ((lsize + 2 * LOOK_AHEAD) >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
+
 
 		    // second to last LOOK_AHEAD
 		    for (; i < max1; ++i, ++i1) {
@@ -1517,10 +1559,11 @@ public:
 		      // prefetch container
 		      bid = hashes[i1 & hash_mask] & mask;
 		      if (is_normal(info_container[bid])) {
-		        bid1 = bid + 1 + get_distance(info_container[bid + 1]);
-		        bid += get_distance(info_container[bid]);
+            bid1 = bid + 1;
+            bid += get_distance(info_container[bid]);
+            bid1 += get_distance(info_container[bid1]);
 
-		        for (size_t j = bid; j < bid1; j += (64 / sizeof(value_type))) {
+		        for (size_t j = bid; j < bid1; ++j) {
 		          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
 		        }
 		      }
@@ -1610,7 +1653,7 @@ public:
         bid1 = bid + 1 + get_distance(info_container[bid + 1]);
         bid += get_distance(info_container[bid]);
 
-        for (size_t j = bid; j < bid1; ++j) {   // skipping by cacheline increases cache misses.
+        for (size_t j = bid; j < bid1; j += (64 / sizeof(value_type))) {   // skipping by cacheline increases cache misses.
           _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
         }
       }

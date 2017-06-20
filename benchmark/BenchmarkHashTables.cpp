@@ -500,6 +500,9 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
   BL_BENCH_START(map);
   // no transform involved.
   using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::std::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
+
+  std::cout << " tuple size " << sizeof(typename MAP_TYPE::value_type) << std::endl;
+
   MAP_TYPE map(count * 2 / repeat_rate);
   BL_BENCH_END(map, "reserve", count);
 
@@ -590,6 +593,9 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
   BL_BENCH_START(map);
   // no transform involved.
   using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::std::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
+
+  std::cout << " tuple size " << sizeof(typename MAP_TYPE::value_type) << std::endl;
+
   MAP_TYPE map(count * 2 / repeat_rate);
   BL_BENCH_END(map, "reserve", count);
 
