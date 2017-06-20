@@ -27,6 +27,7 @@
 #define KMERHASH_HASHMAP_ROBINHOOD_OFFSETS_PREFETCH_HPP_
 
 #include <vector>   // for vector.
+#include <array>
 #include <type_traits> // for is_constructible
 #include <iterator>  // for iterator traits
 #include <algorithm> // for transform
@@ -1446,6 +1447,8 @@ public:
       std::cout << "STATUS: container alignment on value boundary" << std::endl;
 	  }
 		//    throw ::std::logic_error("ERROR: DISABLED FOR NONCIRC VERSION");
+//	  bucket_id_type info_align = reinterpret_cast<size_t>(info_container.data()) % 64;  // cacheline size = 64
+
 
 		#if defined(REPROBE_STAT)
 		    reset_reprobe_stats();
@@ -1456,7 +1459,7 @@ public:
 		    size_t ii;
 		    size_t hash_val;
 
-		    std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+		    std::array<size_t, 2 * LOOK_AHEAD>  hashes;
 
 		    //prefetch only if target_buckets is larger than LOOK_AHEAD
 		    size_t max_prefetch2 = std::min(info_container.size(), static_cast<size_t>(2 * LOOK_AHEAD));
@@ -1467,18 +1470,21 @@ public:
 		      id = hash_val & mask;
 		      // prefetch the info_container entry for ii.
 		      _mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
+//		      if (((id + 1) % 64) == info_align)
+//		        _mm_prefetch((const char *)&(info_container[id + 1]), _MM_HINT_T0);
 
 		      // prefetch container as well - would be NEAR but may not be exact.
 		      _mm_prefetch((const char *)&(container[id]), _MM_HINT_T0);
+
 		    }
 
 		    // iterate based on size between rehashes
 		    constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
 		    size_t max2 = (input.size() > (2*LOOK_AHEAD)) ? input.size() - (2*LOOK_AHEAD) : 0;
 		    size_t max1 = (input.size() > LOOK_AHEAD) ? input.size() - LOOK_AHEAD : 0;
-		    size_t i = 0, i1 = LOOK_AHEAD, i2 = 2*LOOK_AHEAD;
+		    size_t i = 0; //, i1 = LOOK_AHEAD, i2 = 2*LOOK_AHEAD;
 
-		    size_t avail, to_insert, lmax;
+		    size_t to_insert = max2 - i, lmax;
 
 		    while (to_insert > 0) {
 
@@ -1512,33 +1518,38 @@ public:
 	        lmax = i + std::min(max_load - lsize, to_insert);
 
 
-          for (; i < lmax; ++i, ++i1, ++i2) {
+          for (; i < lmax; ++i) {
+            _mm_prefetch((const char *)&(hashes[(i + 2 * LOOK_AHEAD) & hash_mask]), _MM_HINT_T0);
+            // prefetch input
+            _mm_prefetch((const char *)&(input[i + 2 * LOOK_AHEAD]), _MM_HINT_T0);
 
-            // first get the bucket id
-            id = hashes[i & hash_mask] & mask;  // target bucket id.
-
-            // prefetch info_container.
-            hash_val = hash(input[i2].first);
-            hashes[i2 & hash_mask] = hash_val;
-            _mm_prefetch((const char *)&(info_container[hash_val & mask]), _MM_HINT_T0);
 
             // prefetch container
-            bid = hashes[i1 & hash_mask] & mask;
+            bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
             if (is_normal(info_container[bid])) {
               bid1 = bid + 1;
               bid += get_distance(info_container[bid]);
               bid1 += get_distance(info_container[bid1]);
 
-              for (size_t j = bid; j < bid1; ++j) {   // skipping by cacheline increases cache misses.
+              for (size_t j = bid; j < bid1; ++j) {
                 _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
               }
             }
 
+            // first get the bucket id
+            id = hashes[i & hash_mask] & mask;  // target bucket id.
             if (missing(insert_with_hint(container, info_container, id, input[i])))
               ++lsize;
 
       //      std::cout << "insert vec lsize " << lsize << std::endl;
+            // prefetch info_container.
+            hash_val = hash(input[(i + 2 * LOOK_AHEAD)].first);
+            bid = hash_val & mask;
+            _mm_prefetch((const char *)&(info_container[bid]), _MM_HINT_T0);
+//            if (((bid + 1) % 64) == info_align)
+//              _mm_prefetch((const char *)&(info_container[bid + 1]), _MM_HINT_T0);
 
+            hashes[(i + 2 * LOOK_AHEAD)  & hash_mask] = hash_val;
           }
 
 		    }
@@ -1546,18 +1557,20 @@ public:
 
 
 		    // second to last LOOK_AHEAD
-		    for (; i < max1; ++i, ++i1) {
+		    for (; i < max1; ++i) {
+
 
 		      // === same code as in insert(1)..
 
 		      // first check if we need to resize.
 		      if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
+		      bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
+
 		      // first get the bucket id
 		      id = hashes[i & hash_mask] & mask;  // target bucket id.
 
 		      // prefetch container
-		      bid = hashes[i1 & hash_mask] & mask;
 		      if (is_normal(info_container[bid])) {
             bid1 = bid + 1;
             bid += get_distance(info_container[bid]);

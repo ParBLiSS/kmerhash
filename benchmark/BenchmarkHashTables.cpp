@@ -72,6 +72,19 @@
 
 #define LOOK_AHEAD 32
 
+
+template <class T>
+struct equal_to {
+    using result_type = bool;
+    using first_argument_type = T;
+    using second_argument_type = T;
+
+    inline constexpr bool operator()(T const & lhs, T const & rhs) const {
+      return lhs == rhs;
+    }
+};
+
+
 template <typename Kmer, typename Value>
 void generate_input(std::vector<::std::pair<Kmer, Value> > & output, size_t const count, size_t const repeats = 10, bool canonical = false) {
   output.reserve(count);
@@ -490,6 +503,7 @@ void benchmark_google_densehash_map(std::string name, size_t const count,  size_
 #define SHUFFLE_MODE 5
 
 
+
 template <template <typename, typename, typename, typename, typename> class MAP,
 typename Kmer, typename Value>
 void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, int vector_mode, ::mxx::comm const & comm) {
@@ -499,7 +513,7 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
 
   BL_BENCH_START(map);
   // no transform involved.
-  using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::std::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
+  using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
 
   std::cout << " tuple size " << sizeof(typename MAP_TYPE::value_type) << std::endl;
 
@@ -590,9 +604,10 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 
   std::vector<Kmer> query;
 
+
   BL_BENCH_START(map);
   // no transform involved.
-  using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::std::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
+  using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
 
   std::cout << " tuple size " << sizeof(typename MAP_TYPE::value_type) << std::endl;
 
