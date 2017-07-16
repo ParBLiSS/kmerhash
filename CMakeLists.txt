@@ -19,6 +19,12 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG") # -funroll-loops")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O3 -g") # -funroll-loops -g")
 
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wuninitialized --std=c11 -fPIC")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g -O0")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3 -DNDEBUG") # -funroll-loops")
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} -O3 -g") # -funroll-loops -g")
+
+
 set(EXT_PROJECTS_DIR ${PROJECT_SOURCE_DIR}/ext)
 
 #set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
@@ -450,7 +456,7 @@ OPTION(BUILD_BENCHMARKS "whether benchmarking tests should be built" ON)
 
 
 ###### CODE ANALYSIS FLAGS.  TODO: sanitizer flags for icc?  profiling flags for icc?
-set(CODE_ANALYSIS_TYPE "disabled" CACHE STRING "Enable different testing mechanisms including coverage, sanitizers, and profiling")
+set(CODE_ANALYSIS_TYPE "disabled" CACHE STRING "Enable different testing mechanisms. options are disabled, coverage, sanitizer, profiling")
 set_property(CACHE CODE_ANALYSIS_TYPE PROPERTY STRINGS disabled profiling coverage sanitizer)
 
 set(ENABLE_CODE_ANALYSIS OFF CACHE INTERNAL "enabling code analysis")

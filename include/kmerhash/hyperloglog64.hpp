@@ -89,13 +89,14 @@ protected:
 	static constexpr uint64_t nRegisters = 0x1UL << precision;
 	double amm;
 
-	std::array<uint8_t, nRegisters> registers;  // stores count of leading zeros
+	std::array<int8_t, nRegisters> registers;  // stores count of leading zeros
 
 	Hash h;
+  static_assert(precision >= 4, "ERROR: precision for hyperloglog should be at least 4.");
 
 public:
 	hyperloglog64() : amm(0.0) {
-		registers.fill(0UL);
+		registers.fill(-1);
 
         switch (precision) {
             case 4:
@@ -140,12 +141,7 @@ public:
 	}
 
 	inline void update(T const & val) {
-        uint64_t hash = h(val);
-        uint64_t i = hash >> (64 - precision);   // first precision bits are for register id
-        uint8_t rank = leftmost_set_bit(hash & val_mask) - precision;  // then find leading 1 in remaining
-        if (rank > registers[i]) {
-            registers[i] = rank;
-        }
+        update_via_hashval(h(val));
 	}
 	inline void update_via_hashval(uint64_t const & hash) {
         uint64_t i = hash >> (64 - precision);   // first precision bits are for register id
@@ -161,6 +157,7 @@ public:
 
         // compute the denominator of the harmonic mean
         for (uint64_t i = 0; i < nRegisters; i++) {
+          if (registers[i] >= 0)
             sum += 1.0 / static_cast<double>(1UL << registers[i]);
         }
         estimate = amm / sum; // E in the original paper
@@ -188,7 +185,7 @@ public:
 	inline double linear_count() {
         uint64_t zeros = 0;
         for (uint64_t i = 0; i < nRegisters; i++) {
-            zeros += (registers[i] == 0);
+            zeros += (registers[i] == -1);
         }
         if (zeros != 0) {
             return static_cast<double>(nRegisters) * std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
@@ -204,6 +201,134 @@ public:
 
 };
 
+//========= specializations for std::hash. std::hash passes through primitive types, e.g. uint8_t.
+//   this creates problems in that the high bits are all 0.  so for std::hash,
+//   we use the lower bits for register and upper bits for the bit counts.
+//   also, for small datatypes, the number of leading zeros may be artificially large.
+//      we can fix this by tracking the minimum leading zero as well.
+
+template <typename T, uint8_t precision>
+class hyperloglog64<T, std::hash<T>, precision> {
+
+protected:
+	  static constexpr uint8_t data_bits = ((sizeof(T) * 8) > 64) ? 64 : (sizeof(T) * 8);
+	  static constexpr uint8_t value_bits = data_bits - precision;
+	  static constexpr uint8_t lead_zero_bits = 64 - value_bits;
+
+	  // register mask is the lower precision number of bits.
+  static constexpr uint64_t nRegisters = 0x1UL << precision;
+  static constexpr uint64_t reg_mask = nRegisters - 1;   // trailing bits for
+  static constexpr uint64_t val_mask = ~(0x0UL) >> lead_zero_bits;
+  double amm;
+
+  std::array<int8_t, nRegisters> registers;  // stores count of maximum leading zeros
+
+  std::hash<T> h;
+
+  static_assert(precision >= 4, "ERROR: precision for hyperloglog should be at least 4.");
+
+public:
+  hyperloglog64() : amm(0.0) {
+    registers.fill(-1);
+
+        switch (precision) {
+            case 4:
+                amm = 0.673;
+                break;
+            case 5:
+                amm = 0.697;
+                break;
+            case 6:
+                amm = 0.709;
+                break;
+            default:
+                amm = 0.7213 / (1.0 + 1.079 / nRegisters);
+                break;
+        }
+        amm *= static_cast<double>(0x1UL << (precision + precision));
+  }
+
+  hyperloglog64(hyperloglog64 const & other) : amm(other.amm), registers(other.registers) {}
+
+  hyperloglog64(hyperloglog64 && other) : amm(other.amm),
+      registers(std::move(other.registers)) {}
+
+
+  hyperloglog64& operator=(hyperloglog64 const & other) {
+    amm = other.amm;
+    registers = other.registers;
+  }
+
+  hyperloglog64& operator=(hyperloglog64 && other) {
+    amm = other.amm;
+    registers.swap(std::move(other.registers));
+  }
+
+  void swap(hyperloglog64 & other) {
+    std::swap(amm, other.amm);
+    std::swap(registers, other.registers);
+  }
+
+  inline void update(T const & val) {
+        update_via_hashval(h(val));
+  }
+  inline void update_via_hashval(uint64_t const & hash) {
+        uint64_t i = (hash >> value_bits) & reg_mask;   // first precision bits are for register id
+        uint8_t rank = leftmost_set_bit(hash & val_mask) - lead_zero_bits;  // then find leading 1 in remaining
+        if (rank > registers[i]) {
+            registers[i] = rank;
+        }
+  }
+
+  double estimate() {
+        double estimate;
+        double sum = 0.0;
+
+        // compute the denominator of the harmonic mean
+        for (uint64_t i = 0; i < nRegisters; i++) {
+          if (registers[i] > -1)
+            sum += 1.0 / static_cast<double>(1UL << registers[i] );
+        }
+        estimate = amm / sum; // E in the original paper
+        if (estimate <= (5 * nRegisters / 2)) {
+          sum = linear_count();
+          return (sum == -1.0) ? estimate : sum;
+          // don't need below because of 64bit.
+//        } else if (estimate > (1.0 / 30.0) * pow_2_32) {
+//            estimate = neg_pow_2_32 * log(1.0 - (estimate / pow_2_32));
+        } else
+          return estimate;
+  }
+
+
+
+  void merge(hyperloglog64 const & other) {
+    // precisions identical, so don't need to check number of registers either.
+
+    // iterate over both, merge, and update the zero count.
+    for (size_t i = 0; i < nRegisters; ++i) {
+      registers[i] = std::max(registers[i], other.registers[i]);
+    }
+  }
+
+  inline double linear_count() {
+        uint64_t zeros = 0;
+        for (uint64_t i = 0; i < nRegisters; i++) {
+            zeros += (registers[i] == -1);
+        }
+        if (zeros != 0) {
+            return static_cast<double>(nRegisters) * std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
+        } else {
+          return -1.0;
+        }
+  }
+
+
+  void clear() {
+    registers.fill(0U);
+  }
+
+};
 
 
 

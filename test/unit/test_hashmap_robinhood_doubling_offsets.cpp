@@ -135,10 +135,10 @@ TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert)
           if ((test_vals[i].first != gold_vals[i].first) ||
               (test_vals[i].second != gold_vals[i].second))
 
-          printf("%lu->%lu\t%lu->%lu, %lu\n",
-        		  test_vals[i].first, test_vals[i].second,
-				  gold_vals[i].first, gold_vals[i].second,
-			  gold_vals[i].first % (test.capacity()));
+            std::cout <<
+        		  test_vals[i].first << "->" << test_vals[i].second << "\t" <<
+        		  gold_vals[i].first << "->" << gold_vals[i].second << "," <<
+        		  (gold_vals[i].first % (test.capacity())) << std::endl;
         }
       }
 
@@ -186,10 +186,12 @@ TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert_integrated)
           if ((test_vals[i].first != gold_vals[i].first) ||
               (test_vals[i].second != gold_vals[i].second))
 
-          printf("%lu->%lu\t%lu->%lu, %lu\n",
-        		  test_vals[i].first, test_vals[i].second,
-				  gold_vals[i].first, gold_vals[i].second,
-			  gold_vals[i].first % (test.capacity()));
+
+            std::cout <<
+              test_vals[i].first << "->" << test_vals[i].second << "\t" <<
+              gold_vals[i].first << "->" << gold_vals[i].second << "," <<
+              (gold_vals[i].first % (test.capacity())) << std::endl;
+
         }
       }
 
@@ -293,10 +295,11 @@ TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, count)
           if ((test_vals[i].first != gold_vals[i].first) ||
               (test_vals[i].second != gold_vals[i].second))
 
-          printf("%lu->%lu\t%lu->%lu, %lu\n",
-        		  test_vals[i].first, test_vals[i].second,
-				  gold_vals[i].first, gold_vals[i].second,
-			  gold_vals[i].first % (test.capacity()));
+            std::cout <<
+              test_vals[i].first << "->" << test_vals[i].second << "\t" <<
+              gold_vals[i].first << "->" << gold_vals[i].second << "," <<
+              (gold_vals[i].first % (test.capacity())) << std::endl;
+
         }
       }
 

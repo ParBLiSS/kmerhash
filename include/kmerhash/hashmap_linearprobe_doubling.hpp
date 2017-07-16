@@ -387,6 +387,9 @@ protected:
 	 * @return reprobe count
 	 */
 	size_type copy_one(value_type const & value, info_type const & info) {
+
+		if (buckets == 0) return 0;
+
 		size_type pos = hash(value.first) % buckets;
 		size_type i = pos;
 
@@ -429,6 +432,8 @@ public:
 #if defined(REPROBE_STAT)
 		size_type reprobe = 0;
 #endif
+
+		if (buckets == 0) buckets = 1;
 
 		// first check if we need to resize.
 		if (lsize >= max_load) rehash(buckets << 1);
@@ -574,6 +579,8 @@ public:
 	 */
 	size_type count( key_type const & k ) const {
 
+		if (buckets == 0) return 0;
+
 		// first get the bucket id
 		size_t pos = hash(k) % buckets;
 
@@ -685,6 +692,8 @@ public:
 	 */
 	iterator find(key_type const & k) {
 
+		if (buckets == 0) return iterator(container.end(), info_container.end(), filter);
+
 		// first get the bucket id
 		size_t pos = hash(k) % buckets;
 
@@ -742,6 +751,8 @@ public:
 	 * @brief find the iterator for a key
 	 */
 	const_iterator find(key_type const & k) const {
+
+		if (buckets == 0) return const_iterator(container.cend(), info_container.cend(), filter);
 
 		// first get the bucket id
 		size_t pos = hash(k) % buckets;
@@ -818,6 +829,8 @@ public:
 	 * @brief erases a key.
 	 */
 	size_type erase_no_resize(key_type const & k) {
+
+		if (buckets == 0) return 0;
 
 		// first get the bucket id
 		size_t pos = hash(k) % buckets;
