@@ -34,12 +34,16 @@
 
 #include "kmerhash/aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
 #include "kmerhash/math_utils.hpp"
-#include "mmintrin.h"
+#include "mmintrin.h"  // emm: _mm_stream_si64
+
+#include <stdlib.h> // posix_memalign
+
+#include "kmerhash/hyperloglog64.hpp"
 
 //#define REPROBE_STAT
 
 // should be easier for prefetching
-#define LOOK_AHEAD 32
+#define LOOK_AHEAD 16
 
 namespace fsc {
 
@@ -110,6 +114,7 @@ namespace fsc {
  *  [x] use bucket offsets instead of distance to bucket.
  *  [ ] faster insertion in batch
  *  [ ] faster find?
+ *  [ ] estimate distinct element counts in input.
  *
  */
 template <typename Key, typename T, typename Hash = ::std::hash<Key>,
@@ -175,6 +180,7 @@ protected:
 
     using container_type		= ::std::vector<value_type, Allocator>;
     using info_container_type	= ::std::vector<info_type, Allocator>;
+    hyperloglog64<key_type, hasher, 6> hll;  // precision of 6bits  uses 64 bytes, which should fit in a cache line.  sufficient precision.
 
 
 public:
@@ -353,6 +359,141 @@ public:
 #endif
 		}
 
+
+	hashmap_robinhood_doubling_offsets(hashmap_robinhood_doubling_offsets const & other) :
+		hll(other.hll),
+		lsize(other.lsize),
+    	buckets(other.buckets),
+    	mask(other.mask),
+		min_load(other.min_load),
+		max_load(other.max_load),
+		min_load_factor(other.min_load_factor),
+		max_load_factor(other.max_load_factor),
+#if defined(REPROBE_STAT)
+    // some stats.
+    upsize_count(other.upsize_count),
+    downsize_count(other.downsize_count),
+    reprobes(other.reprobes),
+    max_reprobes(max_reprobes),
+    moves(moves),
+    max_moves(max_moves),
+    shifts(shifts),
+    max_shifts(max_shifts),
+#endif
+    filter(other.filter),
+    hash(other.hash),
+    eq(other.eq),
+    container(other.container),
+    info_container(other.info_container) {};
+
+    hashmap_robinhood_doubling_offsets & operator=(hashmap_robinhood_doubling_offsets const & other) {
+		hll = other.hll;
+		lsize = other.lsize;
+    	buckets = other.buckets;
+    	mask = other.mask;
+		min_load = other.min_load;
+		max_load = other.max_load;
+		min_load_factor = other.min_load_factor;
+		max_load_factor = other.max_load_factor;
+#if defined(REPROBE_STAT)
+    // some stats.
+    upsize_count = other.upsize_count;
+    downsize_count = other.downsize_count;
+    reprobes = other.reprobes;
+    max_reprobes = max_reprobes;
+    moves = moves;
+    max_moves = max_moves;
+    shifts = shifts;
+    max_shifts = max_shifts;
+#endif
+    filter = other.filter;
+    hash = other.hash;
+    eq = other.eq;
+    container = other.container;
+    info_container = other.info_container;
+    }
+
+	hashmap_robinhood_doubling_offsets(hashmap_robinhood_doubling_offsets && other) :
+		hll(std::move(other.hll)),
+		lsize(std::move(other.lsize)),
+    	buckets(std::move(other.buckets)),
+    	mask(std::move(other.mask)),
+		min_load(std::move(other.min_load)),
+		max_load(std::move(other.max_load)),
+		min_load_factor(std::move(other.min_load_factor)),
+		max_load_factor(std::move(other.max_load_factor)),
+#if defined(REPROBE_STAT)
+    // some stats.
+    upsize_count(std::move(other.upsize_count)),
+    downsize_count(std::move(other.downsize_count)),
+    reprobes(std::move(other.reprobes)),
+    max_reprobes(std::move(max_reprobes)),
+    moves(std::move(moves)),
+    max_moves(std::move(max_moves)),
+    shifts(std::move(shifts)),
+    max_shifts(std::move(max_shifts)),
+#endif
+    filter(std::move(other.filter)),
+    hash(std::move(other.hash)),
+    eq(std::move(other.eq)),
+    container(std::move(other.container)),
+    info_container(std::move(other.info_container)) {}
+
+	hashmap_robinhood_doubling_offsets & operator=(hashmap_robinhood_doubling_offsets && other) {
+		hll = std::move(other.hll);
+		lsize = std::move(other.lsize);
+    	buckets = std::move(other.buckets);
+    	mask = std::move(other.mask);
+		min_load = std::move(other.min_load);
+		max_load = std::move(other.max_load);
+		min_load_factor = std::move(other.min_load_factor);
+		max_load_factor = std::move(other.max_load_factor);
+#if defined(REPROBE_STAT)
+    // some stats.
+    upsize_count = std::move(other.upsize_count);
+    downsize_count = std::move(other.downsize_count);
+    reprobes = std::move(other.reprobes);
+    max_reprobes = std::move(max_reprobes);
+    moves = std::move(moves);
+    max_moves = std::move(max_moves);
+    shifts = std::move(shifts);
+    max_shifts = std::move(max_shifts);
+#endif
+    filter = std::move(other.filter);
+    hash = std::move(other.hash);
+    eq = std::move(other.eq);
+    container = std::move(other.container);
+    info_container = std::move(other.info_container);
+	}
+
+	void swap(hashmap_robinhood_doubling_offsets && other) {
+		std::swap(hll, std::move(other.hll));
+		std::swap(lsize, std::move(other.lsize));
+    	std::swap(buckets, std::move(other.buckets));
+    	std::swap(mask, std::move(other.mask));
+		std::swap(min_load, std::move(other.min_load));
+		std::swap(max_load, std::move(other.max_load));
+		std::swap(min_load_factor, std::move(other.min_load_factor));
+		std::swap(max_load_factor, std::move(other.max_load_factor));
+#if defined(REPROBE_STAT)
+    // some stats.
+    std::swap(upsize_count, std::move(other.upsize_count));
+    std::swap(downsize_count, std::move(other.downsize_count));
+    std::swap(reprobes, std::move(other.reprobes));
+    std::swap(max_reprobes, std::move(max_reprobes));
+    std::swap(moves, std::move(moves));
+    std::swap(max_moves, std::move(max_moves));
+    std::swap(shifts, std::move(shifts));
+    std::swap(max_shifts, std::move(max_shifts));
+#endif
+    std::swap(filter, std::move(other.filter));
+    std::swap(hash, std::move(other.hash));
+    std::swap(eq, std::move(other.eq));
+    std::swap(container, std::move(other.container));
+    std::swap(info_container, std::move(other.info_container));
+	}
+
+
 	/**
 	 * @brief set the load factors.
 	 */
@@ -474,14 +615,14 @@ public:
     // check it's power of 2
     size_type n = next_power_of_2(b);
 
-//    std::cout << "REHASH b " << b << " n " << n << " lsize " << lsize << std::endl;
+    std::cout << "REHASH current " << buckets << " b " << b << " n " << n << " lsize " << lsize << std::endl;
 
 //    print();
 
-    if ((n != buckets) && (lsize < (max_load_factor * n))) {
+    if ((n != buckets) && (lsize < (max_load_factor * n))) {  // don't resize if lsize is larger than the new max load.
 
-      container_type tmp(n + info_empty);
-      info_container_type tmp_info(n + info_empty, info_empty);
+      container_type tmp(n + std::numeric_limits<info_type>::max() + 1);
+      info_container_type tmp_info(n + std::numeric_limits<info_type>::max() + 1, info_empty);
 
       if (lsize > 0) {
         if (n > buckets) {
@@ -584,7 +725,7 @@ protected:
       if (next_value_prefetch_bid < target_buckets) {
         for (bl = 0; bl < blocks; ++bl) {
           prefetched_info = info_container[next_value_prefetch_bid + bl * target_buckets];
-          if (is_normal(prefetched_info)) _mm_prefetch((const char *)&(container[get_distance(prefetched_info)]), _MM_HINT_T0);
+          if (is_normal(prefetched_info)) _mm_prefetch((const char *)&(container[next_value_prefetch_bid + bl * target_buckets + get_distance(prefetched_info)]), _MM_HINT_T0);
         }
       }
 
@@ -659,7 +800,8 @@ protected:
         endd = id + 1 + get_distance(info_container[id + 1]);
 
         // copy the range.
-//        std::cout << " copy from " << pos << " to " << new_end << " length " << (endd - pos) << std::endl;
+//        std::cout << id << " infos " << static_cast<size_t>(info_container[id]) << "," << static_cast<size_t>(info_container[id + 1]) << ", " <<
+//        		" copy from " << pos << " to " << new_end << " length " << (endd - pos) << std::endl;
         memmove(&(target[new_end]), &(container[pos]), sizeof(value_type) * (endd - pos));
 
         new_end += (endd - pos);
@@ -902,7 +1044,7 @@ protected:
 	}
 
 	/**
-	 * return the next position in "container" that is empty - i.e. info has 0x80.
+	 * return the next position in "container" that is pointing to self - i.e. offset == 0.
 	 *
 	 * one property to use - we can jump the "distance" in the current info_container, there are guaranteed no
 	 *   empty entries within that range.
@@ -931,8 +1073,7 @@ protected:
 	 */
 	inline size_type find_next_non_empty_pos(info_container_type const & target_info, size_t const & pos) const {
 		size_t end = pos;
-		for (; end < target_info.size(); ) {
-			if (is_normal(target_info[end])) return end;
+		for (; (end < target_info.size()) && !is_normal(target_info[end]); ) {
 			// can skip ahead with target_info[end]
 			end += get_distance(target_info[end]);
 			end += (target_info[end] == info_empty);
@@ -1063,8 +1204,10 @@ protected:
 //		std::cout << "val " << v.first << " id " << id <<
 //				" start " << static_cast<size_t>(start) <<
 //				" next " << static_cast<size_t>(next) <<
-//				" end " << static_cast<size_t>(end) << std::endl;
-
+//				" end " << static_cast<size_t>(end) <<
+//				" buckets " << buckets <<
+//				" actual " << target_info.size() << std::endl;
+//
 		// now compact backwards.  first do the container via MEMMOVE
 		// can potentially be optimized to use only swap, if distance is long enough.
 		memmove(&(target[next + 1]), &(target[next]), sizeof(value_type) * (end - next));
@@ -1085,8 +1228,211 @@ protected:
     return make_missing_bucket_id(next);
 
 	}
+  inline bucket_id_type insert_with_hint2(container_type & target,
+      info_container_type & target_info,
+      size_t const & id,
+      value_type const & v) {
 
-	inline void copy_with_hint(container_type & target,
+    assert(id < buckets);
+
+    // get the starting position
+    info_type info = target_info[id];
+
+//    std::cout << "info " << static_cast<size_t>(info) << std::endl;
+    set_normal(target_info[id]);   // if empty, change it.  if normal, same anyways.
+
+    // if this is empty and no shift, then insert and be done.
+    if (info == info_empty) {
+      target[id] = v;
+      return make_missing_bucket_id(id);
+//      return make_missing_bucket_id(id, target_info[id]);
+    }
+
+    // the bucket is either non-empty, or empty but offset by some amount
+
+    // get the range for this bucket.
+    size_t start = id + get_distance(info);
+    size_t next = id + 1 + get_distance(target_info[id + 1]);
+
+    // now search within bucket to see if already present.
+    if (is_normal(info)) {  // only for full bucket, of course.
+
+#if defined(REPROBE_STAT)
+    size_t reprobe = 0;
+#endif
+      for (size_t i = start; i < next; ++i) {
+        if (eq(v.first, target[i].first)) {
+          // check if value and what's in container match.
+//          std::cout << "EXISTING.  " << v.first << ", " << target[i].first << std::endl;
+#if defined(REPROBE_STAT)
+    this->reprobes += reprobe;
+    this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
+#endif
+
+          //return make_existing_bucket_id(i, info);
+          return make_existing_bucket_id(i);
+        }
+#if defined(REPROBE_STAT)
+      ++reprobe;
+#endif
+      }
+
+#if defined(REPROBE_STAT)
+    this->reprobes += reprobe;
+    this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
+#endif
+    }
+
+    // now for the non-empty, or empty with offset, shift and insert, starting from NEXT bucket.
+
+
+    // first swap in at start of bucket, then deal with the swapped.
+    // swap until empty info
+    // then insert into last empty,
+    // then update info until info_empty
+
+    // scan for the next empty position
+    size_t end = find_next_empty_pos(target_info, next);
+    size_t i = id+1;
+    value_type vv = v;
+#if defined(REPROBE_STAT)
+    size_t m = 0;
+#endif
+    for (; i < end; ++i) {
+      if (is_normal(target_info[i])) {
+        std::swap(target[i + get_distance(target_info[i])], vv);
+#if defined(REPROBE_STAT)
+        ++m;
+#endif
+      }
+
+      ++target_info[i];
+    }
+    target[i] = vv;  // last one.
+    ++target_info[i];
+
+
+#if defined(REPROBE_STAT)
+    this->shifts += (end - id);
+    this->max_shifts = std::max(this->max_shifts, (end - id));
+    this->moves += m;
+    this->max_moves = std::max(this->max_moves, m);
+#endif
+
+//    return make_missing_bucket_id(next, target_info[id]);
+    return make_missing_bucket_id(next);
+
+  }
+
+  inline bucket_id_type insert_with_hint3(container_type & target,
+      info_container_type & target_info,
+      size_t const & id,
+      value_type const & v) {
+
+		assert(id < buckets);
+
+		// get the starting position
+		info_type info = target_info[id];
+
+//		std::cout << "info " << static_cast<size_t>(info) << std::endl;
+		set_normal(target_info[id]);   // if empty, change it.  if normal, same anyways.
+
+		// if this is empty and no shift, then insert and be done.
+		if (info == info_empty) {
+			target[id] = v;
+			return make_missing_bucket_id(id);
+//			return make_missing_bucket_id(id, target_info[id]);
+		}
+
+		// the bucket is either non-empty, or empty but offset by some amount
+
+		// get the range for this bucket.
+		size_t start = id + get_distance(info);
+		size_t next = id + 1 + get_distance(target_info[id + 1]);
+
+		// now search within bucket to see if already present.
+		if (is_normal(info)) {  // only for full bucket, of course.
+
+#if defined(REPROBE_STAT)
+		size_t reprobe = 0;
+#endif
+			for (size_t i = start; i < next; ++i) {
+				if (eq(v.first, target[i].first)) {
+					// check if value and what's in container match.
+//					std::cout << "EXISTING.  " << v.first << ", " << target[i].first << std::endl;
+#if defined(REPROBE_STAT)
+  this->reprobes += reprobe;
+  this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
+#endif
+
+				  //return make_existing_bucket_id(i, info);
+        return make_existing_bucket_id(i);
+				}
+#if defined(REPROBE_STAT)
+			++reprobe;
+#endif
+			}
+
+#if defined(REPROBE_STAT)
+		this->reprobes += reprobe;
+		this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
+#endif
+		}
+
+		// now for the non-empty, or empty with offset, shift and insert, starting from NEXT bucket.
+
+
+		// first swap in at start of bucket, then deal with the swapped.
+		// swap until empty info
+		// then insert into last empty,
+		// then update info until info_empty
+
+		// scan for the next empty position
+		size_t end = find_next_empty_pos(target_info, next);
+
+//		std::cout << "val " << v.first << " id " << id <<
+//				" start " << static_cast<size_t>(start) <<
+//				" next " << static_cast<size_t>(next) <<
+//				" end " << static_cast<size_t>(end) << std::endl;
+
+		// now compact backwards.  first do the container via MEMMOVE
+		// can potentially be optimized to use only swap, if distance is long enough.
+		memmove(&(target[next + 1]), &(target[next]), sizeof(value_type) * (end - next));
+		// and increment the infos.
+		size_t i = id + 1;
+		size_t i8 = std::min(end, (i+7) & ~(0x7UL));
+		size_t e8 = std::max(i8, end & ~(0x7UL));   // ((end + 1) - 1) & ~(0x8UL)
+
+//		std::cout << "increment for id " << id << " from " << i << " to " << i8 << " to " << e8 << " end " << end << std::endl;
+
+		for (; i < i8; ++i) {
+			++(target_info[i]);
+		}
+		for (uint64_t* ptr; i < e8; i += 8) {   //start i8
+			ptr = reinterpret_cast<uint64_t*>(&(target_info[i]));
+			*ptr += 0x0101010101010101UL;
+//			std::cout << static_cast<size_t>(target_info[i]) << std::endl;
+		}
+		for (; i <= end; ++i) {   // start e8
+			++(target_info[i]);
+		}
+
+#if defined(REPROBE_STAT)
+		this->shifts += (end - id);
+		this->max_shifts = std::max(this->max_shifts, (end - id));
+		this->moves += (end - next);
+		this->max_moves = std::max(this->max_moves, (end - next));
+#endif
+
+		// that's it.
+		target[next] = v;
+//		return make_missing_bucket_id(next, target_info[id]);
+		return make_missing_bucket_id(next);
+
+  }
+
+
+  inline void copy_with_hint(container_type & target,
 			info_container_type & target_info,
 			size_t const & id,
 			value_type const & v) {
@@ -1249,7 +1595,7 @@ public:
 
 
 	/// batch insert not using iterator
-	void insert(std::vector<value_type> const & input) {
+	void insert_prefetch(std::vector<value_type> const & input) {
 
 #if defined(REPROBE_STAT)
 		reset_reprobe_stats();
@@ -1323,7 +1669,7 @@ public:
 
 
 
-	/// batch insert using sorting.  This is about 4x slower on core i5-4200U (haswell) than integrated batch insertion above, even just for sort.
+	/// batch insert.  integrated code in insert_with_hint
 	void insert_integrated(::std::vector<value_type> const & input) {
 
 #if defined(REPROBE_STAT)
@@ -1437,20 +1783,157 @@ public:
 	}
 
 
-	/// batch insert using sorting.  This is about 4x slower on core i5-4200U (haswell) than integrated batch insertion above, even just for sort.
-	template <typename LESS = ::std::less<key_type> >
-	void insert_sort(::std::vector<value_type> const & input) {
+	/// batch insert 2.  try to avoid too many extra mem moves by allocating if needed.  can't do this until have some grouping because we can't determine duplicates directly
+	void insert_integrated2(::std::vector<value_type> const & input) {
 
-	  if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
-	    std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-	  } else {
-      std::cout << "STATUS: container alignment on value boundary" << std::endl;
-	  }
+#if defined(REPROBE_STAT)
+		reset_reprobe_stats();
+		size_type before = lsize;
+#endif
+
+
+		// ----------- first generate a hash index array.  linear mem access.
+
+		// if existing is empty, insert 1 entry each first, then do the following.
+
+
+		// ----------- compute insertion count (only previously non-existent entries)  (at most 127 per bucket)
+		// ---------------- compare within buckets.  for update, do it here.  for update insert, update here too
+
+
+		// ----------- if need to resize, resize, and recompute insertion count.
+
+
+		// ----------- create updated info array  (reuse insertion count?)
+
+
+		// ----------- use orig info array and new info array to memmove each bucket, back to front so can do it inplace.
+
+
+		// done...
+
+		bucket_id_type id;
+
+		value_type v;
+		info_type reprobe;
+		info_type curr_info;
+		bool found;
+
+		// iterate based on size between rehashes
+		for (size_t j = 0; j < input.size(); ++j) {
+
+			found = false;
+
+//			std::cout << "insert integrated lsize " << lsize << std::endl;
+			// === same code as in insert(1)..
+
+			// first check if we need to resize.
+			if (lsize >= max_load) rehash(buckets << 1);
+
+			// first get the bucket id
+			v = input[j];
+			id = hash(v.first) & mask;  // target bucket id.
+
+			assert(id < buckets);
+
+			// get the starting position
+			info_type info = info_container[id];
+			set_normal(info_container[id]);   // if empty, change it.  if normal, same anyways.
+
+			// if this is empty and no shift, then insert and be done.
+			if (info == info_empty) {
+				container[id] = v;
+				++lsize;
+				continue;
+			}
+
+			// the bucket is either non-empty, or empty but offset by some amount
+
+			// get the range for this bucket.
+			size_t start = id + get_distance(info);
+			size_t next = id + 1 + get_distance(info_container[id + 1]);
+
+			// now search within bucket to see if already present.
+			if (is_normal(info)) {  // only for full bucket, of course.
+
+	#if defined(REPROBE_STAT)
+			size_t reprobe = 0;
+	#endif
+				for (size_t i = start; i < next; ++i) {
+					if (eq(v.first, container[i].first)) {
+//						std::cout << "Insert Integrated EXISTING.  " << v.first << ", " << container[i].first << std::endl;
+						// check if value and what's in container match.
+						found = true;
+						break;
+					}
+	#if defined(REPROBE_STAT)
+				++reprobe;
+	#endif
+				}
+
+
+	#if defined(REPROBE_STAT)
+			this->reprobes += reprobe;
+			this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
+	#endif
+
+				if (found) continue;   // skip the remaining.
+			}
+
+			// now for the non-empty, or empty with offset, shift and insert, starting from NEXT bucket.
+
+
+			// first swap in at start of bucket, then deal with the swapped.
+			// swap until empty info
+			// then insert into last empty,
+			// then update info until info_empty
+
+			// scan for the next empty position
+			size_t end = find_next_empty_pos(info_container, next);
+
+			// now compact backwards.  first do the container via MEMMOVE
+			// can potentially be optimized to use only swap, if distance is long enough.
+			memmove(&(container[next + 1]), &(container[next]), sizeof(value_type) * (end - next));
+			// and increment the infos.
+			for (size_t i = id + 1; i <= end; ++i) {
+				++(info_container[i]);
+			}
+			// that's it.
+			container[next] = v;
+			++lsize;
+
+	#if defined(REPROBE_STAT)
+			this->shifts += (end - id);
+			this->max_shifts = std::max(this->max_shifts, (end - id));
+			this->moves += (end - next);
+			this->max_moves = std::max(this->max_moves, (end - next));
+	#endif
+
+
+		}
+
+#if defined(REPROBE_STAT)
+		print_reprobe_stats("INSERT INTEGRATED", input.size(), (lsize - before));
+#endif
+
+	}
+
+
+	/// batch insert, minimizing number of loop conditionals and rehash checks.
+	template <typename LESS = ::std::less<key_type> >
+	void insert(::std::vector<value_type> const & input) {
+
+
 		//    throw ::std::logic_error("ERROR: DISABLED FOR NONCIRC VERSION");
 //	  bucket_id_type info_align = reinterpret_cast<size_t>(info_container.data()) % 64;  // cacheline size = 64
 
 
 		#if defined(REPROBE_STAT)
+      if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+        std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+      } else {
+        std::cout << "STATUS: container alignment on value boundary" << std::endl;
+      }
 		    reset_reprobe_stats();
 		    size_type before = lsize;
 		#endif
@@ -1488,29 +1971,23 @@ public:
 
 		    while (to_insert > 0) {
 
+#if defined(REPROBE_STAT)
 		      std::cout << "checking if rehash needed.  i = " << i << std::endl;
+#endif
 
           // first check if we need to resize.
 		      if (lsize >= max_load) {
 		        rehash(buckets << 1);
 
+#if defined(REPROBE_STAT)
             std::cout << "rehashed.  size = " << buckets << std::endl;
 		        if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type))  > 0) {
 		          std::cout << "WARNING: container alignment not on value boundary" << std::endl;
 		        } else {
 		          std::cout << "STATUS: container alignment on value boundary" << std::endl;
 		        }
+#endif
 
-//
-//		        max_prefetch2 = std::min(buckets, static_cast<size_t>(2 * LOOK_AHEAD));
-//		        // prefetch 2*LOOK_AHEAD of the info_container.
-//		        for (ii = 0; ii < max_prefetch2; ++ii) {
-//		          // prefetch the info_container entry for ii.
-//		          _mm_prefetch((const char *)&(info_container[hashes[(i2 + ii) & hash_mask] & mask]), _MM_HINT_T0);
-//
-//		          // prefetch container as well - would be NEAR but may not be exact.
-//		          _mm_prefetch((const char *)&(container[hashes[(i2 + ii) & hash_mask] & mask]), _MM_HINT_T0);
-//		        }
 
 		      }
 
@@ -1614,122 +2091,286 @@ public:
 
 	}
 
+	void insert_sort(::std::vector<value_type> const & input) {
+		insert(input);
+
+	}
+
+	// batch insert, minimizing number of loop conditionals and rehash checks.
+	// provide a set of precomputed hash values, contains the bucket id to go into.
+	// because this hash value is fixed by number of buckets, this function does not allow resize.
+	template <typename LESS = ::std::less<key_type> >
+	void insert_with_hint_no_resize(value_type const * const input, size_t const * const bids, size_t input_size) {
+
+
+		#if defined(REPROBE_STAT)
+		  if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+		  } else {
+			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+		  }
+		    reset_reprobe_stats();
+		    size_type before = lsize;
+		#endif
+		    bucket_id_type id, bid1, bid;
+
+		    size_t ii;
+
+		    //prefetch only if target_buckets is larger than LOOK_AHEAD
+		    size_t max_prefetch = std::min(input_size, static_cast<size_t>(2 * LOOK_AHEAD));
+		    // prefetch 2*LOOK_AHEAD of the info_container.
+		    for (ii = 0; ii < max_prefetch; ++ii) {
+	            _mm_prefetch((const char *)&(bids[ii]), _MM_HINT_T0);
+	            // prefetch input
+	            _mm_prefetch((const char *)&(input[ii]), _MM_HINT_T0);
+
+		    }
+
+		    for (ii = 0; ii < max_prefetch; ++ii) {
+
+	            id = bids[ii];
+		      // prefetch the info_container entry for ii.
+		      _mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
+//		      if (((id + 1) % 64) == info_align)
+//		        _mm_prefetch((const char *)&(info_container[id + 1]), _MM_HINT_T0);
+
+		      // prefetch container as well - would be NEAR but may not be exact.
+		      _mm_prefetch((const char *)&(container[id]), _MM_HINT_T0);
+
+		    }
+
+
+		    // iterate based on size between rehashes
+		    size_t max2 = (input_size > (2*LOOK_AHEAD)) ? input_size - (2*LOOK_AHEAD) : 0;
+		    size_t max1 = (input_size > LOOK_AHEAD) ? input_size - LOOK_AHEAD : 0;
+		    size_t i = 0; //, i1 = LOOK_AHEAD, i2 = 2*LOOK_AHEAD;
+
+          for (; i < max2; ++i) {
+            _mm_prefetch((const char *)&(bids[(i + 2 * LOOK_AHEAD)]), _MM_HINT_T0);
+            // prefetch input
+            _mm_prefetch((const char *)&(input[i + 2 * LOOK_AHEAD]), _MM_HINT_T0);
+
+
+            // prefetch container
+            bid = bids[(i + LOOK_AHEAD)];
+            if (is_normal(info_container[bid])) {
+              bid1 = bid + 1;
+              bid += get_distance(info_container[bid]);
+              bid1 += get_distance(info_container[bid1]);
+
+              for (size_t j = bid; j < bid1; ++j) {
+                _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+              }
+            }
+
+            // first get the bucket id
+            if (missing(insert_with_hint(container, info_container, bids[i], input[i])))
+              ++lsize;
+
+      //      std::cout << "insert vec lsize " << lsize << std::endl;
+            // prefetch info_container.
+            bid = bids[(i + 2 * LOOK_AHEAD)];
+            _mm_prefetch((const char *)&(info_container[bid]), _MM_HINT_T0);
+//            if (((bid + 1) % 64) == info_align)
+//              _mm_prefetch((const char *)&(info_container[bid + 1]), _MM_HINT_T0);
+
+          }
+
+
+        //if ((lsize + 2 * LOOK_AHEAD) >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
+
+
+		    // second to last LOOK_AHEAD
+		    for (; i < max1; ++i) {
+
+
+		      // === same code as in insert(1)..
+
+		      bid = bids[(i + LOOK_AHEAD)];
+
+
+		      // prefetch container
+		      if (is_normal(info_container[bid])) {
+            bid1 = bid + 1;
+            bid += get_distance(info_container[bid]);
+            bid1 += get_distance(info_container[bid1]);
+
+		        for (size_t j = bid; j < bid1; ++j) {
+		          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+		        }
+		      }
+
+		      if (missing(insert_with_hint(container, info_container, bids[i], input[i])))
+		        ++lsize;
+
+		//      std::cout << "insert vec lsize " << lsize << std::endl;
+
+
+		    }
+
+
+		    // last LOOK_AHEAD
+		    for (; i < input_size; ++i) {
+
+		      // === same code as in insert(1)..
+
+		      if (missing(insert_with_hint(container, info_container, bids[i], input[i])))
+		        ++lsize;
+
+		//      std::cout << "insert vec lsize " << lsize << std::endl;
+
+		    }
+
+
+		#if defined(REPROBE_STAT)
+		    print_reprobe_stats("INSERT VEC", input_size, (lsize - before));
+		#endif
+
+	}
+
+
+
   void insert_shuffled(::std::vector<value_type> const & input) {
 
-//    throw ::std::logic_error("ERROR: DISABLED FOR NONCIRC VERSION");
 
-#if defined(REPROBE_STAT)
-    reset_reprobe_stats();
-    size_type before = lsize;
-#endif
-    bucket_id_type id, bid, bid1;
+    #if defined(REPROBE_STAT)
+	    if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+	      std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+	    } else {
+	      std::cout << "STATUS: container alignment on value boundary" << std::endl;
+	    }
 
-    size_t ii;
+	    reset_reprobe_stats();
+        size_type before = lsize;
+    #endif
 
-    std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+        // compute hash value array, and estimate the number of unique entries in current.  then merge with current and get the after count.
+        //std::vector<size_t> hash_vals;
+        //hash_vals.reserve(input.size());
+        size_t* hash_vals;
+        posix_memalign(reinterpret_cast<void **>(&hash_vals), 16, sizeof(size_t) * input.size());
 
-    //prefetch only if target_buckets is larger than LOOK_AHEAD
-    size_t max_prefetch2 = std::min(info_container.size(), static_cast<size_t>(2 * LOOK_AHEAD));
-    // prefetch 2*LOOK_AHEAD of the info_container.
-    for (ii = 0; ii < max_prefetch2; ++ii) {
-      hashes[ii] = hash(input[ii].first);
-      // prefetch the info_container entry for ii.
-      _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 
-      // prefetch container as well - would be NEAR but may not be exact.
-      _mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
-    }
+        hyperloglog64<key_type, hasher, 6> hll_local;
 
-    // iterate based on size between rehashes
-    constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
-    size_t max2 = (input.size() > (2*LOOK_AHEAD)) ? input.size() - (2*LOOK_AHEAD) : 0;
-    size_t max1 = (input.size() > LOOK_AHEAD) ? input.size() - LOOK_AHEAD : 0;
-    size_t i = 0, i1 = LOOK_AHEAD, i2 = 2*LOOK_AHEAD;
-    for (; i < max2; ++i, ++i1, ++i2) {
-
-      // === same code as in insert(1)..
-
-      // first check if we need to resize.
-      if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
-
-      // first get the bucket id
-      id = hashes[i & hash_mask] & mask;  // target bucket id.
-
-      // prefetch info_container.
-      ii = i2 & hash_mask;
-      hashes[ii] = hash(input[i2].first);
-      _mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
-
-      // prefetch container
-      bid = hashes[i1 & hash_mask] & mask;
-      if (is_normal(info_container[bid])) {
-        bid1 = bid + 1 + get_distance(info_container[bid + 1]);
-        bid += get_distance(info_container[bid]);
-
-        for (size_t j = bid; j < bid1; j += (64 / sizeof(value_type))) {   // skipping by cacheline increases cache misses.
-          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+        size_t hval;
+        for (size_t i = 0; i < input.size(); ++i) {
+        	hval = hash(input[i].first);
+        	hll_local.update_via_hashval(hval);
+        	// using mm_stream here does not make a differnece.
+        	//_mm_stream_si64(reinterpret_cast<long long int*>(hash_vals + i), *(reinterpret_cast<long long int*>(&hval)));
+        	hash_vals[i] = hval;
         }
-      }
 
-      if (missing(insert_with_hint(container, info_container, id, input[i])))
-        ++lsize;
+        // estimate the number of unique entries in input.
+        double distinct_input_est = hll_local.estimate();
 
-//      std::cout << "insert vec lsize " << lsize << std::endl;
+        hll_local.merge(hll);
+        double distinct_total_est = hll_local.estimate();
 
-    }
+        std::cout << " estimate input cardinality as " << distinct_input_est << " total after insertion " << distinct_total_est << std::endl;
 
-    // second to last LOOK_AHEAD
-    for (; i < max1; ++i, ++i1) {
+        // assume one element per bucket as ideal, resize now.  should not resize if don't need to.
+        reserve(distinct_total_est);   // this updates the bucket counts also.
 
-      // === same code as in insert(1)..
-
-      // first check if we need to resize.
-      if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
-
-      // first get the bucket id
-      id = hashes[i & hash_mask] & mask;  // target bucket id.
-
-      // prefetch container
-      bid = hashes[i1 & hash_mask] & mask;
-      if (is_normal(info_container[bid])) {
-        bid1 = bid + 1 + get_distance(info_container[bid + 1]);
-        bid += get_distance(info_container[bid]);
-
-        for (size_t j = bid; j < bid1; j += (64 / sizeof(value_type))) {
-          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+        // ---- shuffle data.  Later separate this into a different function, 2 versions, one for insert and one for all others.
+        // want each 64 consecutive buckets's input to be together.
+        // first compute the input bucket counts. each bucket has at most 127 entries, times 64, so 13 bits.
+        std::vector<uint16_t> shuffle_bucket_counts((buckets >> 6) + 1);
+        // random access to compute shuffle buccket counts
+        size_t i = 0;
+        size_t shuffle_max1 = std::min(input.size(), static_cast<size_t>(LOOK_AHEAD));
+        for (; i < shuffle_max1; ++i) {
+        	hash_vals[i] &= mask;  // get the final target bucket id and save it.
+        	_mm_prefetch((const char *)&(shuffle_bucket_counts[((hash_vals[i] >> 6) + 1)]), _MM_HINT_T0);
         }
-      }
+        size_t shuffle_max2 = std::max(input.size(), static_cast<size_t>(LOOK_AHEAD)) - LOOK_AHEAD;
+        for (i = 0; i < shuffle_max2; ++i) {
+        	++shuffle_bucket_counts[((hash_vals[i] >> 6) + 1)];
 
-      if (missing(insert_with_hint(container, info_container, id, input[i])))
-        ++lsize;
+        	hash_vals[i + LOOK_AHEAD] &= mask;
+        	_mm_prefetch((const char *)&(shuffle_bucket_counts[((hash_vals[i + LOOK_AHEAD] >> 6) + 1)]), _MM_HINT_T0);
+        }
+		for (; i < input.size(); ++i) {
+			++shuffle_bucket_counts[((hash_vals[i] >> 6) + 1)];
+        }
+        // convert to excl prefix sum. sequential
+		for (i = 1; i < shuffle_bucket_counts.size(); ++i) {
+			shuffle_bucket_counts[i] += shuffle_bucket_counts[i-1];
+		}
+		// now perform actual shuffle.  random access of shuffle_bucket_counts, sh_input[pos], and sh_hash_vals[pos]
+        value_type* sh_input;
+        posix_memalign(reinterpret_cast<void **>(&sh_input), 16, sizeof(value_type) * input.size());
+        size_t* sh_hash_val;
+        posix_memalign(reinterpret_cast<void **>(&sh_hash_val), 16, sizeof(size_t) * input.size());
+//		std::vector<value_type> sh_input(input.size());
+//		std::vector<size_t> sh_hash_val(input.size());
+		size_t pos;
 
-//      std::cout << "insert vec lsize " << lsize << std::endl;
-
-    }
-
-
-    // last LOOK_AHEAD
-    for (; i < input.size(); ++i) {
-
-      // === same code as in insert(1)..
-
-      // first check if we need to resize.
-      if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
-
-      // first get the bucket id
-      id = hashes[i & hash_mask] & mask;  // target bucket id.
-
-      if (missing(insert_with_hint(container, info_container, id, input[i])))
-        ++lsize;
-
-//      std::cout << "insert vec lsize " << lsize << std::endl;
-
-    }
+		shuffle_max1 = std::min(input.size(), static_cast<size_t>(LOOK_AHEAD));
+		for (i = 0; i < shuffle_max1; ++i) {
+			_mm_prefetch((const char *)&(shuffle_bucket_counts[(hash_vals[i] >> 6)]), _MM_HINT_T0);
+		}
+//		for (i = 0; i < shuffle_max1; ++i) {
+//			_mm_prefetch((const char *)&(shuffle_bucket_counts[(hash_vals[i + LOOK_AHEAD] >> 6)]), _MM_HINT_T0);
+//			// hash_vals have the bucket id for each input
+//			pos = shuffle_bucket_counts[hash_vals[i] >> 6];
+//			_mm_prefetch((const char *)&(sh_input[pos]), _MM_HINT_T0);
+//			_mm_prefetch((const char *)&(sh_hash_val[pos]), _MM_HINT_T0);
+//		}
+		shuffle_max1 = std::max(input.size(), static_cast<size_t>(LOOK_AHEAD)) - LOOK_AHEAD;  // for mm_stream only
+		for (i = 0; i < shuffle_max1; ++i) {
+			_mm_prefetch((const char *)&(shuffle_bucket_counts[(hash_vals[i + LOOK_AHEAD] >> 6)]), _MM_HINT_T0);
+			// hash_vals have the bucket id for each input
+//			pos = shuffle_bucket_counts[hash_vals[i + LOOK_AHEAD] >> 6];
+//			_mm_prefetch((const char *)&(sh_input[pos]), _MM_HINT_T0);
+//			_mm_prefetch((const char *)&(sh_hash_val[pos]), _MM_HINT_T0);
 
 
-#if defined(REPROBE_STAT)
-    print_reprobe_stats("INSERT VEC", input.size(), (lsize - before));
-#endif
+			// hash_vals have the bucket id for each input
+			pos = shuffle_bucket_counts[hash_vals[i] >> 6]++;  // random
+//			sh_input[pos] = input[i];  // random write, seq rea.
+//			sh_hash_val[pos] = hash_vals[i];
+			_mm_stream_si128(reinterpret_cast<__m128i*>(sh_input + pos), *(reinterpret_cast<const __m128i*>(input.data() + i)));
+			_mm_stream_si64(reinterpret_cast<long long int*>(sh_hash_val + pos), *(reinterpret_cast<long long int*>(hash_vals + i)) & mask);
+		}
+//		shuffle_max1 = std::max(input.size(), static_cast<size_t>(LOOK_AHEAD)) - LOOK_AHEAD;
+//		for (; i < shuffle_max1; ++i) {
+//			// hash_vals have the bucket id for each input
+//			pos = shuffle_bucket_counts[hash_vals[i + LOOK_AHEAD] >> 6];
+//			_mm_prefetch((const char *)&(sh_input[pos]), _MM_HINT_T0);
+//			_mm_prefetch((const char *)&(sh_hash_val[pos]), _MM_HINT_T0);
+//
+//			// hash_vals have the bucket id for each input
+//			pos = shuffle_bucket_counts[hash_vals[i] >> 6]++;  // random
+//			sh_input[pos] = input[i];  // random write, seq rea.
+//			sh_hash_val[pos] = hash_vals[i];
+//		}
+		for (; i < input.size(); ++i) {
+			// hash_vals have the bucket id for each input
+			pos = shuffle_bucket_counts[hash_vals[i] >> 6]++;  // random
+//			sh_input[pos] = input[i];  // random write, seq rea.
+//			sh_hash_val[pos] = hash_vals[i];
+			_mm_stream_si128(reinterpret_cast<__m128i*>(sh_input + pos), *(reinterpret_cast<const __m128i*>(input.data() + i)));
+			_mm_stream_si64(reinterpret_cast<long long int*>(sh_hash_val + pos), *(reinterpret_cast<long long int*>(hash_vals + i)) & mask);
+		}
+
+		// now try to insert.  hashing done already.
+		insert_with_hint_no_resize(sh_input, sh_hash_val, input.size());
+
+//        for (size_t i = 0; i < input.size(); ++i) {
+//        	hash_vals[i] &= mask;
+//        }
+//        insert_with_hint_no_resize(input.data(), hash_vals.data(), input.size());
+//        insert_with_hint_no_resize(sh_input.data(), sh_hash_val.data(), sh_input.size());
+        // finally, update the hyperloglog estimator.  just swap.
+        hll.swap(hll_local);
+
+
+    #if defined(REPROBE_STAT)
+        print_reprobe_stats("INSERT VEC", input.size(), (lsize - before));
+    #endif
+
   }
 
 
@@ -1877,6 +2518,7 @@ public:
 #endif
 		return counts;
 	}
+
 
 	/**
 	 * @brief find the iterator for a key
@@ -2059,6 +2701,37 @@ public:
 #endif
     return counts;
   }
+
+
+
+	/**
+	 * @brief.  updates current value.  behaves like insert, but overwrites the exists.
+	 */
+  template <typename Reducer>
+	iterator update(key_type const & k, mapped_type const & val, Reducer const & r) {
+		// find and update.  if not present, insert.
+		std::pair<iterator, bool> result = insert(k, val);
+
+		if (! result.second) {  // not inserted and no exception, so an equal entry has been found.
+			result.first->second = r(result.first->second, val);   // so update.
+
+		} // else inserted. so updated.
+
+		return result.first;
+	}
+  template <typename Reducer>
+	iterator update(value_type const & vv, Reducer const & r) {
+		// find and update.  if not present, insert.
+		std::pair<iterator, bool> result = insert(vv);
+
+		if (! result.second) {  // not inserted and no exception, so an equal entry has been found.
+			result.first->second = r(result.first->second, vv.second);   // so update.
+
+		} // else inserted. so updated.
+
+		return result.first;
+	}
+
 
 
 	/**
