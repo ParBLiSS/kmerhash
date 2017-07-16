@@ -15,14 +15,20 @@ if (BUILD_BENCHMARKS)
 #include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/tommyds")
 add_executable(benchmark_hashtables BenchmarkHashTables.cpp)
 target_link_libraries(benchmark_hashtables ${EXTRA_LIBS})
-message(STATUS "VTUNE_ANALYSIS set to ${VTUNE_ANALYSIS}")
 
+message(STATUS "VTUNE_ANALYSIS set to ${VTUNE_ANALYSIS}")
 if (ENABLE_VTUNE_PROFILING)
 	ADD_LIBRARY(ittnotify STATIC IMPORTED)
 	SET_TARGET_PROPERTIES(ittnotify PROPERTIES
 	    IMPORTED_LOCATION ${VTUNE_LIB})
 	target_link_libraries(benchmark_hashtables ittnotify dl)
 endif(ENABLE_VTUNE_PROFILING)
+
+# EXECUTABLES
+include_directories("${EXT_PROJECTS_DIR}/martinus/src")
+include_directories("${EXT_PROJECTS_DIR}/martinus/src/3rdparty/google")
+add_executable(benchmark_hashtables_martinus martinus_test_robinhood.cpp)
+target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
 
 
 
