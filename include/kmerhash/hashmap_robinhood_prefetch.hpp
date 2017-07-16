@@ -42,7 +42,7 @@
 
 namespace fsc {
 
-#define LOOK_AHEAD 32
+#define LOOK_AHEAD 16
 
 /**
  * @brief Open Addressing hashmap that uses lienar addressing with robin hood hashing strategy, with doubling for reallocation, and with specialization for k-mers.
@@ -746,7 +746,6 @@ public:
 
 	/// batch insert not using iterator
 	void insert(std::vector<value_type> const & input) {
-        printf("batch insert not using iterator\n");
 #if defined(REPROBE_STAT)
 		reset_reprobe_stats();
 		size_type before = lsize;
@@ -1185,6 +1184,7 @@ public:
               throw std::logic_error("ERROR: shifting entries to the right ran out of room in container.");
             }
 
+
   #if defined(REPROBE_STAT)
       this->moves += move_count;
       this->max_moves = std::max(this->max_moves, move_count);
@@ -1192,6 +1192,8 @@ public:
       this->max_shifts = std::max(this->max_shifts, (i-orig_i));
   #endif
     }
+
+    free(hashes);
 
 #if defined(REPROBE_STAT)
     print_reprobe_stats("INSERT PREFETCH", input.size(), (lsize - before));
