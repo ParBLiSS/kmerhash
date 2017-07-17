@@ -715,7 +715,6 @@ public:
 		size_type before = lsize;
 #endif
 		bucket_id_type id;
-		bucket_id_type insert_pos;
 
 		// iterate based on size between rehashes
 		for (auto it = begin; it != end ; ++it) {
@@ -966,8 +965,6 @@ protected:
 		// first get the bucket id
 		bucket_id_type i = hash(k) & mask;
 		info_type curr_info;
-
-		bucket_id_type result = bid_failed;
 
 		// can only search within max of info_type...
 		bucket_id_type i_max = i + static_cast<bucket_id_type>(std::numeric_limits<info_type>::max()) + 1;

@@ -932,7 +932,6 @@ void bench_sequential_insert(HS& r, MicroBenchmark& mb, const std::string& title
 
         // query existing
         const auto endIt = r.end();
-        const int inc = ti + 1;
         while (mb.keepRunning()) {
           for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
             if (endIt != r.find(data[up])) {
@@ -1028,7 +1027,6 @@ void bench_sequential_insert2(HS& r, MicroBenchmark& mb, const std::string& titl
 
         // query existing
         const auto endIt = r.end();
-        const int inc = ti + 1;
         while (mb.keepRunning()) {
           for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
               if (endIt != r.find(data[up].first) ) ++found;
@@ -1105,7 +1103,6 @@ void bench_sequential_insertBatch(HS& r, MicroBenchmark& mb, const std::string& 
 
         // query existing
         const auto endIt = r.end();
-        const int inc = ti + 1;
         while (mb.keepRunning()) {
           found += r.find(data.begin(), data.end()).size();
         }

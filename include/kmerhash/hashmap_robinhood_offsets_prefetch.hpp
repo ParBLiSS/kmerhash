@@ -37,6 +37,7 @@
 #include "mmintrin.h"  // emm: _mm_stream_si64
 
 #include <stdlib.h> // posix_memalign
+#include <stdexcept>
 
 #include "kmerhash/hyperloglog64.hpp"
 
@@ -374,11 +375,11 @@ public:
     upsize_count(other.upsize_count),
     downsize_count(other.downsize_count),
     reprobes(other.reprobes),
-    max_reprobes(max_reprobes),
-    moves(moves),
-    max_moves(max_moves),
-    shifts(shifts),
-    max_shifts(max_shifts),
+    max_reprobes(other.max_reprobes),
+    moves(other.moves),
+    max_moves(other.max_moves),
+    shifts(other.shifts),
+    max_shifts(other.max_shifts),
 #endif
     filter(other.filter),
     hash(other.hash),
@@ -400,11 +401,11 @@ public:
     upsize_count = other.upsize_count;
     downsize_count = other.downsize_count;
     reprobes = other.reprobes;
-    max_reprobes = max_reprobes;
-    moves = moves;
-    max_moves = max_moves;
-    shifts = shifts;
-    max_shifts = max_shifts;
+    max_reprobes = other.max_reprobes;
+    moves = other.moves;
+    max_moves = other.max_moves;
+    shifts = other.shifts;
+    max_shifts = other.max_shifts;
 #endif
     filter = other.filter;
     hash = other.hash;
@@ -427,11 +428,11 @@ public:
     upsize_count(std::move(other.upsize_count)),
     downsize_count(std::move(other.downsize_count)),
     reprobes(std::move(other.reprobes)),
-    max_reprobes(std::move(max_reprobes)),
-    moves(std::move(moves)),
-    max_moves(std::move(max_moves)),
-    shifts(std::move(shifts)),
-    max_shifts(std::move(max_shifts)),
+    max_reprobes(std::move(other.max_reprobes)),
+    moves(std::move(other.moves)),
+    max_moves(std::move(other.max_moves)),
+    shifts(std::move(other.shifts)),
+    max_shifts(std::move(other.max_shifts)),
 #endif
     filter(std::move(other.filter)),
     hash(std::move(other.hash)),
@@ -453,11 +454,11 @@ public:
     upsize_count = std::move(other.upsize_count);
     downsize_count = std::move(other.downsize_count);
     reprobes = std::move(other.reprobes);
-    max_reprobes = std::move(max_reprobes);
-    moves = std::move(moves);
-    max_moves = std::move(max_moves);
-    shifts = std::move(shifts);
-    max_shifts = std::move(max_shifts);
+    max_reprobes = std::move(other.max_reprobes);
+    moves = std::move(other.moves);
+    max_moves = std::move(other.max_moves);
+    shifts = std::move(other.shifts);
+    max_shifts = std::move(other.max_shifts);
 #endif
     filter = std::move(other.filter);
     hash = std::move(other.hash);
@@ -480,11 +481,11 @@ public:
     std::swap(upsize_count, std::move(other.upsize_count));
     std::swap(downsize_count, std::move(other.downsize_count));
     std::swap(reprobes, std::move(other.reprobes));
-    std::swap(max_reprobes, std::move(max_reprobes));
-    std::swap(moves, std::move(moves));
-    std::swap(max_moves, std::move(max_moves));
-    std::swap(shifts, std::move(shifts));
-    std::swap(max_shifts, std::move(max_shifts));
+    std::swap(max_reprobes, std::move(other.max_reprobes));
+    std::swap(moves, std::move(other.moves));
+    std::swap(max_moves, std::move(other.max_moves));
+    std::swap(shifts, std::move(other.shifts));
+    std::swap(max_shifts, std::move(other.max_shifts));
 #endif
     std::swap(filter, std::move(other.filter));
     std::swap(hash, std::move(other.hash));
@@ -770,8 +771,7 @@ protected:
   }
   void copy_downsize2(container_type & target, info_container_type & target_info,
                      size_type const & target_buckets) {
-    size_type m = target_buckets - 1;
-    assert((target_buckets & m) == 0);   // assert this is a power of 2.
+    assert((target_buckets & (target_buckets - 1)) == 0);   // assert this is a power of 2.
 
     size_t id = 0, bid;
     size_t pos;
@@ -1487,7 +1487,7 @@ protected:
 
 
 #if defined(REPROBE_STAT)
-	void reset_reprobe_stats() {
+	void reset_reprobe_stats() const {
 		this->reprobes = 0;
 		this->max_reprobes = 0;
 		this->moves = 0;
@@ -1497,7 +1497,7 @@ protected:
 
 	}
 
-	void print_reprobe_stats(std::string const & operation, size_t input_size, size_t success_count) {
+	void print_reprobe_stats(std::string const & operation, size_t input_size, size_t success_count) const {
 		std::cout << "hash table stat: lsize " << lsize << " buckets " << buckets << std::endl;
 
 		std::cout << "hash table op stat: " << operation << ":" <<
@@ -1679,8 +1679,6 @@ public:
 		bucket_id_type id;
 
 		value_type v;
-		info_type reprobe;
-		info_type curr_info;
 		bool found;
 
 		// iterate based on size between rehashes
@@ -1815,8 +1813,6 @@ public:
 		bucket_id_type id;
 
 		value_type v;
-		info_type reprobe;
-		info_type curr_info;
 		bool found;
 
 		// iterate based on size between rehashes
@@ -2248,7 +2244,9 @@ public:
         //std::vector<size_t> hash_vals;
         //hash_vals.reserve(input.size());
         size_t* hash_vals;
-        posix_memalign(reinterpret_cast<void **>(&hash_vals), 16, sizeof(size_t) * input.size());
+        int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 16, sizeof(size_t) * input.size());
+		if (ret)
+			throw std::length_error("failed to allocate aligned memory");
 
 
         hyperloglog64<key_type, hasher, 6> hll_local;
@@ -2300,9 +2298,14 @@ public:
 		}
 		// now perform actual shuffle.  random access of shuffle_bucket_counts, sh_input[pos], and sh_hash_vals[pos]
         value_type* sh_input;
-        posix_memalign(reinterpret_cast<void **>(&sh_input), 16, sizeof(value_type) * input.size());
+        ret = posix_memalign(reinterpret_cast<void **>(&sh_input), 16, sizeof(value_type) * input.size());
+		if (ret)
+			throw std::length_error("failed to allocate aligned memory");
+
         size_t* sh_hash_val;
-        posix_memalign(reinterpret_cast<void **>(&sh_hash_val), 16, sizeof(size_t) * input.size());
+        ret = posix_memalign(reinterpret_cast<void **>(&sh_hash_val), 16, sizeof(size_t) * input.size());
+		if (ret)
+			throw std::length_error("failed to allocate aligned memory");
 //		std::vector<value_type> sh_input(input.size());
 //		std::vector<size_t> sh_hash_val(input.size());
 		size_t pos;
@@ -2628,7 +2631,7 @@ public:
     }
 
 #if defined(REPROBE_STAT)
-    print_reprobe_stats("FIND ITER PAIR", std::distance(begin, end), counts);
+    print_reprobe_stats("FIND ITER PAIR", std::distance(begin, end), counts.size());
 #endif
     return counts;
   }
@@ -2863,7 +2866,6 @@ protected:
 	    size_t total = std::distance(begin, end);
 
 	    size_t id, bid, bid1;
-	    bucket_id_type found;
 	    Iter it2 = begin;
 	    std::advance(it2, 2 * LOOK_AHEAD);
 	        size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
@@ -2930,7 +2932,6 @@ protected:
       size_t total = std::distance(begin, end);
 
       size_t id, bid, bid1;
-      bucket_id_type found;
       Iter it2 = begin;
       std::advance(it2, 2 * LOOK_AHEAD);
       size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;

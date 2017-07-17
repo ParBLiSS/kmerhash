@@ -707,8 +707,11 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 
 
     ::std::pair<Kmer, Value>* input_ptr;
-    posix_memalign(reinterpret_cast<void **>(&input_ptr), 16, sizeof(::std::pair<Kmer, Value>) * count);
-    memcpy(input_ptr, input.data(), count * sizeof(::std::pair<Kmer, Value>));
+    int ret = posix_memalign(reinterpret_cast<void **>(&input_ptr), 16, sizeof(::std::pair<Kmer, Value>) * count);
+	if (ret)
+		throw std::length_error("failed to allocate aligned memory");
+
+	memcpy(input_ptr, input.data(), count * sizeof(::std::pair<Kmer, Value>));
 
     BL_BENCH_START(map);
 #ifdef VTUNE_ANALYSIS
