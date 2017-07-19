@@ -151,6 +151,7 @@ class Hashtable_OARHDO_PrefixTest : public ::testing::Test
     	     same &= ::std::equal(gold_vals.begin(), gold_vals.end(), test_vals.begin());
 
     	      if (!same) {
+    	    	  test.print();
     	        for (size_t i = 0; i < gold_vals.size(); ++i) {
     	          if ((test_vals[i].first != gold_vals[i].first) ||
     	              (test_vals[i].second != gold_vals[i].second))
@@ -423,7 +424,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 		  test.insert_integrated(entries);
 		  break;
 	  case SORT:
-		  test.insert_sort(entries);
+      test.template insert_sort<Less>(entries);
 		  break;
 	  case SHUFFLE:
 		  test.insert_shuffled(entries);
@@ -434,7 +435,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 	  }
 
 
-//      test.print();
+      test.print();
       // check unique items in list.
       std::stable_sort(entries.begin(), entries.end(), Less());
       auto new_end = std::unique(entries.begin(), entries.end(), Equal());
@@ -576,7 +577,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 		::std::unordered_map<Kmer, uint32_t, THash, Equal1> gold;
 		::std::vector<std::pair<Kmer, uint32_t> > entries;
 
-		this->map_insert<VEC, canonical, TLess>(test, gold, entries);
+		this->map_insert<type, canonical, TLess>(test, gold, entries);
 
 
 		::std::vector<::std::pair<Kmer, uint32_t> > test_vals = test.to_vector();
@@ -597,6 +598,8 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 		same &= ::std::equal(gold_vals.begin(), gold_vals.end(), test_vals.begin());
 
 		  if (!same) {
+			  test.print();
+
 			  std::cout << " test count " << test.size() << " gold count " << gold_vals.size() << std::endl;
 			  size_t min = std::min(test_vals.size(), gold_vals.size());
 			for (size_t i = 0; i < std::min(min, 100UL); ++i) {
