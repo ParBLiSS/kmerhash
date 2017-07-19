@@ -1187,6 +1187,87 @@ public:
 
 	}
 
+
+
+	  template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
+	    typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
+	  std::vector<value_type> find(Iter begin, Iter end) {
+
+#if defined(REPROBE_STAT)
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+#endif
+
+
+	    size_t total = std::distance(begin, end);
+
+	    ::std::vector<value_type> counts;
+	    counts.reserve(total);
+
+	    size_type id;
+
+	    // iterate based on size between rehashes
+	    for (Iter it = begin; it != end; ++it) {
+
+	      // === same code as in insert(1)..
+	      id = find_pos((*it).first);
+	      if (id < buckets) counts.emplace_back(container[id]);
+	    }
+
+
+
+#if defined(REPROBE_STAT)
+		std::cout << "FIND ITER:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+					"\tvalid=" << counts.size() << "\ttotal=" << ::std::distance(begin, end) <<
+					"\tbuckets=" << buckets <<std::endl;
+
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+#endif
+
+
+
+	    return counts;
+	  }
+
+
+	  template <typename Iter, typename std::enable_if<std::is_constructible<key_type,
+	    typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
+	  std::vector<value_type> find(Iter begin, Iter end) {
+#if defined(REPROBE_STAT)
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+#endif
+
+	    size_t total = std::distance(begin, end);
+
+	    ::std::vector<value_type> counts;
+	    counts.reserve(total);
+
+	    size_type id;
+
+	    // iterate based on size between rehashes
+	    for (Iter it = begin; it != end; ++it) {
+
+	      // === same code as in insert(1)..
+	      id = find_pos(*it);
+	      if (id < buckets) counts.emplace_back(container[id]);
+	    }
+
+#if defined(REPROBE_STAT)
+		std::cout << "FIND ITER:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+					"\tvalid=" << counts.size() << "\ttotal=" << ::std::distance(begin, end) <<
+					"\tbuckets=" << buckets <<std::endl;
+
+		this->reprobes = 0;
+		this->max_reprobes = 0;
+#endif
+
+
+		    return counts;
+	  }
+
+
 	/**
 	 * @brief.  updates current value.  behaves like insert, but overwrites the existing.
 	 */
