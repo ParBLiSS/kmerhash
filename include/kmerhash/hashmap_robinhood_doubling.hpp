@@ -912,9 +912,10 @@ public:
 			// next merge.  recall that lower k bits are same every 2^k buckets
 			// also stopping has to be at mask count.  should not need to compare when merging.
 			::std::vector<value_type> sorted_input(input.size());
-			while (iterators.size() > mask) {
+			while (iterators.size() > buckets) {
 				// merge pairwise.
 				for (size_t j = 0; j < iterators.size() / 2; ++j) {
+					// this merge is not right, should be merging buckets in steps of "buckets"
 					std::inplace_merge(iterators[j], iterators[j+1], iterators[j+2], merge_comparator);
 				}
 
