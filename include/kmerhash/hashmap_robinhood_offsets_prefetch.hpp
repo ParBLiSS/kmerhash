@@ -549,21 +549,163 @@ public:
 	}
 
 
+//
+//  void print() const {
+//	  std::cout << "lsize " << lsize << " buckets " << buckets << " max load factor " << max_load_factor << std::endl;
+//    for (size_type i = 0; i < info_container.size() - 1; ++i) {
+//      std::cout << "i " << i << " key " << container[i].first << " val " <<
+//          container[i].second << " info " <<
+//          static_cast<size_t>(info_container[i]) << " offset = " << static_cast<size_t>(get_distance(info_container[i])) <<
+//          " pos = " << (i + get_distance(info_container[i])) <<
+//          " count " << (is_empty(info_container[i]) ? 0UL : (get_distance(info_container[i+1]) - get_distance(info_container[i]) + 1));
+//      std::cout << std::endl;
+//    }
+//
+//
+//  }
 
-  void print() const {
-	  std::cout << "lsize " << lsize << " buckets " << buckets << " max load factor " << max_load_factor << std::endl;
-    for (size_type i = 0; i < info_container.size() - 1; ++i) {
-      std::cout << "i " << i << " key " << container[i].first << " val " <<
-          container[i].second << " info " <<
-          static_cast<size_t>(info_container[i]) << " offset = " << static_cast<size_t>(get_distance(info_container[i])) <<
-          " pos = " << (i + get_distance(info_container[i])) <<
-          " count " << (is_empty(info_container[i]) ? 0UL : (get_distance(info_container[i+1]) - get_distance(info_container[i]) + 1));
-      std::cout << std::endl;
-    }
+	void print() const {
+		std::cout << "lsize " << lsize << "\tbuckets " << buckets << "\tmax load factor " << max_load_factor << std::endl;
+		size_type i = 0, j = 0;
+
+		container_type tmp;
+		size_t offset = 0;
+		for (; i < buckets; ++i) {
+			std::cout << "buc: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i]) <<
+					", off: " << std::setw(3) << static_cast<size_t>(get_distance(info_container[i])) <<
+					", pos: " << std::setw(10) << (i + get_distance(info_container[i])) <<
+					", cnt: " << std::setw(3) << (is_empty(info_container[i]) ? 0UL : (get_distance(info_container[i+1]) - get_distance(info_container[i]) + 1)) <<
+					std::endl;
 
 
-  }
+			if (! is_empty(info_container[i])) {
+				offset = i + get_distance(info_container[i]);
+				tmp.clear();
+				tmp.insert(tmp.end(), container.begin() + offset,
+						container.begin() + i + 1 + get_distance(info_container[i + 1]));
+				std::sort(tmp.begin(), tmp.end(), [](typename container_type::value_type const & x,
+						typename container_type::value_type const & y){
+					return x.first < y.first;
+				});
+				for (j = 0; j < tmp.size(); ++j) {
+					std::cout << std::setw(72) << (offset + j) <<
+							", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+							", key: " << std::setw(22) << tmp[j].first <<
+							", val: " << std::setw(22) << tmp[j].second <<
+							std::endl;
+				}
+			}
+		}
 
+		for (i = buckets; i < info_container.size(); ++i) {
+			std::cout << "PAD: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i]) <<
+					", off: " << std::setw(3) << static_cast<size_t>(get_distance(info_container[i])) <<
+					", pos: " << std::setw(10) << (i + get_distance(info_container[i])) <<
+					", cnt: " << std::setw(3) << (is_empty(info_container[i]) ? 0UL : (get_distance(info_container[i+1]) - get_distance(info_container[i]) + 1)) <<
+					"\n" << std::setw(72) << i <<
+					", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+					", key: " << container[i].first <<
+					", val: " << container[i].second <<
+					std::endl;
+		}
+	}
+
+	void print_raw() const {
+		std::cout << "lsize " << lsize << "\tbuckets " << buckets << "\tmax load factor " << max_load_factor << std::endl;
+		size_type i = 0;
+
+		for (i = 0; i < buckets; ++i) {
+			std::cout << "buc: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i]) <<
+					", off: " << std::setw(3) << static_cast<size_t>(get_distance(info_container[i])) <<
+					", pos: " << std::setw(10) << (i + get_distance(info_container[i])) <<
+					", cnt: " << std::setw(3) << (is_empty(info_container[i]) ? 0UL : (get_distance(info_container[i+1]) - get_distance(info_container[i]) + 1)) <<
+					"\n" << std::setw(72) << i <<
+					", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+					", key: " << container[i].first <<
+					", val: " << container[i].second <<
+					std::endl;
+		}
+
+		for (i = buckets; i < info_container.size(); ++i) {
+			std::cout << "PAD: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i]) <<
+					", off: " << std::setw(3) << static_cast<size_t>(get_distance(info_container[i])) <<
+					", pos: " << std::setw(10) << (i + get_distance(info_container[i])) <<
+					", cnt: " << std::setw(3) << (is_empty(info_container[i]) ? 0UL : (get_distance(info_container[i+1]) - get_distance(info_container[i]) + 1)) <<
+					"\n" << std::setw(72) << i <<
+					", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+					", key: " << container[i].first <<
+					", val: " << container[i].second <<
+					std::endl;
+		}
+	}
+
+	void print_raw(size_t const & first, size_t const &last, std::string prefix) const {
+		std::cout << prefix <<
+				" lsize " << lsize <<
+				"\tbuckets " << buckets <<
+				"\tmax load factor " << max_load_factor <<
+				"\t printing [" << first << " .. " << last << "]" << std::endl;
+		size_type i = 0;
+
+		for (i = first; i <= last; ++i) {
+			std::cout << prefix <<
+					" buc: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i]) <<
+					", off: " << std::setw(3) << static_cast<size_t>(get_distance(info_container[i])) <<
+					", pos: " << std::setw(10) << (i + get_distance(info_container[i])) <<
+					", cnt: " << std::setw(3) << (is_empty(info_container[i]) ? 0UL : (get_distance(info_container[i+1]) - get_distance(info_container[i]) + 1)) <<
+					"\n" << std::setw(72) << i <<
+					", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+					", key: " << container[i].first <<
+					", val: " << container[i].second <<
+					std::endl;
+		}
+	}
+
+	void print(size_t const & first, size_t const &last, std::string prefix) const {
+		std::cout << prefix <<
+				" lsize " << lsize <<
+				"\tbuckets " << buckets <<
+				"\tmax load factor " << max_load_factor <<
+				"\t printing [" << first << " .. " << last << "]" << std::endl;
+		size_type i = 0, j = 0;
+
+		container_type tmp;
+		size_t offset = 0;
+		for (i = first; i <= last; ++i) {
+			std::cout << prefix <<
+					" buc: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i]) <<
+					", off: " << std::setw(3) << static_cast<size_t>(get_distance(info_container[i])) <<
+					", pos: " << std::setw(10) << (i + get_distance(info_container[i])) <<
+					", cnt: " << std::setw(3) << (is_empty(info_container[i]) ? 0UL : (get_distance(info_container[i+1]) - get_distance(info_container[i]) + 1)) <<
+					std::endl;
+
+
+			if (! is_empty(info_container[i])) {
+				offset = i + get_distance(info_container[i]);
+				tmp.clear();
+				tmp.insert(tmp.end(), container.begin() + offset,
+						container.begin() + i + 1 + get_distance(info_container[i + 1]));
+				std::sort(tmp.begin(), tmp.end(), [](typename container_type::value_type const & x,
+						typename container_type::value_type const & y){
+					return x.first < y.first;
+				});
+				for (j = 0; j < tmp.size(); ++j) {
+					std::cout << prefix <<
+							" " << std::setw(72) << (offset + j) <<
+							", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+							", key: " << std::setw(22) << tmp[j].first <<
+							", val: " << std::setw(22) << tmp[j].second <<
+							std::endl;
+				}
+			}
+		}
+	}
 
 	std::vector<std::pair<key_type, mapped_type> > to_vector() const {
 		std::vector<std::pair<key_type, mapped_type> > output(lsize);
@@ -1135,6 +1277,7 @@ protected:
 
 		// return bucket_id_type with info_type of CURRENT info_type
 	 */
+	// old insert_with_hint, searches for empty position, move, then update info
 	inline bucket_id_type insert_with_hint(container_type & target,
 			info_container_type & target_info,
 			size_t const & id,
@@ -2087,6 +2230,7 @@ public:
 
 	}
 
+	template <typename LESS = ::std::less<key_type> >
 	void insert_sort(::std::vector<value_type> const & input) {
 		insert(input);
 
@@ -2271,6 +2415,8 @@ public:
         // assume one element per bucket as ideal, resize now.  should not resize if don't need to.
         reserve(distinct_total_est);   // this updates the bucket counts also.
 
+#if 0
+   // not correct...
         // ---- shuffle data.  Later separate this into a different function, 2 versions, one for insert and one for all others.
         // want each 64 consecutive buckets's input to be together.
         // first compute the input bucket counts. each bucket has at most 127 entries, times 64, so 13 bits.
@@ -2321,22 +2467,22 @@ public:
 //			_mm_prefetch((const char *)&(sh_input[pos]), _MM_HINT_T0);
 //			_mm_prefetch((const char *)&(sh_hash_val[pos]), _MM_HINT_T0);
 //		}
-		shuffle_max1 = std::max(input.size(), static_cast<size_t>(LOOK_AHEAD)) - LOOK_AHEAD;  // for mm_stream only
-		for (i = 0; i < shuffle_max1; ++i) {
-			_mm_prefetch((const char *)&(shuffle_bucket_counts[(hash_vals[i + LOOK_AHEAD] >> 6)]), _MM_HINT_T0);
-			// hash_vals have the bucket id for each input
-//			pos = shuffle_bucket_counts[hash_vals[i + LOOK_AHEAD] >> 6];
-//			_mm_prefetch((const char *)&(sh_input[pos]), _MM_HINT_T0);
-//			_mm_prefetch((const char *)&(sh_hash_val[pos]), _MM_HINT_T0);
-
-
-			// hash_vals have the bucket id for each input
-			pos = shuffle_bucket_counts[hash_vals[i] >> 6]++;  // random
-//			sh_input[pos] = input[i];  // random write, seq rea.
-//			sh_hash_val[pos] = hash_vals[i];
-			_mm_stream_si128(reinterpret_cast<__m128i*>(sh_input + pos), *(reinterpret_cast<const __m128i*>(input.data() + i)));
-			_mm_stream_si64(reinterpret_cast<long long int*>(sh_hash_val + pos), *(reinterpret_cast<long long int*>(hash_vals + i)) & mask);
-		}
+//		shuffle_max1 = std::max(input.size(), static_cast<size_t>(LOOK_AHEAD)) - LOOK_AHEAD;  // for mm_stream only
+//		for (i = 0; i < shuffle_max1; ++i) {
+//			_mm_prefetch((const char *)&(shuffle_bucket_counts[(hash_vals[i + LOOK_AHEAD] >> 6)]), _MM_HINT_T0);
+//			// hash_vals have the bucket id for each input
+////			pos = shuffle_bucket_counts[hash_vals[i + LOOK_AHEAD] >> 6];
+////			_mm_prefetch((const char *)&(sh_input[pos]), _MM_HINT_T0);
+////			_mm_prefetch((const char *)&(sh_hash_val[pos]), _MM_HINT_T0);
+//
+//
+//			// hash_vals have the bucket id for each input
+//			pos = shuffle_bucket_counts[hash_vals[i] >> 6]++;  // random
+////			sh_input[pos] = input[i];  // random write, seq rea.
+////			sh_hash_val[pos] = hash_vals[i];
+//			_mm_stream_si128(reinterpret_cast<__m128i*>(sh_input + pos), *(reinterpret_cast<const __m128i*>(input.data() + i)));
+//			_mm_stream_si64(reinterpret_cast<long long int*>(sh_hash_val + pos), *(reinterpret_cast<long long int*>(hash_vals + i)) & mask);
+//		}
 //		shuffle_max1 = std::max(input.size(), static_cast<size_t>(LOOK_AHEAD)) - LOOK_AHEAD;
 //		for (; i < shuffle_max1; ++i) {
 //			// hash_vals have the bucket id for each input
@@ -2360,6 +2506,13 @@ public:
 
 		// now try to insert.  hashing done already.
 		insert_with_hint_no_resize(sh_input, sh_hash_val, input.size());
+#else
+
+		for (size_t i = 0; i < input.size(); ++i) {
+			hash_vals[i] &= mask;
+		}
+		insert_with_hint_no_resize(input.data(), hash_vals, input.size());
+#endif
 
 //        for (size_t i = 0; i < input.size(); ++i) {
 //        	hash_vals[i] &= mask;
@@ -2368,7 +2521,7 @@ public:
 //        insert_with_hint_no_resize(sh_input.data(), sh_hash_val.data(), sh_input.size());
         // finally, update the hyperloglog estimator.  just swap.
         hll.swap(hll_local);
-
+        free(hash_vals);
 
     #if defined(REPROBE_STAT)
         print_reprobe_stats("INSERT VEC", input.size(), (lsize - before));
