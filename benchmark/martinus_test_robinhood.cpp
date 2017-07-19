@@ -9,6 +9,7 @@
 #include "kmerhash/hashmap_robinhood_doubling.hpp"
 #include "kmerhash/hashmap_robinhood_prefetch.hpp"
 #include "kmerhash/hashmap_robinhood_offsets_prefetch.hpp"
+#include "kmerhash/robinhood_offset_hashmap.hpp"
 #include "kmerhash/hashmap_linearprobe_doubling.hpp"
 
 #include <robinhood.h>
@@ -990,7 +991,7 @@ void print_header(O& out, const std::vector<std::vector<Stats>>& s, const std::s
 
 
 template<class HS>
-void bench_sequential_insert2(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
+void bench_sequential_insert_pair(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
     std::cout << title << "; ";
     std::cout.flush();
     std::vector<Stats> stats;
@@ -1068,7 +1069,7 @@ void bench_sequential_insert2(HS& r, MicroBenchmark& mb, const std::string& titl
 }
 
 template<class HS>
-void bench_sequential_insertBatch(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
+void bench_batch_insert(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
     std::cout << title << "; ";
     std::cout.flush();
     std::vector<Stats> stats;
@@ -1102,7 +1103,6 @@ void bench_sequential_insertBatch(HS& r, MicroBenchmark& mb, const std::string& 
 
 
         // query existing
-        const auto endIt = r.end();
         while (mb.keepRunning()) {
           found += r.find(data.begin(), data.end()).size();
         }
@@ -1141,7 +1141,7 @@ void bench_sequential_insertBatch(HS& r, MicroBenchmark& mb, const std::string& 
 
 
 template<class HS>
-void bench_sequential_insertBatch2(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
+void bench_batch_insert_integrated(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
     std::cout << title << "; ";
     std::cout.flush();
     std::vector<Stats> stats;
@@ -1163,7 +1163,7 @@ void bench_sequential_insertBatch2(HS& r, MicroBenchmark& mb, const std::string&
             data[up].second = static_cast<typename HS::mapped_type>(i);
         }
         t.restart();
-        r.insert_sort(data);
+        r.insert_integrated(data);
         s.elapsed_insert = t.elapsed() / upTo;
         auto gm = get_mem();
         s.mem = gm - mem_before;
@@ -1222,84 +1222,113 @@ std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t time
     //bench_sequential_insert(hopscotch_map<int, int, H>(), "tessil/hopscotch_map", upTo, times, all_stats);
 
 
-//    {
-//        ::fsc::hashmap_robinhood_prefetch<K, V, H> m;
-//        bench_sequential_insertBatch(m, mb, "Tony RHPre BATCH 0.9", upTo, times, all_stats);
-//    }
-//
+	{
+		::fsc::hashmap_robinhood_doubling<K, V, H> m;
+		bench_sequential_insert_pair(m, mb, "Tony Robinhood 0.9", upTo, times, all_stats);
+	}
+	{
+		::fsc::hashmap_robinhood_doubling<K, V, H> m;
+		bench_batch_insert(m, mb, "Tony Robinhood BATCH 0.9", upTo, times, all_stats);
+	}
+	{
+		::fsc::hashmap_robinhood_doubling<K, V, H> m;
+		bench_batch_insert_integrated(m, mb, "Tony Robinhood BATCH integrated 0.9", upTo, times, all_stats);
+	}
+
+	{
+		::fsc::hashmap_robinhood_prefetch<K, V, H> m;
+		bench_sequential_insert_pair(m, mb, "Tony RHPre 0.9", upTo, times, all_stats);
+	}
+	{
+		::fsc::hashmap_robinhood_prefetch<K, V, H> m;
+		bench_batch_insert(m, mb, "Tony RHPre BATCH 0.9", upTo, times, all_stats);
+	}
+	{
+		::fsc::hashmap_robinhood_prefetch<K, V, H> m;
+		bench_batch_insert_integrated(m, mb, "Tony RHPre BATCH integrated 0.9", upTo, times, all_stats);
+	}
+
     {
         ::fsc::hashmap_robinhood_doubling_offsets<K, V, H> m;
-        bench_sequential_insertBatch2(m, mb, "Tony RHOffPre BATCH 0.9", upTo, times, all_stats);
+        bench_sequential_insert_pair(m, mb, "Tony RHOffPre 0.9", upTo, times, all_stats);
+    }
+    {
+        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H> m;
+        bench_batch_insert(m, mb, "Tony RHOffPre BATCH 0.9", upTo, times, all_stats);
+    }
+    {
+        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H> m;
+        bench_batch_insert_integrated(m, mb, "Tony RHOffPre BATCH integrated 0.9", upTo, times, all_stats);
     }
 
-//    {
-//        ::fsc::hashmap_robinhood_prefetch<K, V, H> m;
-//        bench_sequential_insert2(m, mb, "Tony RHPre 0.9", upTo, times, all_stats);
-//    }
-//
-//
-//    {
-//        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H> m;
-//        bench_sequential_insert2(m, mb, "Tony RHOffPre 0.9", upTo, times, all_stats);
-//    }
-//
-//
-//    {
-//        RobinHoodInfobytePairNoOverflow::Map<K, V, H> m;
-//        m.max_load_factor(0.9f);
-//        bench_sequential_insert(m, mb, "RobinHoodInfobytePairNoOverflow 0.9", upTo, times, all_stats);
-//    }
-//
+    {
+        ::fsc::hashmap_robinhood_offsets<K, V, H> m;
+        bench_sequential_insert_pair(m, mb, "Tony RHOffPreNoOverflow 0.9", upTo, times, all_stats);
+    }
+    {
+        ::fsc::hashmap_robinhood_offsets<K, V, H> m;
+        bench_batch_insert(m, mb, "Tony RHOffPreNoOverflow BATCH 0.9", upTo, times, all_stats);
+    }
+    {
+        ::fsc::hashmap_robinhood_offsets<K, V, H> m;
+        bench_batch_insert_integrated(m, mb, "Tony RHOffPreNoOverflow BATCH integrated 0.9", upTo, times, all_stats);
+    }
+
+
+    {
+        ::fsc::hashmap_linearprobe_doubling<K, V, H> m;
+        bench_sequential_insert_pair(m, mb, "Tony LP", upTo, times, all_stats);
+    }
+    {
+        ::fsc::hashmap_linearprobe_doubling<K, V, H> m;
+        bench_batch_insert(m, mb, "Tony LP BATCH", upTo, times, all_stats);
+    }
+
+    {
+        RobinHoodInfobytePairNoOverflow::Map<K, V, H> m;
+        m.max_load_factor(0.9f);
+        bench_sequential_insert(m, mb, "RobinHoodInfobytePairNoOverflow 0.9", upTo, times, all_stats);
+    }
+
 ////    {
 ////        RobinHoodInfobytePairNoOverflow::Map<int, int, H> m;
 ////        m.max_load_factor(0.5f);
 ////        bench_sequential_insert(m, mb, "RobinHoodInfobytePairNoOverflow 0.5", upTo, times, all_stats);
 ////    }
-//
-//    {
-//        RobinHoodInfobytePair::Map<K, V, H> m;
-//        m.max_load_factor(0.9f);
-//        bench_sequential_insert(m, mb, "RobinHoodInfobytePair 0.9", upTo, times, all_stats);
-//    }
+
+    {
+        RobinHoodInfobytePair::Map<K, V, H> m;
+        m.max_load_factor(0.9f);
+        bench_sequential_insert(m, mb, "RobinHoodInfobytePair 0.9", upTo, times, all_stats);
+    }
 ////    {
 ////        RobinHoodInfobytePair::Map<int, int, H> m;
 ////        m.max_load_factor(0.5f);
 ////        bench_sequential_insert(m, mb, "RobinHoodInfobytePair 0.5", upTo, times, all_stats);
 ////    }
-//
-//    {
-//        google::dense_hash_map<K, V, H> googlemap;
-//        googlemap.set_empty_key(-1);
-//        googlemap.set_deleted_key(-2);
-//        googlemap.max_load_factor(0.9f);
-//        bench_sequential_insert(googlemap, mb, "google::dense_hash_map 0.9", upTo, times, all_stats);
-//    }
-//
+
+    {
+        google::dense_hash_map<K, V, H> googlemap;
+        googlemap.set_empty_key(-1);
+        googlemap.set_deleted_key(-2);
+        googlemap.max_load_factor(0.9f);
+        bench_sequential_insert(googlemap, mb, "google::dense_hash_map 0.9", upTo, times, all_stats);
+    }
+
 ////    {
 ////        google::dense_hash_map<int, int, H> googlemap;
 ////        googlemap.set_empty_key(-1);
 ////        googlemap.set_deleted_key(-2);
 ////        bench_sequential_insert(googlemap, mb, "google::dense_hash_map 0.5", upTo, times, all_stats);
 ////    }
-//
-//
-//    {
-//        ::fsc::hashmap_linearprobe_doubling<K, V, H> m;
-//        bench_sequential_insert2(m, mb, "Tony Linear Probing", upTo, times, all_stats);
-//    }
-//
-//    {
-//        ::fsc::hashmap_robinhood_doubling<K, V, H> m;
-//        bench_sequential_insert2(m, mb, "Tony Robinhood 0.9", upTo, times, all_stats);
-//    }
-//
-//
-//    {
-//        std::unordered_map<K, V, H> m;
-//        m.max_load_factor(0.9f);
-//        bench_sequential_insert(m, mb, "std::unordered_map 0.9", upTo, times, all_stats);
-//    }
-//
+
+
+    {
+        std::unordered_map<K, V, H> m;
+        m.max_load_factor(0.9f);
+        bench_sequential_insert(m, mb, "std::unordered_map 0.9", upTo, times, all_stats);
+    }
+
 ////    {
 ////        std::unordered_map<int, int, H> m;
 ////        m.max_load_factor(0.5f);
