@@ -38,6 +38,9 @@
 
 #include "io/incremental_mxx.hpp"
 
+#include "kmerhash/hyperloglog64.hpp"  // for size estimation.
+
+
 #include <mmintrin.h>
 
 namespace fsc {
@@ -118,6 +121,10 @@ namespace fsc {
  *  [ ] refactor so to avoid checking for rehashing during each iteration of batch insertion - break up into multiple inserts, each up to current size.
  *  [ ] prefetching insertion of a range of data.
  *  [ ] try erase without compact, then compact in 1 pass.  however, erase without compact may take more time....
+ *
+ *  [x] resize when reprobe distance is greater than 127 during insert_with_hint
+ *  [x] resize when reprobe distance is greater than 127 during insert_integrated
+ *  [ ] resize when resize down and reprobe distance is greater than 127. - can only throw
  *
  *  Robin Hood Hashing logic follows
  *  	http://www.sebastiansylvan.com/post/robin-hood-hashing-should-be-your-default-hash-table-implementation/
@@ -344,19 +351,80 @@ public:
 
 
 	void print() const {
-		for (size_type i = 0; i < info_container.size(); ++i) {
-			std::cout << i << ": [" << container[i].first << "->" <<
-					container[i].second << "] info " <<
-					static_cast<size_t>(info_container[i]) <<
-					" bucket = ";
-			if (is_normal(info_container[i])) {
-				std::cout << static_cast<size_t>(i - get_distance(info_container[i]));
-			} else {
-				std::cout << static_cast<int64_t>(-i);
-			}
-			std::cout << std::endl;
+		print_raw();
+	}
+
+	void print_raw() const {
+		std::cout << "lsize " << lsize << "\tbuckets " << buckets << "\tmax load factor " << max_load_factor << std::endl;
+		size_type i = 0;
+
+		for (i = 0; i < buckets; ++i) {
+			std::cout <<
+					" buc: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i]) <<
+					", off: " << std::setw(3) << static_cast<size_t>(get_distance(info_container[i])) <<
+					", pos: " << std::setw(10) << (is_normal(info_container[i]) ? (i - get_distance(info_container[i])) : -i) <<
+					"\n" << std::setw(62) << i <<
+					", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+					", key: " << container[i].first <<
+					", val: " << container[i].second <<
+					std::endl;
+		}
+
+		for (i = buckets; i < info_container.size(); ++i) {
+			std::cout <<
+					" buc: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i]) <<
+					", off: " << std::setw(3) << static_cast<size_t>(get_distance(info_container[i])) <<
+					", pos: " << std::setw(10) << (is_normal(info_container[i]) ? (i - get_distance(info_container[i])) : -i) <<
+					"\n" << std::setw(62) << i <<
+					", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+					", key: " << container[i].first <<
+					", val: " << container[i].second <<
+					std::endl;
 		}
 	}
+
+	void print_raw(size_t const & first, size_t const &last, std::string prefix) const {
+		std::cout << prefix <<
+				" lsize " << lsize <<
+				"\tbuckets " << buckets <<
+				"\tmax load factor " << max_load_factor <<
+				"\t printing [" << first << " .. " << last << "]" << std::endl;
+		size_type i = 0;
+
+		for (i = first; i <= last; ++i) {
+			std::cout << prefix <<
+					" buc: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i]) <<
+					", off: " << std::setw(3) << static_cast<size_t>(get_distance(info_container[i])) <<
+					", pos: " << std::setw(10) << (is_normal(info_container[i]) ? (i - get_distance(info_container[i])) : -i) <<
+					"\n" << std::setw(62) << i <<
+					", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+					", key: " << container[i].first <<
+					", val: " << container[i].second <<
+					std::endl;
+		}
+	}
+
+	void print(size_t const & first, size_t const &last, std::string prefix) const {
+		print_raw(first, last, prefix);
+	}
+
+//	void print() const {
+//		for (size_type i = 0; i < info_container.size(); ++i) {
+//			std::cout << i << ": [" << container[i].first << "->" <<
+//					container[i].second << "] info " <<
+//					static_cast<size_t>(info_container[i]) <<
+//					" bucket = ";
+//			if (is_normal(info_container[i])) {
+//				std::cout << static_cast<size_t>(i - get_distance(info_container[i]));
+//			} else {
+//				std::cout << static_cast<int64_t>(-i);
+//			}
+//			std::cout << std::endl;
+//		}
+//	}
 
 	std::vector<value_type > to_vector() const {
 		std::vector<value_type > output(lsize);
@@ -470,6 +538,10 @@ protected:
 
   				  last = insert_with_hint(target, target_info, id, last, container[i]);
 
+  				  if (last == bid_failed) {
+  				    throw std::logic_error("ERROR: max reprobe reached during downsizing");
+  				  }
+
   			  }  // else is empty, so continue.
   		  }
   	  }
@@ -496,6 +568,11 @@ protected:
   				  id = hash(container[i].first) & m;
 
   				  last = insert_with_hint(target, target_info, id, last, container[i]);
+
+            if (last == bid_failed) {
+              throw std::logic_error("ERROR: max reprobe reached during upsizing");
+            }
+
 
   			  }  // else is empty, so continue.
   		  }
@@ -532,7 +609,7 @@ protected:
 
 		bucket_id_type insert_pos = bid_failed;
 		bucket_id_type i = get_bucket_id(id);
-		bucket_id_type i_max = i + static_cast<bucket_id_type>(std::numeric_limits<info_type>::max()) + 1;
+		bucket_id_type i_max = i + static_cast<bucket_id_type>(std::numeric_limits<info_type>::max() - info_normal) + 1;
 		i_max = std::min(i_max, static_cast<bucket_id_type>(target_info.size()));
 
 		// first take care of inserting vv, search for the first entry of the next bucket, reprobe > target_info.
@@ -584,7 +661,15 @@ protected:
 
 		}
 
-		if (i == i_max) throw std::logic_error("ERROR: searching for insertion position reached max reprobe distance (128)");
+		// kicks in only for third case, and no match.
+		if (i == i_max) {
+      std::cout << " id " << get_bucket_id(id) << " curr pos " << i << ", max " << i_max << " info size " << static_cast<bucket_id_type>(info_container.size()) << std::endl;
+//      print();
+//		  throw std::logic_error("ERROR: searching for insertion position reached max reprobe distance (128)");
+		  // max reprobe reached.  return failed, resize and retry.
+
+		  return bid_failed;
+		}
 
 		// if here, then swapped and breaked. reprobe and i need to advance 1.
 		++reprobe;
@@ -635,7 +720,10 @@ protected:
 		this->max_shifts = std::max(this->max_shifts, (i-orig_i));
 #endif
 
-		if (i == i_max) throw std::logic_error("ERROR: shifting entries to the right ran out of room in container.");
+		if (i == i_max) {
+			std::cout << "i is " << i << " i_max at " << i_max << std::endl;
+		  throw std::logic_error("ERROR: shifting entries to the right ran out of room in container.");
+		}
 
 
 		return insert_pos;
@@ -688,9 +776,15 @@ public:
 		if (lsize >= max_load) rehash(buckets << 1);
 
 		// first get the bucket id
-		bucket_id_type id = hash(vv.first) & mask;  // target bucket id.
+		size_t h = hash(vv.first);
 
-		id = insert_with_hint(container, info_container, id, id, vv);
+		bucket_id_type id = insert_with_hint(container, info_container, h & mask, h & mask, vv);
+		while (id == bid_failed) {
+	    	  std::cout << "RESIZE AND RE_INSERT: " << vv.first << std::endl;
+
+		  rehash(buckets << 1);
+		  id = insert_with_hint(container, info_container, h & mask, h & mask, vv);
+		}
 		bool success = missing(id);
 		size_t bid = get_bucket_id(id);
 
@@ -716,6 +810,7 @@ public:
 		reset_reprobe_stats();
 		size_type before = lsize;
 #endif
+		size_t h;
 		bucket_id_type id;
 
 		// iterate based on size between rehashes
@@ -727,9 +822,17 @@ public:
 			if (lsize >= max_load) rehash(buckets << 1);
 
 			// first get the bucket id
-			id = hash((*it).first) & mask;  // target bucket id.
+			h = hash((*it).first);  // target bucket id.
 
-			if (missing(insert_with_hint(container, info_container, id, id, *it)))
+	    id = insert_with_hint(container, info_container, h & mask, h & mask, *it);
+	    while (id == bid_failed) {
+	    	  std::cout << "RESIZE AND RE_INSERT: " << it->first << std::endl;
+
+	      rehash(buckets << 1);
+	      id = insert_with_hint(container, info_container, h & mask, h & mask, *it);
+	    }
+
+			if (missing(id))
 				++lsize;
 		}
 
@@ -783,6 +886,7 @@ public:
       }
 
 		size_t hashes_mask = LOOK_AHEAD - 1;
+		size_t h;
 
 		// iterate based on size between rehashes
 		for (size_t i = 0; i < block2_max; ++i) {
@@ -794,7 +898,7 @@ public:
 
 			// first get the bucket id
 			hash_pos = i & hashes_mask;
-			id = hashes[hash_pos] & mask;  // target bucket id.
+			h = hashes[hash_pos];
 
       //=== prefetch
       hashes[hash_pos] = hash(input[i + LOOK_AHEAD].first);
@@ -804,8 +908,17 @@ public:
       // adding a second does not help/
       //_mm_prefetch((const char *)&(container[id_la + (64 / sizeof(value_type))]), _MM_HINT_T0);
 
-			if (missing(insert_with_hint(container, info_container, id, id, input[i])))
-				++lsize;
+      // first get the bucket id
+      id = insert_with_hint(container, info_container, h & mask, h & mask, input[i]);
+      while (id == bid_failed) {
+    	  std::cout << "RESIZE AND RE_INSERT: " << input[i].first << std::endl;
+        rehash(buckets << 1);
+        id = insert_with_hint(container, info_container, h & mask, h & mask, input[i]);
+      }
+
+      if (missing(id))
+        ++lsize;
+
 		}
 
 		for (size_t i = block3_min; i < input.size(); ++i) {
@@ -816,9 +929,18 @@ public:
 
       // first get the bucket id
       hash_pos = i & hashes_mask;
-      id = hashes[hash_pos] & mask;  // target bucket id.
+      h = hashes[hash_pos];
 
-      if (missing(insert_with_hint(container, info_container, id, id, input[i])))
+      // first get the bucket id
+      id = insert_with_hint(container, info_container, h & mask, h & mask, input[i]);
+      while (id == bid_failed) {
+    	  std::cout << "RESIZE AND RE_INSERT: " << input[i].first << std::endl;
+
+        rehash(buckets << 1);
+        id = insert_with_hint(container, info_container, h & mask, h & mask, input[i]);
+      }
+
+      if (missing(id))
         ++lsize;
 		}
 
@@ -885,10 +1007,11 @@ public:
 
 
       size_t hashes_mask = LOOK_AHEAD - 1;
-
+      size_t h; // old hash value
       // ------------- INSERT
 
     // iterate based on size between rehashes
+
     for (size_t j = 0; j < block2_max; ++j) {
 
       // === same code as in insert(1)..
@@ -898,7 +1021,8 @@ public:
 
       // first get the bucket id
       hash_pos = j & hashes_mask;
-      id = hashes[hash_pos] & mask;  // target bucket id.
+      h = hashes[hash_pos];
+      id = h & mask;  // target bucket id.
 
       //=== prefetch
       hashes[hash_pos] = hash(input[j + LOOK_AHEAD].first);
@@ -915,7 +1039,7 @@ public:
       reprobe = info_normal;
 
       i = get_bucket_id(id);
-      i_max = i + static_cast<bucket_id_type>(std::numeric_limits<info_type>::max()) + 1;
+      i_max = i + static_cast<bucket_id_type>(std::numeric_limits<info_type>::max() - info_normal) + 1;
       i_max = std::min(i_max, static_cast<bucket_id_type>(info_container.size()));
 
       // first take care of inserting vv, search for the first entry of the next bucket, reprobe > target_info.
@@ -975,8 +1099,15 @@ public:
       }
 
       if (i == i_max) {
-        std::cout << j << ", " << i << ", " << i_max << std::endl;
-        throw std::logic_error("ERROR: searching for insertion position reached max reprobe distance (128)");
+        std::cout << "block 2 entry " << j << ", id " << get_bucket_id(id) << " curr pos " << i << ", max " << i_max << " info size " << static_cast<bucket_id_type>(info_container.size()) << std::endl;
+//        ;
+//        throw std::logic_error("ERROR: searching for insertion position reached max reprobe distance (128)");
+  	  std::cout << "RESIZE AND RE_INSERT: " << vv.first << std::endl;
+
+        rehash(buckets << 1);  // resize.
+        --j;  // roll back one and restart this iterator.
+        hashes[hash_pos] = h;  // also roll back hash code.
+        continue;  //
       }
 
       if (no_shift) {   // skip rest of loop if no need to shift.
@@ -1053,9 +1184,7 @@ public:
 
           // first get the bucket id
           hash_pos = j & hashes_mask;
-          id = hashes[hash_pos] & mask;  // target bucket id.
-
-
+          id = hashes[hash_pos] & mask; // target bucket id.
 
           //==== now do some work to insert.
           // first get the bucket id
@@ -1066,7 +1195,7 @@ public:
           reprobe = info_normal;
 
           i = get_bucket_id(id);
-          i_max = i + static_cast<bucket_id_type>(std::numeric_limits<info_type>::max()) + 1;
+          i_max = i + static_cast<bucket_id_type>(std::numeric_limits<info_type>::max() - info_normal) + 1;
           i_max = std::min(i_max, static_cast<bucket_id_type>(info_container.size()));
 
           // first take care of inserting vv, search for the first entry of the next bucket, reprobe > target_info.
@@ -1125,8 +1254,12 @@ public:
           }
 
           if (i == i_max) {
-            std::cout << j << ", " << i << ", " << i_max << std::endl;
-            throw std::logic_error("ERROR: searching for insertion position reached max reprobe distance (128)");
+//            std::cout << "block 3 entry " << j << ", id " << get_bucket_id(id) << " curr pos " << i << ", max " << i_max << " info size " << static_cast<bucket_id_type>(info_container.size()) << std::endl;
+//            print();
+//            throw std::logic_error("ERROR: searching for insertion position reached max reprobe distance (128)");
+            rehash(buckets << 1);  // resize.
+            --j;  // roll back one and restart this iterator.
+            continue;  //
           }
 
           if (no_shift) {   // skip rest of loop if no need to shift.
@@ -1204,16 +1337,97 @@ public:
 
 
 	/// batch insert using sorting.  This is about 4x slower on core i5-4200U (haswell) than integrated batch insertion above, even just for sort.
+  /// THIS NOT WORKING RIGHT NOW.
 	template <typename LESS = ::std::less<key_type> >
 	void insert_sort(::std::vector<value_type> const & input) {
 
-	  throw ::std::logic_error("ERROR: DISABLED FOR PREFETCH VERSION");
+    std::cerr << "sort adds a stable sort, but otherwise same as integrated." << std::endl;
+
+//#if defined(REPROBE_STAT)
+//		this->reprobes = 0;
+//		this->max_reprobes = 0;
+//		this->moves = 0;
+//		this->max_moves = 0;
+//		size_t total = input.size();
+//#endif
+
+		// need hyperloglog to estimate the final size, in order to sort by bucket.
+
+
+    size_t local_mask = next_power_of_2(static_cast<size_t>(static_cast<float>(input.size() + this->lsize) / this->max_load_factor)) - 1;
+
+    // 1/2 local mask is okay, but using mask is not, only for uint32 and uint64.  DONT KNOW WHY
+    local_mask >>= 1;
+
+		::std::vector<value_type> orig(input);
+		::std::vector<value_type> sorted(input);
+
+		// sort by last binary digits of hash value
+		std::stable_sort(sorted.begin(), sorted.end(),
+				[this, &local_mask](value_type const & x, value_type const & y){
+			 //return ((this->hash(x.first) & this->mask) < (this->hash(y.first) & this->mask));  // this line is NOT working.
+			 return (this->hash(x.first) & local_mask) < (this->hash(y.first) & local_mask);  // this line is working...
+
+			 // do not want below.  messes up original order.
+//			size_t id_x = this->hash(x.first) & local_mask;
+//			size_t id_y = this->hash(y.first) & local_mask;
+//
+//			return (id_x < id_y) || ( (id_x == id_y) && less(x.first, y.first) );
+		});
+
+
+    std::stable_sort(orig.begin(), orig.end(), [](value_type const & x, value_type const & y){
+          return (x.first < y.first);
+    });
+
+
+    std::cout << " LOCAL MASK " << local_mask << std::endl;
+//    std::cout << "in_k,in_v,in_h,in_p,s_k,s_v,s_h,s_p,hs_k,hs_v,hs_h,hs_p" << std::endl;
+//    for (size_t i = 0; i < input.size(); ++i) {
+//      std::cout <<
+//          input[i].first << "," << input[i].second << "," << this->hash(input[i].first)  << "," << (this->hash(input[i].first) & local_mask) << "," <<
+//          orig[i].first << "," << orig[i].second << "," << this->hash(orig[i].first)  << "," << (this->hash(orig[i].first) & local_mask) << "," <<
+//          sorted[i].first << "," << sorted[i].second << "," << this->hash(sorted[i].first) << "," << (this->hash(sorted[i].first) & local_mask) <<
+//          std::endl;
+//    }
+
+    // no difference in (in)correctness between insert(iter,iter), insert(vec), and insert_integrated
+    insert_integrated(sorted);
+    print();
+
+		std::stable_sort(sorted.begin(), sorted.end(), [](value_type const & x, value_type const & y){
+	        return (x.first < y.first);
+		});
+
+		bool same = std::equal(orig.begin(), orig.end(), sorted.begin());
+
+		std::cout << "INSERT SORT:  SORTING CHANGED CONTENT? " << (same ? "no" : "yes") << std::endl;
+
+
+//#if defined(REPROBE_STAT)
+//    std::cout << "lsize " << lsize << std::endl;
+//
+//    std::cout << "INSERT_I batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+//    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
+//					"\tvalid=" << input.size() << "\ttotal=" << total <<
+//					"\tbuckets=" << buckets <<std::endl;
+//		this->reprobes = 0;
+//		this->max_reprobes = 0;
+//		this->moves = 0;
+//		this->max_moves = 0;
+//#endif
+
 
 	}
 
   void insert_shuffled(::std::vector<value_type> const & input) {
 
-    throw ::std::logic_error("ERROR: DISABLED FOR PREFETCH VERSION");
+//    std::random_shuffle(input.begin(), input.end());
+    insert(input);
+	  std::cerr << "ERROR: no shuffling in prefetch version" << std::endl;
+	  //throw ::std::logic_error("ERROR: DISABLED FOR PREFETCH VERSION");
+	  print();
+
 
   }
 
@@ -1241,7 +1455,7 @@ protected:
     info_type curr_info;
 
     // can only search within max of info_type...
-    bucket_id_type i_max = i + static_cast<bucket_id_type>(std::numeric_limits<info_type>::max()) + 1;
+    bucket_id_type i_max = i + static_cast<bucket_id_type>(std::numeric_limits<info_type>::max()- info_normal) + 1;
     i_max = std::max(i_max, static_cast<bucket_id_type>(info_container.size()));
 
     for (; i < i_max; ++i, ++reprobe) {
