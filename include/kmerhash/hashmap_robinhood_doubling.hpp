@@ -309,20 +309,81 @@ public:
 	}
 
 
-
 	void print() const {
-		std::cout << "buckets " << buckets << " lsize " << lsize << " max load factor " << max_load_factor << std::endl;
+		print_raw();
+	}
 
-		for (size_t i = 0; i < buckets; ++i) {
-			std::cout << i << ": [" << container[i].first << "->" <<
-					container[i].second << "] info " <<
-					static_cast<size_t>(info_container[i].info) <<
-					" offset = " <<
-					static_cast<size_t>(info_container[i].get_offset()) <<
-					" pos = " <<
-					(info_container[i].get_offset() + i) << std::endl;
+	void print_raw() const {
+		std::cout << "lsize " << lsize << "\tbuckets " << buckets << "\tmax load factor " << max_load_factor << std::endl;
+		size_type i = 0;
+
+		for (i = 0; i < buckets; ++i) {
+			std::cout <<
+					" buc: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i].info) <<
+					", off: " << std::setw(3) << static_cast<size_t>(info_container[i].get_offset()) <<
+					", pos: " << std::setw(10) << ((i + mask - info_container[i].get_offset()) & mask) <<
+					"\n" << std::setw(62) << i <<
+					", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+					", key: " << container[i].first <<
+					", val: " << container[i].second <<
+					std::endl;
+		}
+
+		for (i = buckets; i < info_container.size(); ++i) {
+			std::cout <<
+					" buc: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i].info) <<
+					", off: " << std::setw(3) << static_cast<size_t>(info_container[i].get_offset()) <<
+					", pos: " << std::setw(10) << ((i + mask - info_container[i].get_offset()) & mask) <<
+					"\n" << std::setw(62) << i <<
+					", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+					", key: " << container[i].first <<
+					", val: " << container[i].second <<
+					std::endl;
 		}
 	}
+
+	void print_raw(size_t const & first, size_t const &last, std::string prefix) const {
+		std::cout << prefix <<
+				" lsize " << lsize <<
+				"\tbuckets " << buckets <<
+				"\tmax load factor " << max_load_factor <<
+				"\t printing [" << first << " .. " << last << "]" << std::endl;
+		size_type i = 0;
+
+		for (i = first; i <= last; ++i) {
+			std::cout << prefix <<
+					" buc: " << std::setw(10) << i <<
+					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i].info) <<
+					", off: " << std::setw(3) << static_cast<size_t>(info_container[i].get_offset()) <<
+					", pos: " << std::setw(10) << ((i + mask - info_container[i].get_offset()) & mask) <<
+					"\n" << std::setw(62) << i <<
+					", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
+					", key: " << container[i].first <<
+					", val: " << container[i].second <<
+					std::endl;
+		}
+	}
+
+	void print(size_t const & first, size_t const &last, std::string prefix) const {
+		print_raw(first, last, prefix);
+	}
+
+//
+//	void print() const {
+//		std::cout << "buckets " << buckets << " lsize " << lsize << " max load factor " << max_load_factor << std::endl;
+//
+//		for (size_t i = 0; i < buckets; ++i) {
+//			std::cout << i << ": [" << container[i].first << "->" <<
+//					container[i].second << "] info " <<
+//					static_cast<size_t>(info_container[i].info) <<
+//					" offset = " <<
+//					static_cast<size_t>(info_container[i].get_offset()) <<
+//					" pos = " <<
+//					(info_container[i].get_offset() + i) << std::endl;
+//		}
+//	}
 
 	std::vector<std::pair<key_type, mapped_type> > to_vector() const {
 		std::vector<std::pair<key_type, mapped_type> > output(lsize);
@@ -781,21 +842,25 @@ public:
 	template <typename LESS = ::std::less<key_type> >
 	void insert_sort(::std::vector<value_type> & input) {
 
-		assert(lsize == 0);   // currently only works with empty hashmap.
+		std::cerr << "sort adds a stable sort, but otherwise same as integrated." << std::endl;
 
-#if defined(REPROBE_STAT)
-		this->reprobes = 0;
-		this->max_reprobes = 0;
-		this->moves = 0;
-		this->max_moves = 0;
-		size_t total = input.size();
-#endif
+//		assert(lsize == 0);   // currently only works with empty hashmap.
+//
+//#if defined(REPROBE_STAT)
+//		this->reprobes = 0;
+//		this->max_reprobes = 0;
+//		this->moves = 0;
+//		this->max_moves = 0;
+//		size_t total = input.size();
+//#endif
 		LESS less;
 
-		size_t local_mask = next_power_of_2(static_cast<size_t>(static_cast<float>(input.size()) / this->max_load_factor)) - 1;
+		// overestimate the size first.
+		size_t local_mask = next_power_of_2(static_cast<size_t>(static_cast<float>(input.size() + this->lsize) / this->max_load_factor)) - 1;
 
-		// first sort by hash value.  two with same hash then are compared by key.  radix sort later?
-		std::sort(input.begin(), input.end(),
+		// first sort by hash value.  two with same hash then are compared by key.  this last part is needed
+		// for the unique.  stable sort to ensure the right entry is kept.
+		std::stable_sort(input.begin(), input.end(),
 				[this, &local_mask, &less](value_type const & x, value_type const & y){
 			size_t id_x = this->hash(x.first) & local_mask;
 			size_t id_y = this->hash(y.first) & local_mask;
@@ -804,7 +869,10 @@ public:
 		});
 
 #if 0
+// THIS HAS ISSUES.  in particular, it needs estimated size, correct merge, and insert code is incorrect.
+// DO NOT USE. RIGHT NOW.
 		// then do unique by key_value, so we have an accurate count
+		// THIS IS NOT SUITABLE FOR COUNT OR REDUCTION IN GENERAL.
 		auto new_end = std::unique(input.begin(), input.end(),
 				[this](value_type const & x, value_type const & y){
 			return this->eq(x.first, y.first);
@@ -812,7 +880,11 @@ public:
 		input.erase(new_end, input.end());
 
 		// now allocate for the new size.
-		reserve(input.size());
+		// TODO:  we need at least same number as the number of unique entries.
+		//        if there are existing entries, then we've overprovisioned.
+		//		  but that may be okay?
+		//		  alternatively, insert into a local hash, then merge
+		reserve(input.size() + lsize);  // include current size.  overestimated. but input is now smaller.
 
 		auto merge_comparator = [this, &less](value_type const & x, value_type const & y){
 			size_t id_x = this->hash(x.first) & this->mask;
@@ -822,7 +894,8 @@ public:
 		};
 
 		// do one scan, and get all the break points (at (& mask) == 0).
-		if (local_mask > this->mask) { // need to condense.
+		// local mask should always be >= mask, since only input.size is possibly reduced.
+		if (local_mask > this->mask) { // if original size is larger than target size, then need to condense.
 			// first get the splitters.
 			std::vector<typename ::std::vector<value_type>::iterator> iterators;
 			auto it = input.begin();
@@ -836,12 +909,13 @@ public:
 			}
 			iterators.push_back(input.end());
 
-			// next merge.
-			while (iterators.size() > 2) {
+			// next merge.  recall that lower k bits are same every 2^k buckets
+			// also stopping has to be at mask count.  should not need to compare when merging.
+			::std::vector<value_type> sorted_input(input.size());
+			while (iterators.size() > mask) {
 				// merge pairwise.
-				for (size_t j = 0; j < iterators.size() - 2; j+=2) {
-					std::inplace_merge(iterators[j], iterators[j+1], iterators[j+2],
-					merge_comparator);
+				for (size_t j = 0; j < iterators.size() / 2; ++j) {
+					std::inplace_merge(iterators[j], iterators[j+1], iterators[j+2], merge_comparator);
 				}
 
 				// remove every other entry from iterators.
@@ -853,6 +927,10 @@ public:
 
 				iterators.swap(new_iters);
 			}
+		} else if ( local_mask < this->mask) {
+			// should not happen
+		} else {
+			// same.  so buckets already matched up....
 		}
 
 		// set up the hash table, using only unique entries (by key value)  THIS PART PROBABLY IS CAUSING SEGV.
@@ -878,9 +956,10 @@ public:
 				} else if (id == pos) {  // write to current position, which must be occupied, so need to increment by 1.
 					++pos;
 					dist = info_type::normal + 1;
+					// this fails at first position
 				} else {  // a previous bucket.
 					++pos;
-					dist = info_type::normal + pos - id;
+					dist = info_type::normal + (pos - id);
 				}
 
 
@@ -891,31 +970,28 @@ public:
 				container[pos] = input[i];
 		}
 		 lsize += input.size();
+
+#else
+		insert_integrated(input);
+
 #endif
 
-	#if defined(REPROBE_STAT)
-//			this->reprobes += probe_count;
-//			this->max_reprobes = std::max(this->max_reprobes, static_cast<size_t>(probe_count));
 //
-//			this->moves += move_count;
-//			this->max_moves = std::max(this->max_moves, move_count);
-	#endif
-
-
-#if defined(REPROBE_STAT)
-    std::cout << "lsize " << lsize << std::endl;
-
-    std::cout << "INSERT_I batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
-    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
-					"\tvalid=" << input.size() << "\ttotal=" << total <<
-					"\tbuckets=" << buckets <<std::endl;
-		this->reprobes = 0;
-		this->max_reprobes = 0;
-		this->moves = 0;
-		this->max_moves = 0;
-#endif
-
-		reserve(lsize);  // resize down as needed
+//
+//#if defined(REPROBE_STAT)
+//    std::cout << "lsize " << lsize << std::endl;
+//
+//    std::cout << "INSERT_I batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+//    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
+//					"\tvalid=" << input.size() << "\ttotal=" << total <<
+//					"\tbuckets=" << buckets <<std::endl;
+//		this->reprobes = 0;
+//		this->max_reprobes = 0;
+//		this->moves = 0;
+//		this->max_moves = 0;
+//#endif
+//
+//		reserve(lsize);  // resize down as needed
 	}
 
 
@@ -924,44 +1000,51 @@ public:
 	/// batch insert using extra memory and do shuffling
 	void insert_shuffled(::std::vector<value_type> & input) {
 
-		assert(lsize == 0);   // currently only works with empty hashmap.
+		insert_integrated(input);
+		std::cerr << "shuffle not implemented" << std::endl;
 
-#if defined(REPROBE_STAT)
-		this->reprobes = 0;
-		this->max_reprobes = 0;
-		this->moves = 0;
-		this->max_moves = 0;
-		size_t total = input.size();
-#endif
-
-		size_t local_mask = next_power_of_2(static_cast<size_t>(static_cast<float>(input.size()) / this->max_load_factor)) - 1;
-		local_mask = ::std::max(local_mask, mask);
-
-		::std::vector<size_t> bucket_sizes;
-		bucket_sizes.reserve(local_mask);
-
-		// first compute hash values
-		::imxx::local::bucketing_impl(input, [this, &local_mask](value_type const & x){
-			return this->hash(x.first) & local_mask;
-		}, local_mask, bucket_sizes);
-		// now shuffle to bucket them together.
-
-
-
-#if defined(REPROBE_STAT)
-    std::cout << "lsize " << lsize << std::endl;
-
-    std::cout << "INSERT_I batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
-    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
-					"\tvalid=" << input.size() << "\ttotal=" << total <<
-					"\tbuckets=" << buckets <<std::endl;
-		this->reprobes = 0;
-		this->max_reprobes = 0;
-		this->moves = 0;
-		this->max_moves = 0;
-#endif
-
-		reserve(lsize);  // resize down as needed
+//		assert(lsize == 0);   // currently only works with empty hashmap.
+//
+//#if defined(REPROBE_STAT)
+//		this->reprobes = 0;
+//		this->max_reprobes = 0;
+//		this->moves = 0;
+//		this->max_moves = 0;
+//		size_t total = input.size();
+//#endif
+//
+//		// NEED ESTIMATE.
+//		size_t local_mask = next_power_of_2(static_cast<size_t>(static_cast<float>(input.size()) / this->max_load_factor)) - 1;
+//		local_mask = ::std::max(local_mask, mask);
+//
+//		::std::vector<size_t> bucket_sizes;
+//		bucket_sizes.reserve(local_mask);
+//
+//		// first compute hash values
+//		// now shuffle to bucket them together.
+//		::imxx::local::bucketing_impl(input, [this, &local_mask](value_type const & x){
+//			return this->hash(x.first) & local_mask;
+//		}, local_mask, bucket_sizes);
+//
+//
+//		// then insert
+//		insert_integrated(input);
+//
+//
+//#if defined(REPROBE_STAT)
+//    std::cout << "lsize " << lsize << std::endl;
+//
+//    std::cout << "INSERT_I batch:\treprobe max=" << static_cast<unsigned int>(this->max_reprobes) << "\treprobe total=" << this->reprobes <<
+//    		"\tmove max=" << static_cast<unsigned int>(this->max_moves) << "\tmove total=" << this->moves <<
+//					"\tvalid=" << input.size() << "\ttotal=" << total <<
+//					"\tbuckets=" << buckets <<std::endl;
+//		this->reprobes = 0;
+//		this->max_reprobes = 0;
+//		this->moves = 0;
+//		this->max_moves = 0;
+//#endif
+//
+//		reserve(lsize);  // resize down as needed
 	}
 
 
