@@ -558,7 +558,7 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
 #endif
 
 	// compute hyperloglog estimate for reference.
-	hyperloglog64<Kmer, ::bliss::kmer::hash::farm<Kmer, false>, 6> hll;
+	hyperloglog64<Kmer, ::bliss::kmer::hash::farm<Kmer, false>, 12> hll;
 	for (size_t i = 0; i < input.size(); ++i) {
 		hll.update(input[i].first);
 	}
@@ -720,7 +720,7 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 #endif
 
 	// compute hyperloglog estimate for reference.
-    hyperloglog64<Kmer, ::bliss::kmer::hash::farm<Kmer, false>, 6> hll;
+    hyperloglog64<Kmer, ::bliss::kmer::hash::farm<Kmer, false>, 12> hll;
     ::std::pair<Kmer, Value> val __attribute__ ((aligned (16)));
     for (size_t i = 0; i < input.size(); ++i) {
     	*(reinterpret_cast<__m128i*>(&val)) = _mm_stream_load_si128(reinterpret_cast<__m128i*>(input_ptr + i));

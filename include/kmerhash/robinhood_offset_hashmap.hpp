@@ -209,7 +209,7 @@ protected:
 
 	using container_type		= ::std::vector<value_type, Allocator>;
 	using info_container_type	= ::std::vector<info_type, Allocator>;
-	hyperloglog64<key_type, hasher, 6> hll;  // precision of 6bits  uses 64 bytes, which should fit in a cache line.  sufficient precision.
+	hyperloglog64<key_type, hasher, 12> hll;  // precision of 6bits  uses 4096 bytes, which should fit in L1 cache.  error rate : 1.03/(2^12)
 
 
 public:
@@ -779,7 +779,9 @@ public:
 		// check it's power of 2
 		size_type n = next_power_of_2(b);
 
+#if defined(REPROBE_STAT)
 		std::cout << "REHASH current " << buckets << " b " << b << " n " << n << " lsize " << lsize << std::endl;
+#endif
 
 		//    print();
 
@@ -1864,9 +1866,9 @@ public:
 	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
 	typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
 	void insert(Iter begin, Iter end) {
+#if defined(REPROBE_STAT)
 		std::cout << "INSERT ITERATOR" << std::endl;
 
-#if defined(REPROBE_STAT)
 		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
 			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
 		} else {
@@ -1891,7 +1893,7 @@ public:
 			throw std::length_error("failed to allocate aligned memory");
 		}
 
-		hyperloglog64<key_type, hasher, 6> hll_local;
+		hyperloglog64<key_type, hasher, 12> hll_local;
 
 		size_t hval;
 		Iter it = begin;
@@ -1909,8 +1911,9 @@ public:
 		hll_local.merge(hll);
 		double distinct_total_est = hll_local.estimate();
 
+#if defined(REPROBE_STAT)
 		std::cout << " estimate input cardinality as " << distinct_input_est << " total after insertion " << distinct_total_est << std::endl;
-
+#endif
 		// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
 		reserve(static_cast<size_t>(static_cast<double>(distinct_total_est) * 1.0));   // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
 
@@ -1934,9 +1937,9 @@ public:
 	template <typename LESS = ::std::less<key_type> >
 	void insert_sort(::std::vector<value_type> const & input) {
 
+#if defined(REPROBE_STAT)
 		std::cout << "INSERT MIN REHASH CHECK (not really sort)" << std::endl;
 
-#if defined(REPROBE_STAT)
 		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
 			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
 		} else {
@@ -2107,9 +2110,9 @@ public:
 	template <typename LESS = ::std::less<key_type> >
 	void insert_integrated(::std::vector<value_type> const & input) {
 
+#if defined(REPROBE_STAT)
 		std::cout << "INSERT INTEGRATED" << std::endl;
 
-#if defined(REPROBE_STAT)
 		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
 			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
 		} else {
@@ -2587,9 +2590,9 @@ public:
 	/// insert with estimated size to avoid resizing.  uses more memory because of the hash?
 	// similar to insert with iterator in structure.  prefetch stuff is delegated to insert_with_hint_no_resize.
 	void insert(::std::vector<value_type> const & input) {
-		std::cout << "INSERT VECTOR" << std::endl;
 
 #if defined(REPROBE_STAT)
+		std::cout << "INSERT VECTOR" << std::endl;
 		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
 			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
 		} else {
@@ -2610,7 +2613,7 @@ public:
 			throw std::length_error("failed to allocate aligned memory");
 		}
 
-		hyperloglog64<key_type, hasher, 6> hll_local;
+		hyperloglog64<key_type, hasher, 12> hll_local;
 
 		size_t hval;
 		for (size_t i = 0; i < input.size(); ++i) {
@@ -2627,8 +2630,9 @@ public:
 		hll_local.merge(hll);
 		double distinct_total_est = hll_local.estimate();
 
+#if defined(REPROBE_STAT)
 		std::cout << " estimate input cardinality as " << distinct_input_est << " total after insertion " << distinct_total_est << std::endl;
-
+#endif
 		// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
 		reserve(static_cast<size_t>(static_cast<double>(distinct_total_est) * 1.0));   // this updates the bucket counts also.  overestimate by 10%
 
@@ -2651,9 +2655,9 @@ public:
 	// similar to insert_sorted
 	void insert_shuffled(::std::vector<value_type> const & input) {
 
+#if defined(REPROBE_STAT)
 		std::cout << "INSERT SHUFFLED" << std::endl;
 
-#if defined(REPROBE_STAT)
 		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
 			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
 		} else {

@@ -181,7 +181,7 @@ protected:
 
     using container_type		= ::std::vector<value_type, Allocator>;
     using info_container_type	= ::std::vector<info_type, Allocator>;
-    hyperloglog64<key_type, hasher, 6> hll;  // precision of 6bits  uses 64 bytes, which should fit in a cache line.  sufficient precision.
+    hyperloglog64<key_type, hasher, 12> hll;  // precision of 6bits  uses 64 bytes, which should fit in a cache line.  sufficient precision.
 
 
 public:
@@ -758,7 +758,9 @@ public:
     // check it's power of 2
     size_type n = next_power_of_2(b);
 
+#if defined(REPROBE_STAT)
     std::cout << "REHASH current " << buckets << " b " << b << " n " << n << " lsize " << lsize << std::endl;
+#endif
 
 //    print();
 
@@ -2393,7 +2395,7 @@ public:
 			throw std::length_error("failed to allocate aligned memory");
 
 
-        hyperloglog64<key_type, hasher, 6> hll_local;
+        hyperloglog64<key_type, hasher, 12> hll_local;
 
         size_t hval;
         for (size_t i = 0; i < input.size(); ++i) {

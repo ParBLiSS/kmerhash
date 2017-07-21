@@ -33,6 +33,8 @@
  *
  * this is structured as a class because we want to be able to merge instances
  *
+ * this implementation is not yet correct:  accuracy of prediction is not within 2 % yet.  would prefer to have a
+ *
  *  Created on: Mar 1, 2017
  *      Author: tpan
  */
@@ -42,6 +44,7 @@
 
 #include <array>
 #include <stdint.h>
+#include <iostream> // std::cout
 
 // FROM https://github.com/hideo55/cpp-HyperLogLog.
 // modified to conform to the leftmost 1 bit convention, and faster implementation. and to make macro safer.
@@ -65,13 +68,13 @@ inline uint8_t leftmost_set_bit(uint64_t x) {
 // from https://en.wikipedia.org/wiki/Find_first_set, extended to 64 bit
 static const uint8_t clz_table_4bit[16] = { 4, 3, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0 };
 inline uint8_t leftmost_set_bit(uint64_t x) {
-	if (x == 0) return 65;
+  if (x == 0) return 65;
   uint8_t n;
   if ((x & 0xFFFFFFFF00000000UL) == 0) {n  = 32; x <<= 32;} else {n = 0;}
   if ((x & 0xFFFF000000000000UL) == 0) {n += 16; x <<= 16;}
   if ((x & 0xFF00000000000000UL) == 0) {n +=  8; x <<=  8;}
   if ((x & 0xF000000000000000UL) == 0) {n +=  4; x <<=  4;}
-  n += (int)clz_table_4bit[x >> 60];  // 64 - 4
+  n += clz_table_4bit[x >> 60];  // 64 - 4
   return n+1;
 }
 
@@ -82,21 +85,23 @@ inline uint8_t leftmost_set_bit(uint64_t x) {
 
 template <typename T, typename Hash, uint8_t precision = 4>
 class hyperloglog64 {
+	  static_assert((precision >= 4) && (precision <= 16),
+			  "ERROR: precision for hyperloglog should be in [4, 16].");
 
 protected:
-	// don't need because of 64 bit.
-	static constexpr uint64_t val_mask = ~(0x0UL) >> precision;
-	static constexpr uint64_t nRegisters = 0x1UL << precision;
-	double amm;
+	// don't need because of 64 bit.  0xRRVVVVVV  // high bits: reg.  low: values
+	static constexpr uint64_t val_mask = ~(0x0UL) >> precision;  // e.g. 0x00FFFFFF
+	static constexpr uint64_t nRegisters = 0x1UL << precision;   // e.g. 0x00000100
+	mutable double amm;
 
-	std::array<int8_t, nRegisters> registers;  // stores count of leading zeros
+	using REG_T = uint8_t;
+	std::array<REG_T, nRegisters> registers;  // stores count of leading zeros
 
 	Hash h;
-  static_assert(precision >= 4, "ERROR: precision for hyperloglog should be at least 4.");
 
 public:
-	hyperloglog64() : amm(0.0) {
-		registers.fill(-1);
+	hyperloglog64() {
+		registers.fill(static_cast<REG_T>(0));
 
         switch (precision) {
             case 4:
@@ -112,17 +117,16 @@ public:
                 amm = 0.7213 / (1.0 + 1.079 / nRegisters);
                 break;
         }
-        amm *= static_cast<double>(0x1UL << (precision + precision));
+        amm *= static_cast<double>(0x1ULL << (precision + precision));
 	}
 
-	hyperloglog64(hyperloglog64 const & other) : amm(other.amm), registers(other.registers) {
-
+	hyperloglog64(hyperloglog64 const & other) :
+		amm(other.amm), registers(other.registers) {
 	}
 
-	hyperloglog64(hyperloglog64 && other) : amm(other.amm), registers(std::move(other.registers)) {
-
+	hyperloglog64(hyperloglog64 && other) :
+		amm(other.amm), registers(std::move(other.registers)) {
 	}
-
 
 	hyperloglog64& operator=(hyperloglog64 const & other) {
 		amm = other.amm;
@@ -145,27 +149,31 @@ public:
 	}
 	inline void update_via_hashval(uint64_t const & hash) {
         uint64_t i = hash >> (64 - precision);   // first precision bits are for register id
-        uint8_t rank = leftmost_set_bit(hash & val_mask) - precision;  // then find leading 1 in remaining
+        REG_T rank = leftmost_set_bit(hash & val_mask) - precision;  // then find leading 1 in remaining
         if (rank > registers[i]) {
             registers[i] = rank;
         }
 	}
 
-	double estimate() {
-        double estimate;
+	double estimate() const {
+        double estimate = 0.0;
         double sum = 0.0;
 
         // compute the denominator of the harmonic mean
-        for (uint64_t i = 0; i < nRegisters; i++) {
-          if (registers[i] >= 0)
-            sum += 1.0 / static_cast<double>(1UL << registers[i]);
+        for (size_t i = 0; i < nRegisters; i++) {
+            sum += 1.0 / static_cast<double>(1ULL << registers[i]);
         }
         estimate = amm / sum; // E in the original paper
-        if (estimate <= (5 * nRegisters / 2)) {
-        	sum = linear_count();
-        	return (sum == -1.0) ? estimate : sum;
-        	// don't need below because of 64bit.
+
+        if (estimate <= (5 * (nRegisters >> 1))) {
+        	size_t zeros = count_zeros();
+        	if (zeros > 0) {
+        		std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
+				return linear_count(zeros);
+        	} else
+        		return estimate;
 //        } else if (estimate > (1.0 / 30.0) * pow_2_32) {
+        	// don't need this because of 64bit.
 //            estimate = neg_pow_2_32 * log(1.0 - (estimate / pow_2_32));
         } else
         	return estimate;
@@ -182,21 +190,21 @@ public:
 		}
 	}
 
-	inline double linear_count() {
-        uint64_t zeros = 0;
-        for (uint64_t i = 0; i < nRegisters; i++) {
-            zeros += (registers[i] == -1);
-        }
-        if (zeros != 0) {
-            return static_cast<double>(nRegisters) * std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
-        } else {
-        	return -1.0;
-        }
+	inline uint64_t count_zeros() const {
+		uint64_t zeros = 0;
+		for (size_t i = 0; i < nRegisters; i++) {
+			if (registers[i] == 0) ++zeros;
+		}
+		return zeros;
 	}
 
+	inline double linear_count(uint64_t const & zeros) const {
+		return static_cast<double>(nRegisters) *
+				std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
+	}
 
 	void clear() {
-		registers.fill(0U);
+		registers.fill(static_cast<REG_T>(0));
 	}
 
 };
@@ -210,26 +218,28 @@ public:
 template <typename T, uint8_t precision>
 class hyperloglog64<T, std::hash<T>, precision> {
 
+	  static_assert((precision < (sizeof(T) * 8)) && (precision >= 4) && (precision <= 16),
+			  "precision must be set to lower than sizeof(T) * 8 and in range [4, 16]");
+
 protected:
 	  static constexpr uint8_t data_bits = ((sizeof(T) * 8) > 64) ? 64 : (sizeof(T) * 8);
 	  static constexpr uint8_t value_bits = data_bits - precision;
-	  static constexpr uint8_t lead_zero_bits = 64 - value_bits;
+	  static constexpr uint8_t lead_zero_bits = 64 - value_bits;  // in case sizeof(T) < 8.  exclude reg bits.
 
-	  // register mask is the lower precision number of bits.
+	  // register mask is the upper most precision bits.
   static constexpr uint64_t nRegisters = 0x1UL << precision;
-  static constexpr uint64_t reg_mask = nRegisters - 1;   // trailing bits for
+  static constexpr uint64_t reg_mask = nRegisters - 1;   // need to shift right value_bits first.
   static constexpr uint64_t val_mask = ~(0x0UL) >> lead_zero_bits;
   double amm;
 
-  std::array<int8_t, nRegisters> registers;  // stores count of maximum leading zeros
+	using REG_T = uint8_t;
+	std::array<REG_T, nRegisters> registers;  // stores count of leading zeros
 
   std::hash<T> h;
 
-  static_assert(precision >= 4, "ERROR: precision for hyperloglog should be at least 4.");
-
 public:
-  hyperloglog64() : amm(0.0) {
-    registers.fill(-1);
+  hyperloglog64() {
+    registers.fill(static_cast<REG_T>(0));
 
         switch (precision) {
             case 4:
@@ -280,21 +290,25 @@ public:
         }
   }
 
-  double estimate() {
-        double estimate;
+  double estimate() const {
+        double estimate = 0.0;
         double sum = 0.0;
 
         // compute the denominator of the harmonic mean
-        for (uint64_t i = 0; i < nRegisters; i++) {
-          if (registers[i] > -1)
-            sum += 1.0 / static_cast<double>(1UL << registers[i] );
+        for (size_t i = 0; i < nRegisters; i++) {
+            sum += 1.0 / static_cast<double>(1ULL << registers[i] );
         }
         estimate = amm / sum; // E in the original paper
-        if (estimate <= (5 * nRegisters / 2)) {
-          sum = linear_count();
-          return (sum == -1.0) ? estimate : sum;
-          // don't need below because of 64bit.
+
+        if (estimate <= (5 * (nRegisters >> 1))) {
+        	size_t zeros = count_zeros();
+        	if (zeros > 0) {
+        		std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
+				return linear_count(zeros);
+        	} else
+        		return estimate;
 //        } else if (estimate > (1.0 / 30.0) * pow_2_32) {
+            // don't need below because of 64bit.
 //            estimate = neg_pow_2_32 * log(1.0 - (estimate / pow_2_32));
         } else
           return estimate;
@@ -311,22 +325,22 @@ public:
     }
   }
 
-  inline double linear_count() {
-        uint64_t zeros = 0;
-        for (uint64_t i = 0; i < nRegisters; i++) {
-            zeros += (registers[i] == -1);
-        }
-        if (zeros != 0) {
-            return static_cast<double>(nRegisters) * std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
-        } else {
-          return -1.0;
-        }
-  }
+	inline uint64_t count_zeros() const {
+		uint64_t zeros = 0;
+		for (size_t i = 0; i < nRegisters; i++) {
+			if (registers[i] == 0) ++zeros;
+		}
+		return zeros;
+	}
 
+	inline double linear_count(uint64_t const & zeros) const {
+		return static_cast<double>(nRegisters) *
+				std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
+	}
 
-  void clear() {
-    registers.fill(0U);
-  }
+	void clear() {
+		registers.fill(static_cast<REG_T>(0));
+	}
 
 };
 

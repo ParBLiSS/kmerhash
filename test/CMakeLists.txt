@@ -25,6 +25,8 @@ if (IS_DIRECTORY ${PROJECT_SOURCE_DIR}/test/unit)
 #    kmerhash_add_test(${TEST_NAME} FALSE ${TEST_FILES})
 
     kmerhash_add_test(kmerhash_aux_filter_iter FALSE unit/test_aux_filter_iterator.cpp)
+    kmerhash_add_test(hyperloglog64 FALSE unit/test_hyperloglog64.cpp)
+
 
     kmerhash_add_test(kmerhash_LP FALSE unit/test_hashmap_linearprobe_doubling.cpp)
     kmerhash_add_test(kmerhash_RH FALSE unit/test_hashmap_robinhood_doubling.cpp)
