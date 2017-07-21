@@ -168,7 +168,7 @@ public:
         if (estimate <= (5 * (nRegisters >> 1))) {
         	size_t zeros = count_zeros();
         	if (zeros > 0) {
-        		std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
+//        		std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
 				return linear_count(zeros);
         	} else
         		return estimate;
@@ -303,7 +303,7 @@ public:
         if (estimate <= (5 * (nRegisters >> 1))) {
         	size_t zeros = count_zeros();
         	if (zeros > 0) {
-        		std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
+//        		std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
 				return linear_count(zeros);
         	} else
         		return estimate;

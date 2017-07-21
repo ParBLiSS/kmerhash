@@ -11,6 +11,7 @@
 #include "kmerhash/hashmap_robinhood_offsets_prefetch.hpp"
 #include "kmerhash/robinhood_offset_hashmap.hpp"
 #include "kmerhash/hashmap_linearprobe_doubling.hpp"
+#include "kmerhash/hash.hpp"
 
 #include <robinhood.h>
 #include <marsagliamwc99.h>
@@ -1221,7 +1222,6 @@ std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t time
     MicroBenchmark mb;
     //bench_sequential_insert(hopscotch_map<int, int, H>(), "tessil/hopscotch_map", upTo, times, all_stats);
 
-
 	{
 		::fsc::hashmap_robinhood_doubling<K, V, H> m;
 		bench_sequential_insert_pair(m, mb, "Tony Robinhood 0.9", upTo, times, all_stats);
@@ -1265,6 +1265,7 @@ std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t time
         ::fsc::hashmap_robinhood_offsets<K, V, H> m;
         bench_sequential_insert_pair(m, mb, "Tony RHOffPreNoOverflow 0.9", upTo, times, all_stats);
     }
+
     {
         ::fsc::hashmap_robinhood_offsets<K, V, H> m;
         bench_batch_insert(m, mb, "Tony RHOffPreNoOverflow BATCH 0.9", upTo, times, all_stats);
@@ -1638,18 +1639,32 @@ int main(int argc, char** argv) {
     benchRng<MarsagliaMWC99>("MarsagliaMWC99");
     benchRng<Pcg32>("Pcg32");
 
-    test1_std<RobinHoodInfobytePairNoOverflow::Map<int, int>>(100000);
+//    test1_std<RobinHoodInfobytePairNoOverflow::Map<int, int> >(100000);
+    size_t iterations = 1000;
+    size_t cnt_per_iter = 100 * 1000;
     {
-    auto stats = bench_sequential_insert<int, int, std::hash<size_t>>(100 * 1000, 1000);
-    print(std::cout, stats);
-    std::ofstream fout("out_32_32.txt");
-    print(fout, stats);
+		auto stats64 = bench_sequential_insert<uint64_t, uint32_t, ::fsc::hash::farm<uint64_t> >(cnt_per_iter, iterations);
+		print(std::cout, stats64);
+		std::ofstream fout("datascaling_benchmark_64_32_farmhash.txt");
+		print(fout, stats64);
     }
     {
-    auto stats64 = bench_sequential_insert<uint64_t, uint32_t, std::hash<size_t>>(100 * 1000, 1000);
-    print(std::cout, stats64);
-    std::ofstream fout("out_64_32.txt");
-    print(fout, stats64);
+		auto stats = bench_sequential_insert<int, int, ::fsc::hash::farm<int> >(cnt_per_iter, iterations);
+		print(std::cout, stats);
+		std::ofstream fout("datascaling_benchmark_32_32_farmhash.txt");
+		print(fout, stats);
+    }
+    {
+		auto stats64 = bench_sequential_insert<uint64_t, uint32_t, ::std::hash<uint64_t> >(cnt_per_iter, iterations);
+		print(std::cout, stats64);
+		std::ofstream fout("datascaling_benchmark_64_32_stdhash.txt");
+		print(fout, stats64);
+    }
+    {
+		auto stats = bench_sequential_insert<int, int, ::std::hash<int> >(cnt_per_iter, iterations);
+		print(std::cout, stats);
+		std::ofstream fout("datascaling_benchmark_32_32_stdhash.txt");
+		print(fout, stats);
     }
 #if 0
     for (int i = 0; i < 10; ++i) {

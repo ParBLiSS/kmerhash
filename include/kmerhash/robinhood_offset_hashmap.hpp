@@ -1906,7 +1906,9 @@ public:
 		}
 
 		// estimate the number of unique entries in input.
+#if defined(REPROBE_STAT)
 		double distinct_input_est = hll_local.estimate();
+#endif
 
 		hll_local.merge(hll);
 		double distinct_total_est = hll_local.estimate();
@@ -2625,7 +2627,9 @@ public:
 		}
 
 		// estimate the number of unique entries in input.
+#if defined(REPROBE_STAT)
 		double distinct_input_est = hll_local.estimate();
+#endif
 
 		hll_local.merge(hll);
 		double distinct_total_est = hll_local.estimate();
