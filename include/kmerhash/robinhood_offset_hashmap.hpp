@@ -780,17 +780,28 @@ public:
 		size_type n = next_power_of_2(b);
 
 #if defined(REPROBE_STAT)
-		std::cout << "REHASH current " << buckets << " b " << b << " n " << n << " lsize " << lsize << std::endl;
+		std::cout << "REHASH current " << buckets << " request " << b << " nears 2^x " << n << " lsize " << lsize << std::endl;
 #endif
 
-		//    print();
+		// early termination
+		if (lsize == 0) {
+		  container.resize(n + std::numeric_limits<info_type>::max() + 1);
+		  info_container.resize(n + std::numeric_limits<info_type>::max() + 1, info_empty);
+		  return;
+		}
 
+		size_t max_offset;
 		if ((n != buckets) && (lsize < static_cast<size_type>(max_load_factor * static_cast<double>(n)))) {  // don't resize if lsize is larger than the new max load.
 
 			if ((lsize > 0) && (n < buckets)) {  // down sizing. check if we overflow info
-				while (this->copy_downsize_max_offset(n) > 127)  // if downsizing creates offset > 127, then increase n and check again.
-					n <<= 1;
+				while ((max_offset = this->copy_downsize_max_offset(n)) > 127)  { // if downsizing creates offset > 127, then increase n and check again.
+          n <<= 1;
+//          std::cout << "REHASH DOWN INFO FIELD OVERFLOW. " <<  max_offset << " INCREASE n to " << n << std::endl;
+				}
 			}
+#if defined(REPROBE_STAT)
+    std::cout << "REHASH_final current" << buckets << " request " << b << " nears 2^x " << n << " lsize " << lsize << std::endl;
+#endif
 
 			// if after checking we cannot downsize, then we stop and return.
 			if ( n == buckets )  return;
@@ -834,13 +845,13 @@ protected:
 		assert((target_buckets & (target_buckets - 1)) == 0);   // assert this is a power of 2.
 
 
-		if (target_buckets > buckets) return 0;
+		if (target_buckets >= buckets) return 0;
 
-		size_t id = 0, bid;
+		size_t id = 0, bid = 0;
 
 		//    std::cout << "RESIZE DOWN " << target_buckets << std::endl;
 
-		size_t new_start = 0, new_end = 0;
+		size_t new_end = 0;
 
 		size_t blocks = buckets / target_buckets;
 
@@ -857,30 +868,42 @@ protected:
 
 		// iterate over all matching blocks.  fill one target bucket at a time and immediately fill the target info.
 		for (bid = 0; bid < target_buckets; ++bid) {
-			// starting offset is maximum of bid and prev offset.  (allows handling of empty but offset positions)
-			new_start = std::max(bid, new_end);
-			new_end = new_start;
+			// if end of last bucket offset is higher than current target bucket id, calc the new offset for curr bucket.  else it's a no op.
 
-			for (bl = 0; bl < blocks; ++bl) {
-				id = bid + bl * target_buckets;  // id within each block.
-
-				if (is_normal(info_container[id])) {
-					// get the range
-					new_end += (1 + get_offset(info_container[id + 1]) - get_offset(info_container[id]));
-				}
-			}
-
-			// offset - current bucket id.
-			max_offset = std::max(max_offset, new_start - bid);
+		  if (new_end > bid) {
+		    max_offset = std::max(max_offset, new_end - bid);
+		  } else {
+        new_end = bid;
+		  }
 
 			// early termination
-			if (max_offset > 127) return max_offset;
+			if (max_offset > 127) {
+#if defined(REPROBE_STAT)
+        std::cout << "MAX OFFSET early. " <<  max_offset << " for bucket " << bid << " new end " << new_end << std::endl;
+#endif
+			  return max_offset;
+			}
+
+      for (bl = 0; bl < blocks; ++bl) {
+        id = bid + bl * target_buckets;  // id within each block.
+
+        if (is_normal(info_container[id])) {
+          // get the range
+          new_end += (1 + get_offset(info_container[id + 1]) - get_offset(info_container[id]));
+        }
+      }
+
 		}
+
+#if defined(REPROBE_STAT)
+    std::cout << "MAX OFFSET full. " <<  max_offset << " for bucket " << bid << " new end " << new_end << " target buckets " << target_buckets << std::endl;
+#endif
 
 		//  std::cout << " info: " << (target_buckets - 1) << " info " << static_cast<size_t>(target_info[target_buckets - 1]) << " entry " << target[target_buckets - 1].first << std::endl;
 		// adjust the target_info at the end, in the padding region.
 		// new_end is end of all occupied entries.  target_bucket is the last bid.
-		max_offset = std::max(max_offset, new_end - target_buckets);
+    if (new_end > target_buckets)
+      max_offset = std::max(max_offset, new_end - target_buckets);
 
 		return max_offset;
 	}
@@ -1686,8 +1709,8 @@ protected:
 			std::cout << "checking if rehash needed.  i = " << i << std::endl;
 #endif
 
-			// first check if we need to resize.
-			if (lsize >= max_load) {
+			// first check if we need to resize.  within 1% of
+			if (static_cast<size_t>(static_cast<double>(lsize) * 1.01) >= max_load) {
 				rehash(buckets << 1);
 
 #if defined(REPROBE_STAT)
@@ -2949,13 +2972,13 @@ protected:
 		std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
 
 		//prefetch only if target_buckets is larger than LOOK_AHEAD
-		size_t ii = 0;
+		size_t i = 0;
 		size_t h;
 
 		// prefetch 2*LOOK_AHEAD of the info_container.
-		for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
+		for (Iter it = begin; (i < (2* LOOK_AHEAD)) && (it != end); ++it, ++i) {
 			h =  hash(get_key(it));
-			hashes[ii] = h;
+			hashes[i] = h;
 			// prefetch the info_container entry for ii.
 			_mm_prefetch((const char *)&(info_container[h & mask]), _MM_HINT_T0);
 
@@ -2968,7 +2991,7 @@ protected:
 		size_t id, bid, bid1;
 		Iter it, new_end = begin;
 		std::advance(new_end, (total > (2 * LOOK_AHEAD)) ? (total - (2 * LOOK_AHEAD)) : 0);
-		size_t i = 0;
+		i = 0;
 		constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
 		bucket_id_type found;
 
@@ -2993,7 +3016,7 @@ protected:
 				}
 			}
 
-			found = find_pos_with_hint(get_key(it), id);
+			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);
 			cnt += eval(out, found);  // out is incremented here
 
 			++i;
@@ -3018,7 +3041,7 @@ protected:
 				}
 			}
 
-			found = find_pos_with_hint(get_key(it), id);
+			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);
 			cnt += eval(out, found);  // out is incremented here
 
 			++i;
@@ -3031,7 +3054,7 @@ protected:
 			// first get the bucket id
 			id = hashes[i] & mask;  // target bucket id.
 
-			found = find_pos_with_hint(get_key(it), id);
+			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred	);
 			cnt += eval(out, found);  // out is incremented here
 
 			++i;
@@ -3220,7 +3243,7 @@ public:
 //				}
 //			}
 //
-//			found = find_pos_with_hint(*it, id);
+//			found = find_pos_with_hint(*it, id, out_pred, in_pred);
 //
 //			counts.emplace_back(present(found));
 //		}
@@ -3375,7 +3398,7 @@ public:
 //				}
 //			}
 //
-//			found = find_pos_with_hint((*it).first, id);
+//			found = find_pos_with_hint((*it).first, id, out_pred, in_pred);
 //
 //			if (present(found)) results.emplace_back(container[get_pos(found)]);
 //		}
@@ -3443,7 +3466,7 @@ public:
 //				}
 //			}
 //
-//			found = find_pos_with_hint(*it, id);
+//			found = find_pos_with_hint(*it, id, out_pred, in_pred);
 //
 //			if (present(found)) results.emplace_back(container[get_pos(found)]);
 //		}
@@ -3555,7 +3578,7 @@ public:
 //				}
 //			}
 //
-//			found = find_pos_with_hint((*it).first, id);
+//			found = find_pos_with_hint((*it).first, id, out_pred, in_pred);
 //
 //			if (present(found)) {
 //				if (! std::is_same<reducer, ::fsc::DiscardReducer>::value) container[get_pos(found)].second = r(container[get_pos(found)].second, it->second);
@@ -3573,13 +3596,17 @@ public:
 //	}
 
 
-
 protected:
 	/**
-	 * @brief erases a key.  performs backward shift.  swap at bucket boundaries only.
+	 * @brief erases a key.  performs backward shift using memmove
 	 */
-	size_type erase_and_compact(key_type const & k, bucket_id_type const & bid) {
-		bucket_id_type found = find_pos_with_hint(k, bid);  // get the matching position
+	template <typename OutPredicate = ::bliss::filter::TruePredicate,
+			typename InPredicate = ::bliss::filter::TruePredicate >
+	size_type erase_and_compact(key_type const & k, bucket_id_type const & bid,
+			OutPredicate const & out_pred = OutPredicate(),
+			InPredicate const & in_pred = InPredicate()) {
+
+		bucket_id_type found = find_pos_with_hint(k, bid, out_pred, in_pred);  // get the matching position
 
 		if (missing(found)) {
 			// did not find. done
@@ -3595,7 +3622,8 @@ protected:
 
 		size_type end = find_next_zero_offset_pos(info_container, bid1);
 
-		// debug		std::cout << "erasing " << k << " hash " << bid << " at " << found << " end is " << end << std::endl;
+//		if (end < pos1)
+//		  std::cout << "erasing " << k << " hash " << bid << " at " << found << " pos " << pos << " end is " << end << std::endl;
 
 		// move to backward shift.  move [found+1 ... end-1] to [found ... end - 2].  end is excluded because it has 0 dist.
 		memmove(&(container[pos]), &(container[pos1]), (end - pos1) * sizeof(value_type));
@@ -3614,6 +3642,7 @@ protected:
 		// start from bid+1, end at end - 1.
 		for (size_t i = bid1; i < end; ++i ) {
 			--(info_container[i]);
+			if (get_offset(info_container[i]) == 127) throw std::logic_error("ERROR: should not get 127, indicates an underflow situation.");
 		}
 
 #if defined(REPROBE_STAT)
@@ -3635,13 +3664,17 @@ protected:
 public:
 
 	/// single element erase with key.
-	size_type erase_no_resize(key_type const & k) {
+  template <typename OutPredicate = ::bliss::filter::TruePredicate,
+      typename InPredicate = ::bliss::filter::TruePredicate >
+	size_type erase_no_resize(key_type const & k,
+                            OutPredicate const & out_pred = OutPredicate(),
+                            InPredicate const & in_pred = InPredicate()) {
 #if defined(REPROBE_STAT)
 		reset_reprobe_stats();
 #endif
 		size_t bid = hash(k) & mask;
 
-		size_t erased = erase_and_compact(k, bid);
+		size_t erased = erase_and_compact(k, bid, out_pred, in_pred);
 
 #if defined(REPROBE_STAT)
 		print_reprobe_stats("ERASE 1", 1, erased);
@@ -3650,9 +3683,11 @@ public:
 	}
 
 	/// batch erase with iterator of value pairs.
-	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
-	typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
-	size_type erase_no_resize(Iter begin, Iter end) {
+	template <typename Iter, typename OutPredicate = ::bliss::filter::TruePredicate,
+      typename InPredicate = ::bliss::filter::TruePredicate>
+	size_type erase_no_resize(Iter begin, Iter end,
+	                          OutPredicate const & out_pred = OutPredicate(),
+	                          InPredicate const & in_pred = InPredicate()) {
 
 #if defined(REPROBE_STAT)
 		reset_reprobe_stats();
@@ -3663,51 +3698,93 @@ public:
 		std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
 
 		//prefetch only if target_buckets is larger than LOOK_AHEAD
-		size_t ii = 0;
-		// prefetch 2*LOOK_AHEAD of the info_container.
-		for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
-			hashes[ii] = hash((*it).first);
-			// prefetch the info_container entry for ii.
-			_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+		size_t i = 0;
+		size_t h;
 
-			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
-		}
+		// prefetch 2*LOOK_AHEAD of the info_container.
+    for (Iter it = begin; (i < (2* LOOK_AHEAD)) && (it != end); ++it, ++i) {
+      h =  hash(get_key(it));
+      hashes[i] = h;
+      // prefetch the info_container entry for ii.
+      _mm_prefetch((const char *)&(info_container[h & mask]), _MM_HINT_T0);
+
+      // prefetch container as well - would be NEAR but may not be exact.
+      _mm_prefetch((const char *)&(container[h & mask]), _MM_HINT_T0);
+    }
 
 		size_t total = std::distance(begin, end);
 
 		size_t id, bid, bid1;
-		Iter it2 = begin;
-		std::advance(it2, 2 * LOOK_AHEAD);
-		size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
-		constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
+		Iter it, new_end = begin;
+		std::advance(new_end, (total > (2 * LOOK_AHEAD)) ? (total - (2 * LOOK_AHEAD)) : 0);
+    i = 0;
+    constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
+    bucket_id_type found;
 
-		for (auto it = begin; it != end; ++it, ++it2, ++i, ++i1, ++i2) {
+
+		for (it = begin; it != new_end; ++it) {
 
 			// first get the bucket id
-			id = hashes[i & hash_mask] & mask;  // target bucket id.
+			id = hashes[i] & mask;  // target bucket id.
 
 			// prefetch info_container.
-			if (i2 < total) {
-				ii = i2 & hash_mask;
-				hashes[ii] = hash((*it2).first);
-				_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
-			}
-			// prefetch container
-			if (i1 < total) {
-				bid = hashes[i1 & hash_mask] & mask;
-				if (is_normal(info_container[bid])) {
-					bid1 = bid + 1 + get_offset(info_container[bid + 1]);
-					bid += get_offset(info_container[bid]);
+      h = hash(get_key(it + 2 * LOOK_AHEAD));
+      hashes[i] = h;
+      _mm_prefetch((const char *)&(info_container[h & mask]), _MM_HINT_T0);
 
-					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
-					}
-				}
-			}
+      // prefetch container
+      bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
+      if (is_normal(info_container[bid])) {
+        bid1 = bid + 1 + get_offset(info_container[bid + 1]);
+        bid += get_offset(info_container[bid]);
 
-			erase_and_compact((*it).first, id);
+        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
+          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+        }
+      }
+
+
+			erase_and_compact(get_key(it), id, out_pred, in_pred);
+
+      ++i;
+      i &= hash_mask;
 		}
+
+
+    new_end = begin;
+    std::advance(new_end, (total > LOOK_AHEAD) ? (total - LOOK_AHEAD) : 0);
+    for (; it != new_end; ++it) {
+
+      // first get the bucket id
+      id = hashes[i] & mask;  // target bucket id.
+
+      // prefetch container
+      bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
+      if (is_normal(info_container[bid])) {
+        bid1 = bid + 1 + get_offset(info_container[bid + 1]);
+        bid += get_offset(info_container[bid]);
+
+        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
+          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+        }
+      }
+
+      erase_and_compact(get_key(it), id, out_pred, in_pred);
+
+      ++i;
+      i &= hash_mask;
+    }
+
+    for (; it != end; ++it) {
+
+      // first get the bucket id
+      id = hashes[i] & mask;  // target bucket id.
+
+      erase_and_compact(get_key(it), id, out_pred, in_pred);
+
+      ++i;
+      i &= hash_mask;
+    }
 
 
 #if defined(REPROBE_STAT)
@@ -3716,87 +3793,30 @@ public:
 		return before - lsize;
 	}
 
-	/// batch erase with iterator of keys.
-	template <typename Iter, typename std::enable_if<std::is_constructible<key_type,
-	typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
-	size_type erase_no_resize(Iter begin, Iter end) {
-#if defined(REPROBE_STAT)
-		reset_reprobe_stats();
-#endif
-
-		size_type before = lsize;
-
-		std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
-
-		//prefetch only if target_buckets is larger than LOOK_AHEAD
-		size_t ii = 0;
-		// prefetch 2*LOOK_AHEAD of the info_container.
-		for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
-			hashes[ii] = hash(*it);
-			// prefetch the info_container entry for ii.
-			_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
-
-			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
-		}
-
-		size_t total = std::distance(begin, end);
-
-		size_t id, bid, bid1;
-		Iter it2 = begin;
-		std::advance(it2, 2 * LOOK_AHEAD);
-		size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
-		constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
-
-		for (auto it = begin; it != end; ++it, ++it2, ++i, ++i1, ++i2) {
-
-			// first get the bucket id
-			id = hashes[i & hash_mask] & mask;  // target bucket id.
-
-			// prefetch info_container.
-			if (i2 < total) {
-				ii = i2 & hash_mask;
-				hashes[ii] = hash(*it2);
-				_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
-			}
-			// prefetch container
-			if (i1 < total) {
-				bid = hashes[i1 & hash_mask] & mask;
-				if (is_normal(info_container[bid])) {
-					bid1 = bid + 1 + get_offset(info_container[bid + 1]);
-					bid += get_offset(info_container[bid]);
-
-					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
-					}
-				}
-			}
-
-			erase_and_compact(*it, id);
-		}
-
-#if defined(REPROBE_STAT)
-		print_reprobe_stats("ERASE ITER KEY", std::distance(begin, end), before - lsize);
-#endif
-		return before - lsize;
-	}
 
 	/**
 	 * @brief erases a key.
 	 */
-	size_type erase(key_type const & k) {
+	template <typename OutPredicate = ::bliss::filter::TruePredicate,
+      typename InPredicate = ::bliss::filter::TruePredicate >
+	size_type erase(key_type const & k,
+	                OutPredicate const & out_pred = OutPredicate(),
+	                InPredicate const & in_pred = InPredicate()) {
 
-		size_type res = erase_no_resize(k);
+		size_type res = erase_no_resize(k, out_pred, in_pred);
 
 		if (lsize < min_load) rehash(buckets >> 1);
 
 		return res;
 	}
 
-	template <typename Iter>
-	size_type erase(Iter begin, Iter end) {
+	template <typename Iter, typename OutPredicate = ::bliss::filter::TruePredicate,
+      typename InPredicate = ::bliss::filter::TruePredicate >
+	size_type erase(Iter begin, Iter end,
+	                OutPredicate const & out_pred = OutPredicate(),
+	                InPredicate const & in_pred = InPredicate()) {
 
-		size_type erased = erase_no_resize(begin, end);
+		size_type erased = erase_no_resize(begin, end, out_pred, in_pred);
 
 		if (lsize < min_load) reserve(lsize);
 
