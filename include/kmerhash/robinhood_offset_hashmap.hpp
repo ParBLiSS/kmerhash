@@ -783,12 +783,19 @@ public:
 		std::cout << "REHASH current " << buckets << " request " << b << " nears 2^x " << n << " lsize " << lsize << std::endl;
 #endif
 
-		// early termination
-		if (lsize == 0) {
-		  container.resize(n + std::numeric_limits<info_type>::max() + 1);
-		  info_container.resize(n + std::numeric_limits<info_type>::max() + 1, info_empty);
-		  return;
-		}
+//		// early termination
+//		if (lsize == 0) {
+//		  container.resize(n + std::numeric_limits<info_type>::max() + 1);
+//		  info_container.resize(n + std::numeric_limits<info_type>::max() + 1, info_empty);
+//
+//      buckets = n;
+//      mask = n - 1;
+//
+//      min_load = static_cast<size_type>(static_cast<double>(n) * min_load_factor);
+//      max_load = static_cast<size_type>(static_cast<double>(n) * max_load_factor);
+//
+//		  return;
+//		}
 
 		size_t max_offset;
 		if ((n != buckets) && (lsize < static_cast<size_type>(max_load_factor * static_cast<double>(n)))) {  // don't resize if lsize is larger than the new max load.
@@ -1664,7 +1671,7 @@ protected:
 		} else {
 			std::cout << "STATUS: container alignment on value boundary" << std::endl;
 		}
-		reset_reprobe_stats();
+
 		size_type before = lsize;
 #endif
 		bucket_id_type id, bid1, bid;
@@ -1706,7 +1713,7 @@ protected:
 		while (max2 > i) {
 
 #if defined(REPROBE_STAT)
-			std::cout << "checking if rehash needed.  i = " << i << std::endl;
+			std::cout << "hint: checking if rehash needed.  i = " << i << std::endl;
 #endif
 
 			// first check if we need to resize.  within 1% of
@@ -1820,9 +1827,6 @@ protected:
 		}
 
 
-#if defined(REPROBE_STAT)
-		print_reprobe_stats("INSERT VEC", input_size, (lsize - before));
-#endif
 
 	}
 
@@ -2022,7 +2026,7 @@ public:
 		while (max2 > i) {
 
 #if defined(REPROBE_STAT)
-			std::cout << "checking if rehash needed.  i = " << i << std::endl;
+			std::cout << "sort checking if rehash needed.  i = " << i << std::endl;
 #endif
 
 			// first check if we need to resize.
@@ -2135,7 +2139,7 @@ public:
 
 
 #if defined(REPROBE_STAT)
-		print_reprobe_stats("INSERT VEC", input.size(), (lsize - before));
+		print_reprobe_stats("INSERT SORT", input.size(), (lsize - before));
 #endif
 
 	}
@@ -2204,7 +2208,7 @@ public:
 		while (max2 > i) {
 
 #if defined(REPROBE_STAT)
-			std::cout << "checking if rehash needed.  i = " << i << std::endl;
+			std::cout << "integrated checking if rehash needed.  i = " << i << std::endl;
 #endif
 
 			// first check if we need to resize.
@@ -2620,7 +2624,7 @@ public:
 
 
 #if defined(REPROBE_STAT)
-		print_reprobe_stats("INSERT VEC", input.size(), (lsize - before));
+		print_reprobe_stats("INSERT INTEGRATED", input.size(), (lsize - before));
 #endif
 
 	}
@@ -2742,7 +2746,7 @@ public:
 		while (max2 > i) {
 
 #if defined(REPROBE_STAT)
-			std::cout << "checking if rehash needed.  i = " << i << std::endl;
+			std::cout << "shuffled: checking if rehash needed.  i = " << i << std::endl;
 #endif
 
 			// first check if we need to resize.
@@ -2855,7 +2859,7 @@ public:
 
 
 #if defined(REPROBE_STAT)
-		print_reprobe_stats("INSERT VEC", input.size(), (lsize - before));
+		print_reprobe_stats("INSERT SHUFFLED", input.size(), (lsize - before));
 #endif
 
 	}
