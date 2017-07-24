@@ -61,6 +61,8 @@
 
 
 #include "kmerhash/distributed_robinhood_map.hpp"
+#include "kmerhash/distributed_batched_robinhood_map.hpp"
+
 #include "index/kmer_index.hpp"
 
 #include "utils/benchmark_utils.hpp"
@@ -96,7 +98,7 @@
 #define UNORDERED 46
 #define DENSEHASH 47
 #define ROBINHOOD 48
-#define DISTROBINHOOD 49
+#define ROBINHOOD_BATCHED 49
 
 #define SINGLE 51
 #define CANONICAL 52
@@ -282,9 +284,6 @@ using CountType = uint32_t;
     #elif (pMAP == DENSEHASH)
       using MapType = ::dsc::densehash_multimap<
           KmerType, ValType, MapParams, SpecialKeys>;
-    #elif (pMAP == ROBINHOOD)
-      using MapType = ::dsc::robinhood_multimap<
-          KmerType, ValType, MapParams>;
     #endif
   #elif (pINDEX == COUNT)  // map
     #if (pMAP == DENSEHASH)
@@ -292,6 +291,9 @@ using CountType = uint32_t;
         KmerType, ValType, MapParams, SpecialKeys>;
     #elif (pMAP == ROBINHOOD)
       using MapType = ::dsc::counting_robinhood_map<
+          KmerType, ValType, MapParams>;
+    #elif (pMAP == ROBINHOOD_BATCHED)
+      using MapType = ::dsc::counting_batched_robinhood_map<
           KmerType, ValType, MapParams>;
     #else
       using MapType = ::dsc::counting_unordered_map<

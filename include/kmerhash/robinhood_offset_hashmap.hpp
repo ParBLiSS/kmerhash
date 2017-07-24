@@ -2885,6 +2885,14 @@ protected:
 	inline void copy_value(Iter it, value_type const & val) const {
 		*it = val;
 	}
+  template <typename Iter, typename std::enable_if<
+    std::is_constructible<
+      mapped_type,
+      typename std::iterator_traits<Iter>::value_type >::value,
+    int >::type = 1>
+  inline void copy_value(Iter it, mapped_type const & val) const {
+    *it = val;
+  }
 	template <typename Iter, typename std::enable_if<
 		std::is_constructible<
 			mapped_type,
@@ -2893,7 +2901,14 @@ protected:
 	inline void copy_value(Iter it, value_type const & val) const {
 		*it = val.second;
 	}
-
+  template <typename Iter, typename std::enable_if<
+    std::is_constructible<
+      value_type,
+      typename std::iterator_traits<Iter>::value_type >::value,
+    int >::type = 1>
+  inline void copy_value(Iter it, key_type const & key, mapped_type const & val) const {
+    it = std::make_pair(key, val);
+  }
 
 
 	struct eval_exists {
@@ -2901,13 +2916,29 @@ protected:
 		eval_exists(hashmap_robinhood_offsets_reduction const & _self,
 				container_type const & _cont) : self(_self) {}
 
-		template <typename OutIter>
-		inline uint8_t operator()(OutIter & it, bucket_id_type const & bid) const {
+		template <typename OutIter, typename std::enable_if<
+    std::is_constructible<
+      mapped_type,
+      typename std::iterator_traits<OutIter>::value_type >::value,
+    int >::type = 1>
+		inline uint8_t operator()(OutIter & it, key_type const & k, bucket_id_type const & bid) const {
 			uint8_t rs = self.present(bid);
-			*it = rs;
+			self.copy_value(it, rs);
 			++it;
 			return rs;
 		}
+    template <typename OutIter, typename std::enable_if<
+    std::is_constructible<
+      value_type,
+      typename std::iterator_traits<OutIter>::value_type >::value,
+    int >::type = 1>
+    inline uint8_t operator()(OutIter & it, key_type const & k, bucket_id_type const & bid) const {
+      uint8_t rs = self.present(bid);
+      self.copy_value(it, k, rs);
+      ++it;
+      return rs;
+    }
+
 	};
 	struct eval_find {
 		hashmap_robinhood_offsets_reduction const & self;
@@ -2917,7 +2948,7 @@ protected:
 				container_type const & _cont) : self(_self), cont(_cont) {}
 
 		template <typename OutIter>
-		inline uint8_t operator()(OutIter & it, bucket_id_type const & bid) const {
+		inline uint8_t operator()(OutIter & it, key_type const & k, bucket_id_type const & bid) const {
 			if (self.present(bid)) {
 				self.copy_value(it, cont[self.get_pos(bid)]);
 				++it;
@@ -2938,7 +2969,7 @@ protected:
 		template <typename Iter, typename R = Reduc,
 				typename ::std::enable_if<
 					!std::is_same<R, ::fsc::DiscardReducer>::value, int>::type = 1>
-		inline uint8_t operator()(Iter & it, bucket_id_type const & bid) {
+		inline uint8_t operator()(Iter & it, key_type const & k, bucket_id_type const & bid) {
 			if (self.present(bid)) {
 				cont[self.get_pos(bid)].second =
 						self.reduc(cont[self.get_pos(bid)].second, it->second);
@@ -2949,7 +2980,7 @@ protected:
 		template <typename Iter, typename R = Reduc,
 				typename ::std::enable_if<
 					std::is_same<R, ::fsc::DiscardReducer>::value, int>::type = 1>
-		inline uint8_t operator()(Iter & it, bucket_id_type const & bid) {
+		inline uint8_t operator()(Iter & it, key_type const & k, bucket_id_type const & bid) {
 			return self.present(bid);
 		}
 	};
@@ -3017,7 +3048,7 @@ protected:
 			}
 
 			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);
-			cnt += eval(out, found);  // out is incremented here
+			cnt += eval(out, get_key(it), found);  // out is incremented here
 
 			++i;
 			i &= hash_mask;
@@ -3042,7 +3073,7 @@ protected:
 			}
 
 			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);
-			cnt += eval(out, found);  // out is incremented here
+			cnt += eval(out, get_key(it), found);  // out is incremented here
 
 			++i;
 			i &= hash_mask;
@@ -3055,7 +3086,7 @@ protected:
 			id = hashes[i] & mask;  // target bucket id.
 
 			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred	);
-			cnt += eval(out, found);  // out is incremented here
+			cnt += eval(out, get_key(it), found);  // out is incremented here
 
 			++i;
 			i &= hash_mask;
@@ -3094,7 +3125,7 @@ public:
 	>
 	std::vector<uint8_t> exists(Iter begin, Iter end,
 			OutPredicate const & out_pred = OutPredicate(),
-			InPredicate const & in_pred = InPredicate() ) {
+			InPredicate const & in_pred = InPredicate() ) const {
 
 		eval_exists ev(*this, container);
 
@@ -3109,16 +3140,13 @@ public:
 	}
 
 
-	template <typename Iter, typename OutIter,
+	template <typename OutIter, typename Iter,
 		typename OutPredicate = ::bliss::filter::TruePredicate,
-		typename InPredicate = ::bliss::filter::TruePredicate,
-		typename std::enable_if<std::is_constructible<uint8_t,
-			typename std::iterator_traits<Iter>::value_type >::value,
-			int >::type = 1
+		typename InPredicate = ::bliss::filter::TruePredicate
 	>
-	size_t exists(Iter begin, Iter end, OutIter out,
+	size_t exists(OutIter out, Iter begin, Iter end,
 			OutPredicate const & out_pred = OutPredicate(),
-			InPredicate const & in_pred = InPredicate() ) {
+			InPredicate const & in_pred = InPredicate() ) const {
 
 		eval_exists ev(*this, container);
 
@@ -3135,7 +3163,7 @@ public:
 			OutPredicate const & out_pred = OutPredicate(),
 			InPredicate const & in_pred = InPredicate()  ) const {
 
-		return present(find_pos(k, out_pred, in_pred)) ? 1 : 0;
+		return present(find_pos(k, out_pred, in_pred));
 	}
 
 
@@ -3145,24 +3173,21 @@ public:
 	>
 	std::vector<uint8_t> count(Iter begin, Iter end,
 			OutPredicate const & out_pred = OutPredicate(),
-			InPredicate const & in_pred = InPredicate() ) {
+			InPredicate const & in_pred = InPredicate() ) const {
 
-		return exists(begin, end, out_pred, in_pred);
+		return exists<Iter, OutPredicate, InPredicate>(begin, end, out_pred, in_pred);
 	}
 
 
-	template <typename Iter, typename OutIter,
+	template <typename OutIter, typename Iter,
 		typename OutPredicate = ::bliss::filter::TruePredicate,
-		typename InPredicate = ::bliss::filter::TruePredicate,
-		typename std::enable_if<std::is_constructible<uint8_t,
-			typename std::iterator_traits<OutIter>::value_type >::value,
-			int >::type = 1
+		typename InPredicate = ::bliss::filter::TruePredicate
 	>
-	size_t count(Iter begin, Iter end, OutIter out,
+	size_t count(OutIter out, Iter begin, Iter end,
 			OutPredicate const & out_pred = OutPredicate(),
-			InPredicate const & in_pred = InPredicate() ) {
+			InPredicate const & in_pred = InPredicate() ) const {
 
-		return exists(begin, end, out, out_pred, in_pred);
+		return exists<OutIter, Iter, OutPredicate, InPredicate>(out, begin, end, out_pred, in_pred);
 	}
 
 
@@ -3307,7 +3332,7 @@ public:
 	>
 	std::vector<value_type> find(Iter begin, Iter end,
 			OutPredicate const & out_pred = OutPredicate(),
-			InPredicate const & in_pred = InPredicate() ) {
+			InPredicate const & in_pred = InPredicate() ) const {
 
 		eval_find ev(*this, container);
 
@@ -3322,16 +3347,16 @@ public:
 		return results;
 	}
 
-	template <typename Iter, typename OutIter,
+	template <typename OutIter, typename Iter,
 		typename OutPredicate = ::bliss::filter::TruePredicate,
 		typename InPredicate = ::bliss::filter::TruePredicate,
 		typename std::enable_if<std::is_constructible<value_type,
 			typename std::iterator_traits<OutIter>::value_type >::value,
 		int >::type = 1
 	>
-	size_t find(Iter begin, Iter end, OutIter out,
+	size_t find(OutIter out, Iter begin, Iter end,
 			OutPredicate const & out_pred = OutPredicate(),
-			InPredicate const & in_pred = InPredicate() ) {
+			InPredicate const & in_pred = InPredicate() ) const {
 
 		eval_find ev(*this, container);
 
@@ -3504,7 +3529,7 @@ public:
 	}
 
 
-	template <typename Iter, typename OutIter,
+	template <typename Iter,
 		typename OutPredicate = ::bliss::filter::TruePredicate,
 		typename InPredicate = ::bliss::filter::TruePredicate,
 		typename std::enable_if<std::is_constructible<value_type,
