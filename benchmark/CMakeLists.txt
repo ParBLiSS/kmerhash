@@ -32,6 +32,30 @@ target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
 
 
 
+  add_executable(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM BenchmarkKmerIndex.cpp)
+  SET_TARGET_PROPERTIES(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM
+     PROPERTIES COMPILE_FLAGS 
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=ROBINHOOD -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=FARM -DpStoreHash=FARM -DpCompare")
+  target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM
+   ${EXTRA_LIBS})
+
+  add_executable(testKmerIndex-FASTQ-a4-k31-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhFARM-shFARM BenchmarkKmerIndex.cpp)
+  SET_TARGET_PROPERTIES(testKmerIndex-FASTQ-a4-k31-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhFARM-shFARM
+     PROPERTIES COMPILE_FLAGS 
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=DENSEHASH -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=FARM -DpStoreHash=FARM -DpCompare")
+  target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhFARM-shFARM
+   ${EXTRA_LIBS})
+
+
+  add_executable(testKmerIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM BenchmarkKmerIndex.cpp)
+  SET_TARGET_PROPERTIES(testKmerIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM
+     PROPERTIES COMPILE_FLAGS 
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=ROBINHOOD_BATCHED -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=FARM -DpStoreHash=FARM -DpCompare")
+  target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM
+   ${EXTRA_LIBS})
+
+
+
 add_executable(hash_vs_sort hash_vs_sort.cpp)
 target_link_libraries(hash_vs_sort ${EXTRA_LIBS})
 
