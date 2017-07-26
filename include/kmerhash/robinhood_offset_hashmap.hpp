@@ -1274,7 +1274,7 @@ protected:
 		// return bucket_id_type with info_type of CURRENT info_type
 	 */
 
-	bucket_id_type insert_with_hint(container_type & target,
+	bucket_id_type insert_with_hint_old2(container_type & target,
 			info_container_type & target_info,
 			size_t const & id,
 			value_type const & v) {
@@ -1406,7 +1406,7 @@ protected:
 	}
 
 	// insert with hint, while checking to see if any offset is almost overflowing.
-	bucket_id_type insert_with_hint_new(container_type & target,
+	bucket_id_type insert_with_hint(container_type & target,
 			info_container_type & target_info,
 			size_t const & id,
 			value_type const & v) {
@@ -1748,16 +1748,20 @@ protected:
 					bid += get_offset(info_container[bid]);
 					bid1 += get_offset(info_container[bid1]);
 
-					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
-					}
+//					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
+//						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//					}
+					_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+					if (bid1 > (bid + value_per_cacheline))
+						_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
+
 				}
 
 				// first get the bucket id
-				insert_bid = insert_with_hint_new(container, info_container, *(hashes + i) & mask, *(input + i));
+				insert_bid = insert_with_hint(container, info_container, *(hashes + i) & mask, *(input + i));
 				while (insert_bid == insert_failed) {
 					rehash(buckets << 1);  // resize.
-					insert_bid = insert_with_hint_new(container, info_container, *(hashes + i) & mask, *(input + i));
+					insert_bid = insert_with_hint(container, info_container, *(hashes + i) & mask, *(input + i));
 				}
 				if (missing(insert_bid))
 					++lsize;
@@ -1790,15 +1794,18 @@ protected:
 				bid += get_offset(info_container[bid]);
 				bid1 += get_offset(info_container[bid1]);
 
-				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
-				}
+//				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
+//					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//				}
+				_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+				if (bid1 > (bid + value_per_cacheline))
+					_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
 			}
 
-			insert_bid = insert_with_hint_new(container, info_container, *(hashes + i) & mask, *(input + i));
+			insert_bid = insert_with_hint(container, info_container, *(hashes + i) & mask, *(input + i));
 			while (insert_bid == insert_failed) {
 				rehash(buckets << 1);  // resize.
-				insert_bid = insert_with_hint_new(container, info_container, *(hashes + i) & mask, *(input + i));
+				insert_bid = insert_with_hint(container, info_container, *(hashes + i) & mask, *(input + i));
 			}
 			if (missing(insert_bid))
 				++lsize;
@@ -1814,10 +1821,10 @@ protected:
 
 			// === same code as in insert(1)..
 
-			insert_bid = insert_with_hint_new(container, info_container, *(hashes + i) & mask, *(input + i));
+			insert_bid = insert_with_hint(container, info_container, *(hashes + i) & mask, *(input + i));
 			while (insert_bid == insert_failed) {
 				rehash(buckets << 1);  // resize.
-				insert_bid = insert_with_hint_new(container, info_container, *(hashes + i) & mask, *(input + i));
+				insert_bid = insert_with_hint(container, info_container, *(hashes + i) & mask, *(input + i));
 			}
 			if (missing(insert_bid))
 				++lsize;
@@ -1879,10 +1886,10 @@ public:
 		// first get the bucket id
 		bucket_id_type id = hash(vv.first) & mask;  // target bucket id.
 
-		id = insert_with_hint_new(container, info_container, id, vv);
+		id = insert_with_hint(container, info_container, id, vv);
 		while (id == insert_failed) {
 			rehash(buckets << 1);  // resize.
-			id = insert_with_hint_new(container, info_container, id, vv);
+			id = insert_with_hint(container, info_container, id, vv);
 		}
 		bool success = missing(id);
 		size_t bid = get_pos(id);
@@ -2068,7 +2075,7 @@ public:
 
 				// first get the bucket id
 				id = hashes[i & hash_mask] & mask;  // target bucket id.
-				if (missing(insert_with_hint(container, info_container, id, input[i])))
+				if (missing(insert_with_hint_old2(container, info_container, id, input[i])))
 					++lsize;
 
 				//      std::cout << "insert vec lsize " << lsize << std::endl;
@@ -2111,7 +2118,7 @@ public:
 				}
 			}
 
-			if (missing(insert_with_hint(container, info_container, id, input[i])))
+			if (missing(insert_with_hint_old2(container, info_container, id, input[i])))
 				++lsize;
 
 			//      std::cout << "insert vec lsize " << lsize << std::endl;
@@ -2130,7 +2137,7 @@ public:
 			// first get the bucket id
 			id = hashes[i & hash_mask] & mask;  // target bucket id.
 
-			if (missing(insert_with_hint(container, info_container, id, input[i])))
+			if (missing(insert_with_hint_old2(container, info_container, id, input[i])))
 				++lsize;
 
 			//      std::cout << "insert vec lsize " << lsize << std::endl;
@@ -3046,9 +3053,12 @@ protected:
 				bid1 = bid + 1 + get_offset(info_container[bid + 1]);
 				bid += get_offset(info_container[bid]);
 
-				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
-				}
+//				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
+//					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//				}
+				_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+				if (bid1 > (bid + value_per_cacheline))
+					_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
 			}
 
 			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);
@@ -3071,9 +3081,12 @@ protected:
 				bid1 = bid + 1 + get_offset(info_container[bid + 1]);
 				bid += get_offset(info_container[bid]);
 
-				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
-				}
+//				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
+//					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//				}
+				_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+				if (bid1 > (bid + value_per_cacheline))
+					_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
 			}
 
 			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);
@@ -3767,9 +3780,12 @@ public:
         bid1 = bid + 1 + get_offset(info_container[bid + 1]);
         bid += get_offset(info_container[bid]);
 
-        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
-        }
+//        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
+//          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//        }
+		_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+		if (bid1 > (bid + value_per_cacheline))
+			_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
       }
 
 
@@ -3793,9 +3809,12 @@ public:
         bid1 = bid + 1 + get_offset(info_container[bid + 1]);
         bid += get_offset(info_container[bid]);
 
-        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
-        }
+//        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
+//          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//        }
+		_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+		if (bid1 > (bid + value_per_cacheline))
+			_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
       }
 
       erase_and_compact(get_key(it), id, out_pred, in_pred);
@@ -3923,9 +3942,12 @@ public:
     	  bid1 = bid + 1 + get_offset(info_container[bid + 1]);
         bid += get_offset(info_container[bid]);
 
-        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
-        }
+//        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
+//          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//        }
+		_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+		if (bid1 > (bid + value_per_cacheline))
+			_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
 
         // prefetch at first element of bucket.
         _mm_prefetch((const char *)&(deleted[bid]), _MM_HINT_T0);  // 64  of these in a cacheline
@@ -3960,9 +3982,12 @@ public:
         bid1 = bid + 1 + get_offset(info_container[bid + 1]);
         bid += get_offset(info_container[bid]);
 
-        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
-        }
+//        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
+//          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//        }
+		_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+		if (bid1 > (bid + value_per_cacheline))
+			_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
         _mm_prefetch((const char *)&(deleted[bid]), _MM_HINT_T0);  // 64 * 8 of these in a cacheline.
       }
 
@@ -4001,10 +4026,22 @@ public:
     }
 
 
+
 	// now compact.
 	// note that original info has to "normal"
 	// advance max_pos to next zero.
     max_pos = find_next_zero_offset_pos(info_container, max_pos + 1);  // then get the next zero offset pos from max_pos + 1
+
+    for (i = min_pos; i < std::min(max_pos, min_pos + LOOK_AHEAD); ++i) {
+        _mm_prefetch((const char *)&(info_container[i]), _MM_HINT_T0);
+
+        // prefetch container as well - would be NEAR but may not be exact.
+        _mm_prefetch((const char *)&(container[i]), _MM_HINT_T0);
+
+        _mm_prefetch((const char *)&(deleted[i]), _MM_HINT_T0);
+
+    }
+
 
     // operate between min_pos and max_pos
     // first compact and move the data, bucket by bucket.  do a simple scan
@@ -4018,7 +4055,52 @@ public:
     // iterate between min pos and max pos (which is the last position past max_pos that had a non info_empty or info_normal entry
     // for each occupied bucket, iteratively walk though, compacting compacting each bucket.  the insert position is upshifted to i
     // when there is a stretch of empty buckets.
-    for (size_t i = min_pos; i < max_pos; ++i) {
+    for (i = min_pos; i < std::max(std::max(max_pos, static_cast<size_t>(LOOK_AHEAD)) - static_cast<size_t>(LOOK_AHEAD), min_pos); ++i) {
+    	// NOTE:  not a complete compaction.   offset cannot go below zero.
+
+        _mm_prefetch((const char *)&(info_container[i + LOOK_AHEAD]), _MM_HINT_T0);
+
+        // prefetch container as well - would be NEAR but may not be exact.
+        _mm_prefetch((const char *)&(container[i + LOOK_AHEAD]), _MM_HINT_T0);
+
+        _mm_prefetch((const char *)&(deleted[i + LOOK_AHEAD]), _MM_HINT_T0);
+
+
+    	next_info = info_container[i + 1];
+
+    	insert_start = std::max(insert_pos, i);  // allow skipping over any entries that are empty.
+    	info_container[i] = info_empty + (insert_start - i);
+
+    	if (is_normal(info)) {  // has content.
+
+    		insert_pos = insert_start;
+
+			read_pos = i + get_offset(info);
+			read_end = i + 1 + get_offset(next_info);
+
+//			if (get_offset(deleted[i]) == 0) {
+//				// nothing was deleted from thsi bucket, so do simple copy.
+//				memmove(&(container[insert_pos]), &(container[read_pos]), sizeof(value_type) * (read_end - read_pos));
+//				insert_pos += (read_end - read_pos);
+//			} else {
+				for (; read_pos < read_end; ++read_pos) {
+					if (is_normal(deleted[read_pos])) {  // read_pos entry not deleted.
+						if (insert_pos < read_pos) container[insert_pos] = std::move(container[read_pos]);  // move every one?
+						++insert_pos;
+					}
+				}
+//			}
+			if (insert_start < insert_pos) set_normal(info_container[i]);  // some inserted entries.
+			// else already set as empty.
+
+    	} // else empty bucket, info already set.
+
+    	info = next_info;
+
+    }
+
+
+    for (; i < max_pos; ++i) {
     	// NOTE:  not a complete compaction.   offset cannot go below zero.
 
     	next_info = info_container[i + 1];
@@ -4033,18 +4115,18 @@ public:
 			read_pos = i + get_offset(info);
 			read_end = i + 1 + get_offset(next_info);
 
-			if (get_offset(deleted[i]) == 0) {
-				// nothing was deleted from thsi bucket, so do simple copy.
-				memmove(&(container[insert_pos]), &(container[read_pos]), sizeof(value_type) * (read_end - read_pos));
-				insert_pos += (read_end - read_pos);
-			} else {
+//			if (get_offset(deleted[i]) == 0) {
+//				// nothing was deleted from thsi bucket, so do simple copy.
+//				memmove(&(container[insert_pos]), &(container[read_pos]), sizeof(value_type) * (read_end - read_pos));
+//				insert_pos += (read_end - read_pos);
+//			} else {
 				for (; read_pos < read_end; ++read_pos) {
 					if (is_normal(deleted[read_pos])) {  // read_pos entry not deleted.
 						if (insert_pos < read_pos) container[insert_pos] = std::move(container[read_pos]);  // move every one?
 						++insert_pos;
 					}
 				}
-			}
+//			}
 			if (insert_start < insert_pos) set_normal(info_container[i]);  // some inserted entries.
 			// else already set as empty.
 
@@ -4053,6 +4135,7 @@ public:
     	info = next_info;
 
     }
+
 
 
 #if defined(REPROBE_STAT)
