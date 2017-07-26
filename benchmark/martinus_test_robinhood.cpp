@@ -1235,10 +1235,10 @@ std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t time
 		bench_batch_insert_integrated(m, mb, "Tony Robinhood BATCH integrated 0.9", upTo, times, all_stats);
 	}
 
-	{
-		::fsc::hashmap_robinhood_prefetch<K, V, H> m;
-		bench_sequential_insert_pair(m, mb, "Tony RHPre 0.9", upTo, times, all_stats);
-	}
+//	{
+//		::fsc::hashmap_robinhood_prefetch<K, V, H> m;
+//		bench_sequential_insert_pair(m, mb, "Tony RHPre 0.9", upTo, times, all_stats);
+//	}
 	{
 		::fsc::hashmap_robinhood_prefetch<K, V, H> m;
 		bench_batch_insert(m, mb, "Tony RHPre BATCH 0.9", upTo, times, all_stats);
@@ -1248,10 +1248,10 @@ std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t time
 		bench_batch_insert_integrated(m, mb, "Tony RHPre BATCH integrated 0.9", upTo, times, all_stats);
 	}
 
-    {
-        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H> m;
-        bench_sequential_insert_pair(m, mb, "Tony RHOffPre 0.9", upTo, times, all_stats);
-    }
+//    {
+//        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H> m;
+//        bench_sequential_insert_pair(m, mb, "Tony RHOffPre 0.9", upTo, times, all_stats);
+//    }
     {
         ::fsc::hashmap_robinhood_doubling_offsets<K, V, H> m;
         bench_batch_insert(m, mb, "Tony RHOffPre BATCH 0.9", upTo, times, all_stats);
@@ -1261,11 +1261,10 @@ std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t time
         bench_batch_insert_integrated(m, mb, "Tony RHOffPre BATCH integrated 0.9", upTo, times, all_stats);
     }
 
-    {
-        ::fsc::hashmap_robinhood_offsets<K, V, H> m;
-        bench_sequential_insert_pair(m, mb, "Tony RHOffPreNoOverflow 0.9", upTo, times, all_stats);
-    }
-
+//    {
+//        ::fsc::hashmap_robinhood_offsets<K, V, H> m;
+//        bench_sequential_insert_pair(m, mb, "Tony RHOffPreNoOverflow 0.9", upTo, times, all_stats);
+//    }
     {
         ::fsc::hashmap_robinhood_offsets<K, V, H> m;
         bench_batch_insert(m, mb, "Tony RHOffPreNoOverflow BATCH 0.9", upTo, times, all_stats);
