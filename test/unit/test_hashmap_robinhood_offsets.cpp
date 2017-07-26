@@ -753,7 +753,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 // debug		test.print();
 
 		// now erase half of the entries.
-		test.erase(entries.begin(), entries.begin() + entries.size() / 2);
+		test.erase2(entries.begin(), entries.begin() + entries.size() / 2);
 		for (auto it = entries.begin(); it != entries.begin() + entries.size() / 2; ++it) {
 			gold.erase((*it).first);
 
