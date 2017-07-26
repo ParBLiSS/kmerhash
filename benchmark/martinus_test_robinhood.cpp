@@ -1648,24 +1648,24 @@ int main(int argc, char** argv) {
 		std::ofstream fout("datascaling_benchmark_64_32_farmhash.txt");
 		print(fout, stats64);
     }
-    {
-		auto stats = bench_sequential_insert<int, int, ::fsc::hash::farm<int> >(cnt_per_iter, iterations);
-		print(std::cout, stats);
-		std::ofstream fout("datascaling_benchmark_32_32_farmhash.txt");
-		print(fout, stats);
-    }
-    {
-		auto stats64 = bench_sequential_insert<uint64_t, uint32_t, ::std::hash<uint64_t> >(cnt_per_iter, iterations);
-		print(std::cout, stats64);
-		std::ofstream fout("datascaling_benchmark_64_32_stdhash.txt");
-		print(fout, stats64);
-    }
-    {
-		auto stats = bench_sequential_insert<int, int, ::std::hash<int> >(cnt_per_iter, iterations);
-		print(std::cout, stats);
-		std::ofstream fout("datascaling_benchmark_32_32_stdhash.txt");
-		print(fout, stats);
-    }
+//    {
+//		auto stats = bench_sequential_insert<int, int, ::fsc::hash::farm<int> >(cnt_per_iter, iterations);
+//		print(std::cout, stats);
+//		std::ofstream fout("datascaling_benchmark_32_32_farmhash.txt");
+//		print(fout, stats);
+//    }
+//    {
+//		auto stats64 = bench_sequential_insert<uint64_t, uint32_t, ::std::hash<uint64_t> >(cnt_per_iter, iterations);
+//		print(std::cout, stats64);
+//		std::ofstream fout("datascaling_benchmark_64_32_stdhash.txt");
+//		print(fout, stats64);
+//    }
+//    {
+//		auto stats = bench_sequential_insert<int, int, ::std::hash<int> >(cnt_per_iter, iterations);
+//		print(std::cout, stats);
+//		std::ofstream fout("datascaling_benchmark_32_32_stdhash.txt");
+//		print(fout, stats);
+//    }
 #if 0
     for (int i = 0; i < 10; ++i) {
         uint32_t mask = (1 << (20 + i)) - 1;
