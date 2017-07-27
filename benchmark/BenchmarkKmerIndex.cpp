@@ -557,14 +557,12 @@ int main(int argc, char** argv) {
 		  auto counts = idx.count(lquery);
 		  BL_BENCH_COLLECTIVE_END(test, "count", counts.size(), comm);
 	  }
-#if defined(pCompare)
 	  {
 		  auto lquery = query;
 		  BL_BENCH_START(test);
 		  auto found = idx.find(lquery);
 		  BL_BENCH_COLLECTIVE_END(test, "find", found.size(), comm);
 	  }
-#endif
 #if 0
 	  // separate test because of it being potentially very slow depending on imbalance.
 	  {
@@ -575,13 +573,13 @@ int main(int argc, char** argv) {
 	  BL_BENCH_COLLECTIVE_END(test, "find_collective", found.size(), comm);
 	  }
 #endif
-	    {
-	      auto lquery = query;
-
-	    BL_BENCH_START(test);
-	    auto found = idx.find_overlap(lquery);
-	    BL_BENCH_COLLECTIVE_END(test, "find_overlap", found.size(), comm);
-	    }
+//	    {
+//	      auto lquery = query;
+//
+//	    BL_BENCH_START(test);
+//	    auto found = idx.find_overlap(lquery);
+//	    BL_BENCH_COLLECTIVE_END(test, "find_overlap", found.size(), comm);
+//	    }
     // separate test because of it being potentially very slow depending on imbalance.
 #if 0
     {
