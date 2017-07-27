@@ -1050,6 +1050,8 @@ protected:
 					// now copy
 					pp = std::max(offsets[bl], id);
 					target[pp] = container[p];
+					// TODO: POTENTIAL SAVINGS: no construction cost.
+					//memcpy(&(target[pp]), &(container[p]), sizeof(value_type));
 
 					//    			std::cout << " moved from " << p << " to " << pp << " block " << bl << " with offset " << offsets[bl] << " len " << len[bl] << std::endl;
 
@@ -1965,7 +1967,7 @@ public:
 		std::cout << " estimate input cardinality as " << distinct_input_est << " total after insertion " << distinct_total_est << std::endl;
 #endif
 		// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
-		reserve(static_cast<size_t>(static_cast<double>(distinct_total_est) * 1.0));   // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
+		reserve(static_cast<size_t>(static_cast<double>(distinct_total_est) * (1.0 + hll_local.est_error_rate)));   // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
 
 		// now try to insert.  hashing done already.
 		insert_with_hint(begin, hash_vals, input_size);
@@ -2686,7 +2688,7 @@ public:
 		std::cout << " estimate input cardinality as " << distinct_input_est << " total after insertion " << distinct_total_est << std::endl;
 #endif
 		// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
-		reserve(static_cast<size_t>(static_cast<double>(distinct_total_est) * 1.0));   // this updates the bucket counts also.  overestimate by 10%
+		reserve(static_cast<size_t>(static_cast<double>(distinct_total_est) * (1.0 + hll_local.est_error_rate)));   // this updates the bucket counts also.  overestimate by 10%
 
 
 		// now try to insert.  hashing done already.

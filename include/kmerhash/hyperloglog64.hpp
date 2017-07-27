@@ -90,8 +90,8 @@ class hyperloglog64 {
 
 protected:
 	// don't need because of 64 bit.  0xRRVVVVVV  // high bits: reg.  low: values
-	static constexpr uint64_t val_mask = ~(0x0UL) >> precision;  // e.g. 0x00FFFFFF
-	static constexpr uint64_t nRegisters = 0x1UL << precision;   // e.g. 0x00000100
+	static constexpr uint64_t val_mask = ~(0x0ULL) >> precision;  // e.g. 0x00FFFFFF
+	static constexpr uint64_t nRegisters = 0x1ULL << precision;   // e.g. 0x00000100
 	mutable double amm;
 
 	using REG_T = uint8_t;
@@ -100,6 +100,9 @@ protected:
 	Hash h;
 
 public:
+
+  static constexpr double est_error_rate = 1.04 / static_cast<double>(0x1ULL << (precision >> 1));   // avoid std::sqrt in constexpr.
+
 	hyperloglog64() {
 		registers.fill(static_cast<REG_T>(0));
 
@@ -227,9 +230,10 @@ protected:
 	  static constexpr uint8_t lead_zero_bits = 64 - value_bits;  // in case sizeof(T) < 8.  exclude reg bits.
 
 	  // register mask is the upper most precision bits.
-  static constexpr uint64_t nRegisters = 0x1UL << precision;
+  static constexpr uint64_t nRegisters = 0x1ULL << precision;
   static constexpr uint64_t reg_mask = nRegisters - 1;   // need to shift right value_bits first.
-  static constexpr uint64_t val_mask = ~(0x0UL) >> lead_zero_bits;
+  static constexpr uint64_t val_mask = ~(0x0ULL) >> lead_zero_bits;
+
   double amm;
 
 	using REG_T = uint8_t;
@@ -238,6 +242,9 @@ protected:
   std::hash<T> h;
 
 public:
+  static constexpr double est_error_rate = 1.04 / static_cast<double>(0x1ULL << (precision >> 1));   // avoid std::sqrt in constexpr.
+
+
   hyperloglog64() {
     registers.fill(static_cast<REG_T>(0));
 
