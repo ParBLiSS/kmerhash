@@ -410,12 +410,13 @@ void sample(std::vector<KmerType> &query, size_t n, unsigned int seed, mxx::comm
 }
 
 
+#ifdef VTUNE_ANALYSIS
 
 #define MEASURE_INSERT 1
 #define MEASURE_FIND 2
 #define MEASURE_COUNT 3
 #define MEASURE_ERASE 4
-
+#endif
 
 /**
  *
@@ -454,7 +455,9 @@ int main(int argc, char** argv) {
   std::string queryname(filename);
 
   int sample_ratio = 10;
+#ifdef VTUNE_ANALYSIS
   int measure_mode = MEASURE_INSERT;
+#endif
 
   int reader_algo = -1;
   // Wrap everything in a try block.  Do this every time,
@@ -483,6 +486,7 @@ int main(int argc, char** argv) {
                                  "query-sample", "sampling ratio for the query kmers. default=100",
                                  false, sample_ratio, "int", cmd);
 
+#ifdef VTUNE_ANALYSIS
     std::vector<std::string> measure_modes;
     measure_modes.push_back("insert");
     measure_modes.push_back("find");
@@ -490,7 +494,7 @@ int main(int argc, char** argv) {
     measure_modes.push_back("erase");
     TCLAP::ValuesConstraint<std::string> measureModeVals( measure_modes );
     TCLAP::ValueArg<std::string> measureModeArg("s","measure_mode","function to measure (default insert)",false,"insert",&measureModeVals, cmd);
-
+#endif
 
 
 
@@ -506,6 +510,7 @@ int main(int argc, char** argv) {
     reader_algo = algoArg.getValue();
     sample_ratio = sampleArg.getValue();
 
+#ifdef VTUNE_ANALYSIS
     // set the default for query to filename, and reparse
     std::string measure_mode_str = measureModeArg.getValue();
     std::cout << "Measuring " << measure_mode_str << std::endl;
@@ -518,7 +523,7 @@ int main(int argc, char** argv) {
     } else if (measure_mode_str == "erase") {
       measure_mode = MEASURE_ERASE;
     }
-
+#endif
 
 
     // Do what you intend.
