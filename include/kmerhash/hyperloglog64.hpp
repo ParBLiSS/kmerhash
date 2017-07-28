@@ -70,10 +70,10 @@ static const uint8_t clz_table_4bit[16] = { 4, 3, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 
 inline uint8_t leftmost_set_bit(uint64_t x) {
   if (x == 0) return 65;
   uint8_t n;
-  if ((x & 0xFFFFFFFF00000000UL) == 0) {n  = 32; x <<= 32;} else {n = 0;}
-  if ((x & 0xFFFF000000000000UL) == 0) {n += 16; x <<= 16;}
-  if ((x & 0xFF00000000000000UL) == 0) {n +=  8; x <<=  8;}
-  if ((x & 0xF000000000000000UL) == 0) {n +=  4; x <<=  4;}
+  if ((x & 0xFFFFFFFF00000000ULL) == 0) {n  = 32; x <<= 32;} else {n = 0;}
+  if ((x & 0xFFFF000000000000ULL) == 0) {n += 16; x <<= 16;}
+  if ((x & 0xFF00000000000000ULL) == 0) {n +=  8; x <<=  8;}
+  if ((x & 0xF000000000000000ULL) == 0) {n +=  4; x <<=  4;}
   n += clz_table_4bit[x >> 60];  // 64 - 4
   return n+1;
 }
@@ -262,7 +262,7 @@ public:
                 amm = 0.7213 / (1.0 + 1.079 / nRegisters);
                 break;
         }
-        amm *= static_cast<double>(0x1UL << (precision + precision));
+        amm *= static_cast<double>(0x1ULL << (precision + precision));
   }
 
   hyperloglog64(hyperloglog64 const & other) : amm(other.amm), registers(other.registers) {}

@@ -337,7 +337,7 @@ namespace dsc  // distributed std container
        * @param keys  content will be changed and reordered
        * @param last
        */
-      template <bool remove_duplicate = true, class LocalFind, typename Predicate = ::bliss::filter::TruePredicate>
+      template <bool remove_duplicate = false, class LocalFind, typename Predicate = ::bliss::filter::TruePredicate>
       ::std::vector<::std::pair<Key, T> > find(LocalFind & find_element, ::std::vector<Key>& keys, bool sorted_input = false, Predicate const& pred = Predicate()) const {
           BL_BENCH_INIT(find);
 
@@ -426,13 +426,6 @@ namespace dsc  // distributed std container
 
           } else {
 
-            BL_BENCH_START(find);
-            // keep unique keys
-        	if (remove_duplicate)
-        		::fsc::unique(keys, sorted_input,
-            		typename Base::StoreTransformedFunc(),
-            		typename Base::StoreTransformedEqual());
-            BL_BENCH_END(find, "uniq1", keys.size());
 
             BL_BENCH_START(find);
             results.reserve(keys.size());                   // TODO:  should estimate coverage.
@@ -494,7 +487,7 @@ namespace dsc  // distributed std container
           return results;
       }
 
-      template <bool remove_duplicate = true, class LocalErase, typename Predicate = ::bliss::filter::TruePredicate>
+      template <bool remove_duplicate = false, class LocalErase, typename Predicate = ::bliss::filter::TruePredicate>
       size_t erase(LocalErase & erase_element, ::std::vector<Key>& keys, bool sorted_input, Predicate const& pred) {
           // even if count is 0, still need to participate in mpi calls.  if (keys.size() == 0) return;
           size_t before = this->c.size();
@@ -657,7 +650,7 @@ namespace dsc  // distributed std container
        * @param first
        * @param last
        */
-      template <bool remove_duplicate = true, class Predicate = ::bliss::filter::TruePredicate>
+      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
       ::std::vector<::std::pair<Key, size_type> > count(::std::vector<Key>& keys, bool sorted_input = false,
                                                         Predicate const& pred = Predicate() ) const {
           BL_BENCH_INIT(count);
@@ -735,14 +728,6 @@ namespace dsc  // distributed std container
             BL_BENCH_END(count, "a2a2", results.size());
           } else {
 
-            BL_BENCH_START(count);
-            // keep unique keys
-            if (remove_duplicate)
-				::fsc::unique(keys, sorted_input,
-						typename Base::StoreTransformedFunc(),
-						typename Base::StoreTransformedEqual());
-            BL_BENCH_END(count, "uniq1", keys.size());
-
 
             BL_BENCH_START(count);
             results.reserve(keys.size());                   // TODO:  should estimate coverage.
@@ -787,7 +772,7 @@ namespace dsc  // distributed std container
        * @param first
        * @param last
        */
-      template <bool remove_duplicate = true, class Predicate = ::bliss::filter::TruePredicate>
+      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
       size_t erase(::std::vector<Key>& keys, bool sorted_input = false, Predicate const& pred = Predicate() ) {
           return this->erase<remove_duplicate>(erase_element, keys, sorted_input, pred);
       }
@@ -928,7 +913,7 @@ namespace dsc  // distributed std container
       using Base::unique_size;
 
 
-//      template <bool remove_duplicate = true, class Predicate = ::bliss::filter::TruePredicate>
+//      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
 //      ::std::vector<::std::pair<Key, T> > find_overlap(::std::vector<Key>& keys, bool sorted_input = false,
 //                                               Predicate const& pred = Predicate()) const {
 //          return Base::find_overlap<remove_duplicate>(find_element, keys, sorted_input, pred);
@@ -939,7 +924,7 @@ namespace dsc  // distributed std container
 //                                                          Predicate const& pred = Predicate()) const {
 //          return Base::find_a2a(find_element, keys, sorted_input, pred);
 //      }
-      template <bool remove_duplicate = true, class Predicate = ::bliss::filter::TruePredicate>
+      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
       ::std::vector<::std::pair<Key, T> > find(::std::vector<Key>& keys, bool sorted_input = false,
                                                           Predicate const& pred = Predicate()) const {
           return Base::template find<remove_duplicate>(find_element, keys, sorted_input, pred);
@@ -1119,7 +1104,7 @@ namespace dsc  // distributed std container
 //   * @param keys    content will be changed and reordered.
 //   * @param last
 //   */
-//  template <bool remove_duplicate = true, class LocalFind, typename Predicate = ::bliss::filter::TruePredicate>
+//  template <bool remove_duplicate = false, class LocalFind, typename Predicate = ::bliss::filter::TruePredicate>
 //  ::std::vector<::std::pair<Key, T> > find_overlap(LocalFind & find_element, ::std::vector<Key>& keys, bool sorted_input = false, Predicate const& pred = Predicate()) const {
 //      BL_BENCH_INIT(find);
 //
@@ -1327,12 +1312,12 @@ namespace dsc  // distributed std container
 //      using Base::unique_size;
 //
 //
-//      template <bool remove_duplicate = true, class Predicate = ::bliss::filter::TruePredicate>
+//      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
 //      ::std::vector<::std::pair<Key, T> > find(::std::vector<Key>& keys, bool sorted_input = false,
 //                                               Predicate const& pred = Predicate()) const {
 //          return Base::find_overlap<remove_duplicate>(find_element, keys, sorted_input, pred);
 //      }
-////      template <bool remove_duplicate = true, class Predicate = ::bliss::filter::TruePredicate>
+////      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
 ////      ::std::vector<::std::pair<Key, T> > find(::std::vector<Key>& keys, bool sorted_input = false,
 ////                                                          Predicate const& pred = Predicate()) const {
 ////          return Base::find<remove_duplicate>(find_element, keys, sorted_input, pred);
