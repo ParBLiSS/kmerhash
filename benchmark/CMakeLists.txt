@@ -16,21 +16,6 @@ if (BUILD_BENCHMARKS)
 add_executable(benchmark_hashtables BenchmarkHashTables.cpp)
 target_link_libraries(benchmark_hashtables ${EXTRA_LIBS})
 
-message(STATUS "VTUNE_ANALYSIS set to ${VTUNE_ANALYSIS}")
-if (ENABLE_VTUNE_PROFILING)
-	ADD_LIBRARY(ittnotify STATIC IMPORTED)
-	SET_TARGET_PROPERTIES(ittnotify PROPERTIES
-	    IMPORTED_LOCATION ${VTUNE_LIB})
-	target_link_libraries(benchmark_hashtables ittnotify dl)
-endif(ENABLE_VTUNE_PROFILING)
-
-# EXECUTABLES
-include_directories("${EXT_PROJECTS_DIR}/martinus/src")
-include_directories("${EXT_PROJECTS_DIR}/martinus/src/3rdparty/google")
-add_executable(benchmark_hashtables_martinus martinus_test_robinhood.cpp)
-target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
-
-
 
   add_executable(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM BenchmarkKmerIndex.cpp)
   SET_TARGET_PROPERTIES(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM
@@ -53,6 +38,29 @@ target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
      "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=ROBINHOOD_BATCHED -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=FARM -DpStoreHash=FARM -DpCompare")
   target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM
    ${EXTRA_LIBS})
+
+
+
+
+message(STATUS "VTUNE_ANALYSIS set to ${VTUNE_ANALYSIS}")
+if (ENABLE_VTUNE_PROFILING)
+	ADD_LIBRARY(ittnotify STATIC IMPORTED)
+	SET_TARGET_PROPERTIES(ittnotify PROPERTIES
+	    IMPORTED_LOCATION ${VTUNE_LIB})
+	target_link_libraries(benchmark_hashtables ittnotify dl)
+	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)
+	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)
+	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)
+endif(ENABLE_VTUNE_PROFILING)
+
+# EXECUTABLES
+include_directories("${EXT_PROJECTS_DIR}/martinus/src")
+include_directories("${EXT_PROJECTS_DIR}/martinus/src/3rdparty/google")
+add_executable(benchmark_hashtables_martinus martinus_test_robinhood.cpp)
+target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
+
+
+
 
 
 

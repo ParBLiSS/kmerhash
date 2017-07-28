@@ -73,6 +73,11 @@
 #include "mxx/env.hpp"
 #include "mxx/comm.hpp"
 
+#ifdef VTUNE_ANALYSIS
+#include <ittnotify.h>
+#endif
+
+
 // ================ define preproc macro constants
 // needed as #if can only calculate constant int expressions
 #define FASTA 1
@@ -405,6 +410,13 @@ void sample(std::vector<KmerType> &query, size_t n, unsigned int seed, mxx::comm
 }
 
 
+
+#define MEASURE_INSERT 1
+#define MEASURE_FIND 2
+#define MEASURE_COUNT 3
+#define MEASURE_ERASE 4
+
+
 /**
  *
  * @param argc
@@ -412,6 +424,9 @@ void sample(std::vector<KmerType> &query, size_t n, unsigned int seed, mxx::comm
  * @return
  */
 int main(int argc, char** argv) {
+#ifdef VTUNE_ANALYSIS
+    __itt_pause();
+#endif
 
   //////////////// init logging
   LOG_INIT();
@@ -438,7 +453,8 @@ int main(int argc, char** argv) {
 #endif
   std::string queryname(filename);
 
-  int sample_ratio = 100;
+  int sample_ratio = 10;
+  int measure_mode = MEASURE_INSERT;
 
   int reader_algo = -1;
   // Wrap everything in a try block.  Do this every time,
@@ -467,6 +483,16 @@ int main(int argc, char** argv) {
                                  "query-sample", "sampling ratio for the query kmers. default=100",
                                  false, sample_ratio, "int", cmd);
 
+    std::vector<std::string> measure_modes;
+    measure_modes.push_back("insert");
+    measure_modes.push_back("find");
+    measure_modes.push_back("count");
+    measure_modes.push_back("erase");
+    TCLAP::ValuesConstraint<std::string> measureModeVals( measure_modes );
+    TCLAP::ValueArg<std::string> measureModeArg("s","measure_mode","function to measure (default insert)",false,"insert",&measureModeVals, cmd);
+
+
+
 
     // Parse the argv array.
     cmd.parse( argc, argv );
@@ -481,6 +507,17 @@ int main(int argc, char** argv) {
     sample_ratio = sampleArg.getValue();
 
     // set the default for query to filename, and reparse
+    std::string measure_mode_str = measureModeArg.getValue();
+    std::cout << "Measuring " << measure_mode_str << std::endl;
+    if (measure_mode_str == "insert") {
+      measure_mode = MEASURE_INSERT;
+    } else if (measure_mode_str == "find") {
+      measure_mode = MEASURE_FIND;
+    } else if (measure_mode_str == "count") {
+      measure_mode = MEASURE_COUNT;
+    } else if (measure_mode_str == "erase") {
+      measure_mode = MEASURE_ERASE;
+    }
 
 
 
@@ -541,9 +578,18 @@ int main(int argc, char** argv) {
 	  size_t total = mxx::allreduce(temp.size(), comm);
 	  if (comm.rank() == 0) printf("total size is %lu\n", total);
 
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_INSERT)
+        __itt_resume();
+#endif
+
 	  BL_BENCH_START(test);
 	  idx.insert(temp);
 	  BL_BENCH_COLLECTIVE_END(test, "insert", idx.local_size(), comm);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_INSERT)
+        __itt_pause();
+#endif
 
     total = idx.size();
     if (comm.rank() == 0) printf("total size after insert/rehash is %lu\n", total);
@@ -551,49 +597,48 @@ int main(int argc, char** argv) {
 
   {
 
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT)
+        __itt_resume();
+#endif
 	  {
 		  auto lquery = query;
 		  BL_BENCH_START(test);
 		  auto counts = idx.count(lquery);
 		  BL_BENCH_COLLECTIVE_END(test, "count", counts.size(), comm);
 	  }
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT)
+        __itt_pause();
+#endif
+
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_resume();
+#endif
 	  {
 		  auto lquery = query;
 		  BL_BENCH_START(test);
 		  auto found = idx.find(lquery);
 		  BL_BENCH_COLLECTIVE_END(test, "find", found.size(), comm);
 	  }
-#if 0
-	  // separate test because of it being potentially very slow depending on imbalance.
-	  {
-		  auto lquery = query;
-
-	  BL_BENCH_START(test);
-	  auto found = idx.find_collective(lquery);
-	  BL_BENCH_COLLECTIVE_END(test, "find_collective", found.size(), comm);
-	  }
-#endif
-//	    {
-//	      auto lquery = query;
-//
-//	    BL_BENCH_START(test);
-//	    auto found = idx.find_overlap(lquery);
-//	    BL_BENCH_COLLECTIVE_END(test, "find_overlap", found.size(), comm);
-//	    }
-    // separate test because of it being potentially very slow depending on imbalance.
-#if 0
-    {
-      auto lquery = query;
-
-    BL_BENCH_START(test);
-    auto found = idx.find_sendrecv(lquery);
-    BL_BENCH_COLLECTIVE_END(test, "find_sendrecv", found.size(), comm);
-    }
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_pause();
 #endif
 
+
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ERASE)
+        __itt_resume();
+#endif
 	  BL_BENCH_START(test);
 	  idx.erase(query);
 	  BL_BENCH_COLLECTIVE_END(test, "erase", idx.local_size(), comm);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ERASE)
+        __itt_pause();
+#endif
 
   }
 
