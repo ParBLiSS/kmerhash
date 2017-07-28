@@ -954,7 +954,7 @@ protected:
 					// copy the range.
 					//        std::cout << id << " infos " << static_cast<size_t>(info_container[id]) << "," << static_cast<size_t>(info_container[id + 1]) << ", " <<
 					//        		" copy from " << pos << " to " << new_end << " length " << (endd - pos) << std::endl;
-					memmove(&(target[new_end]), &(container[pos]), sizeof(value_type) * (endd - pos));
+					memmove((target.data() + new_end), (container.data() + pos), sizeof(value_type) * (endd - pos));
 
 					new_end += (endd - pos);
 
@@ -1056,7 +1056,7 @@ protected:
 					pp = std::max(offsets[bl], id);
 					target[pp] = container[p];
 					// TODO: POTENTIAL SAVINGS: no construction cost.
-					//memcpy(&(target[pp]), &(container[p]), sizeof(value_type));
+					//memcpy((target.data() + pp), (container.data() + p), sizeof(value_type));
 
 					//    			std::cout << " moved from " << p << " to " << pp << " block " << bl << " with offset " << offsets[bl] << " len " << len[bl] << std::endl;
 
@@ -1395,7 +1395,7 @@ protected:
 		}
 		// now compact backwards.  first do the container via MEMMOVE
 		// can potentially be optimized to use only swap, if distance is long enough.
-		memmove(&(target[next + 1]), &(target[next]), sizeof(value_type) * (end - next));
+		memmove((target.data() + next + 1), (target.data() + next), sizeof(value_type) * (end - next));
 
 		// that's it.
 		target[next] = v;
@@ -1525,7 +1525,7 @@ protected:
 
 		// now compact backwards.  first do the container via MEMMOVE
 		// can potentially be optimized to use only swap, if distance is long enough.
-		memmove(&(target[next + 1]), &(target[next]), sizeof(value_type) * (end - next));
+		memmove((target.data() + next + 1), (target.data() + next), sizeof(value_type) * (end - next));
 
 		// that's it.
 		target[next] = v;
@@ -1642,7 +1642,7 @@ protected:
 
 		// now compact backwards.  first do the container via MEMMOVE
 		// can potentially be optimized to use only swap, if distance is long enough.
-		memmove(&(target[next + 1]), &(target[next]), sizeof(value_type) * (end - next));
+		memmove((target.data() + next + 1), (target.data() + next), sizeof(value_type) * (end - next));
 		// and increment the infos.
 		for (size_t i = id + 1; i <= end; ++i) {
 			++(target_info[i]);
@@ -1699,15 +1699,15 @@ protected:
 
 			id = *(hashes + ii) & mask;
 			// prefetch the info_container entry for ii.
-      _mm_prefetch(reinterpret_cast<const char *>(&(info_container[id])), _MM_HINT_T0);
+      _mm_prefetch(reinterpret_cast<const char *>(info_container.data() + id), _MM_HINT_T0);
 
-//			_mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(&(info_container[id])) & cache_align_mask), _MM_HINT_T0);
-//			_mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(&(info_container[id + 1])) & cache_align_mask), _MM_HINT_T0);
+//			_mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(info_container.data() + id) & cache_align_mask), _MM_HINT_T0);
+//			_mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(info_container.data() + id + 1) & cache_align_mask), _MM_HINT_T0);
 //			if ((reinterpret_cast<bucket_id_type>(info_container.data() + id + 1) & cache_align_mask) == 0)
-//			  _mm_prefetch((const char *)&(info_container[id + 1]), _MM_HINT_T1);
+//			  _mm_prefetch((const char *)(info_container.data() + id + 1), _MM_HINT_T1);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)&(container[id]), _MM_HINT_T0);
+			_mm_prefetch((const char *)(container.data() + id), _MM_HINT_T0);
 
 		}
 
@@ -1746,9 +1746,9 @@ protected:
 
 			for (; i < lmax; ++i) {
 
-//				_mm_prefetch(reinterpret_cast<const char *>(&(*(hashes + i + 2 * INSERT_LOOK_AHEAD))), _MM_HINT_T0);
+//				_mm_prefetch(reinterpret_cast<const char *>(hashes + i + 2 * INSERT_LOOK_AHEAD), _MM_HINT_T0);
 //				// prefetch input
-//				_mm_prefetch(reinterpret_cast<const char *>(&(*(input + i + 2 * INSERT_LOOK_AHEAD))), _MM_HINT_T0);
+//				_mm_prefetch(reinterpret_cast<const char *>(input + i + 2 * INSERT_LOOK_AHEAD), _MM_HINT_T0);
 
 
 				// prefetch container
@@ -1759,13 +1759,13 @@ protected:
 					bid1 += get_offset(info_container[bid1]);
 
 //					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //					}
-					_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+					_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
 
 					// NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH, bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
 					if (bid1 > (bid + value_per_cacheline))
-						_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
+						_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 
 				}
 
@@ -1781,14 +1781,14 @@ protected:
 				//      std::cout << "insert vec lsize " << lsize << std::endl;
 				// prefetch info_container.
 				bid = *(hashes + i + 2 * INSERT_LOOK_AHEAD) & mask;
-	      _mm_prefetch(reinterpret_cast<const char *>(&(info_container[bid])), _MM_HINT_T0);
-//	      _mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(&(info_container[bid])) & cache_align_mask), _MM_HINT_T0);
-//	      _mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(&(info_container[bid + 1])) & cache_align_mask), _MM_HINT_T0);
+	      _mm_prefetch(reinterpret_cast<const char *>((info_container.data() + bid)), _MM_HINT_T0);
+//	      _mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>((info_container.data() + bid)) & cache_align_mask), _MM_HINT_T0);
+//	      _mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>((info_container.data() + bid + 1)) & cache_align_mask), _MM_HINT_T0);
 //	      if ((reinterpret_cast<bucket_id_type>(info_container.data() + bid + 1) & cache_align_mask) == 0)
-//	        _mm_prefetch((const char *)&(info_container[bid + 1]), _MM_HINT_T1);
+//	        _mm_prefetch((const char *)(info_container.data() + bid + 1), _MM_HINT_T1);
 
 				//            if (((bid + 1) % 64) == info_align)
-				//              _mm_prefetch((const char *)&(info_container[bid + 1]), _MM_HINT_T0);
+				//              _mm_prefetch((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
 			}
 		}
 
@@ -1812,13 +1812,13 @@ protected:
 				bid1 += get_offset(info_container[bid1]);
 
 //				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //				}
-				_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
 
         // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH, bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
 				if (bid1 > (bid + value_per_cacheline))
-					_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
+					_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 			}
 
 			insert_bid = insert_with_hint(container, info_container, *(hashes + i) & mask, *(input + i));
@@ -2032,12 +2032,12 @@ public:
 			hashes[ii] = hash_val;
 			id = hash_val & mask;
 			// prefetch the info_container entry for ii.
-			_mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
+			_mm_prefetch((const char *)(info_container.data() + id), _MM_HINT_T0);
 			//		      if (((id + 1) % 64) == info_align)
-			//		        _mm_prefetch((const char *)&(info_container[id + 1]), _MM_HINT_T0);
+			//		        _mm_prefetch((const char *)(info_container.data() + id + 1), _MM_HINT_T0);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)&(container[id]), _MM_HINT_T0);
+			_mm_prefetch((const char *)(container.data() + id), _MM_HINT_T0);
 
 		}
 
@@ -2075,9 +2075,9 @@ public:
 
 
 			for (; i < lmax; ++i) {
-				_mm_prefetch((const char *)&(hashes[(i + 2 * INSERT_LOOK_AHEAD) & hash_mask]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(hashes.data() + ((i + 2 * INSERT_LOOK_AHEAD) & hash_mask)), _MM_HINT_T0);
 				// prefetch input
-				_mm_prefetch((const char *)&(input[i + 2 * INSERT_LOOK_AHEAD]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(input.data() + i + 2 * INSERT_LOOK_AHEAD), _MM_HINT_T0);
 
 
 				// prefetch container
@@ -2088,7 +2088,7 @@ public:
 					bid1 += get_offset(info_container[bid1]);
 
 					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 					}
 				}
 
@@ -2101,9 +2101,9 @@ public:
 				// prefetch info_container.
 				hash_val = hash(input[(i + 2 * INSERT_LOOK_AHEAD)].first);
 				bid = hash_val & mask;
-				_mm_prefetch((const char *)&(info_container[bid]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(info_container.data() + bid), _MM_HINT_T0);
 				//            if (((bid + 1) % 64) == info_align)
-				//              _mm_prefetch((const char *)&(info_container[bid + 1]), _MM_HINT_T0);
+				//              _mm_prefetch((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
 
 				hashes[(i + 2 * INSERT_LOOK_AHEAD)  & hash_mask] = hash_val;
 			}
@@ -2133,7 +2133,7 @@ public:
 				bid1 += get_offset(info_container[bid1]);
 
 				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 				}
 			}
 
@@ -2205,12 +2205,12 @@ public:
 			hashes[ii] = hash_val;
 			id = hash_val & mask;
 			// prefetch the info_container entry for ii.
-			_mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
+			_mm_prefetch((const char *)(info_container.data() + id), _MM_HINT_T0);
 			//		      if (((id + 1) % 64) == info_align)
-			//		        _mm_prefetch((const char *)&(info_container[id + 1]), _MM_HINT_T0);
+			//		        _mm_prefetch((const char *)(info_container.data() + id + 1), _MM_HINT_T0);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)&(container[id]), _MM_HINT_T0);
+			_mm_prefetch((const char *)(container.data() + id), _MM_HINT_T0);
 
 		}
 
@@ -2255,9 +2255,9 @@ public:
 
 
 			for (; i < lmax; ++i) {
-				_mm_prefetch((const char *)&(hashes[(i + 2 * INSERT_LOOK_AHEAD) & hash_mask]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(hashes.data() + ((i + 2 * INSERT_LOOK_AHEAD) & hash_mask)), _MM_HINT_T0);
 				// prefetch input
-				_mm_prefetch((const char *)&(input[i + 2 * INSERT_LOOK_AHEAD]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(input.data() + i + 2 * INSERT_LOOK_AHEAD), _MM_HINT_T0);
 
 
 				// prefetch container
@@ -2269,7 +2269,7 @@ public:
 					bid1 = id + 1 + get_offset(info_container[id + 1]);
 
 					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 					}
 				}
 
@@ -2357,7 +2357,7 @@ public:
 
 						// now move backwards.  first do the container via MEMMOVE
 						// using only swap creates more memory accesses for small buckets.  not worth it.
-						memmove(&(container[bid1 + 1]), &(container[bid1]), sizeof(value_type) * (eid - bid1));
+						memmove((container.data() + bid1 + 1), (container.data() + bid1), sizeof(value_type) * (eid - bid1));
 
 						// then insert
 						container[bid1] = input[i];
@@ -2385,9 +2385,9 @@ public:
 				// prefetch info_container.
 				hash_val = hash(input[(i + 2 * INSERT_LOOK_AHEAD)].first);
 				id = hash_val & mask;
-				_mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(info_container.data() + id), _MM_HINT_T0);
 				//            if (((bid + 1) % 64) == info_align)
-				//              _mm_prefetch((const char *)&(info_container[bid + 1]), _MM_HINT_T0);
+				//              _mm_prefetch((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
 
 				hashes[(i + 2 * INSERT_LOOK_AHEAD)  & hash_mask] = hash_val;
 			}
@@ -2413,7 +2413,7 @@ public:
 				bid1 = id + 1 + get_offset(info_container[id + 1]);
 
 				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 				}
 			}
 
@@ -2499,7 +2499,7 @@ public:
 
 					// now move backwards.  first do the container via MEMMOVE
 					// using only swap creates more memory accesses for small buckets.  not worth it.
-					memmove(&(container[bid1 + 1]), &(container[bid1]), sizeof(value_type) * (eid - bid1));
+					memmove((container.data() + bid1 + 1), (container.data() + bid1), sizeof(value_type) * (eid - bid1));
 
 					// then insert
 					container[bid1] = input[i];
@@ -2622,7 +2622,7 @@ public:
 
 					// now move backwards.  first do the container via MEMMOVE
 					// using only swap creates more memory accesses for small buckets.  not worth it.
-					memmove(&(container[bid1 + 1]), &(container[bid1]), sizeof(value_type) * (eid - bid1));
+					memmove((container.data() + bid1 + 1), (container.data() + bid1), sizeof(value_type) * (eid - bid1));
 
 					// then insert
 					container[bid1] = input[i];
@@ -2752,12 +2752,12 @@ public:
 			hashes[ii] = hash_val;
 			id = hash_val & mask;
 			// prefetch the info_container entry for ii.
-			_mm_prefetch((const char *)&(info_container[id]), _MM_HINT_T0);
+			_mm_prefetch((const char *)(info_container.data() + id), _MM_HINT_T0);
 			//          if (((id + 1) % 64) == info_align)
-			//            _mm_prefetch((const char *)&(info_container[id + 1]), _MM_HINT_T0);
+			//            _mm_prefetch((const char *)(info_container.data() + id + 1), _MM_HINT_T0);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)&(container[id]), _MM_HINT_T0);
+			_mm_prefetch((const char *)(container.data() + id), _MM_HINT_T0);
 
 		}
 
@@ -2795,9 +2795,9 @@ public:
 
 
 			for (; i < lmax; ++i) {
-				_mm_prefetch((const char *)&(hashes[(i + 2 * INSERT_LOOK_AHEAD) & hash_mask]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(hashes.data() + ((i + 2 * INSERT_LOOK_AHEAD) & hash_mask)), _MM_HINT_T0);
 				// prefetch input
-				_mm_prefetch((const char *)&(input[i + 2 * INSERT_LOOK_AHEAD]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(input.data() + i + 2 * INSERT_LOOK_AHEAD), _MM_HINT_T0);
 
 
 				// prefetch container
@@ -2808,7 +2808,7 @@ public:
 					bid1 += get_offset(info_container[bid1]);
 
 					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 					}
 				}
 
@@ -2821,9 +2821,9 @@ public:
 				// prefetch info_container.
 				hash_val = hash(input[(i + 2 * INSERT_LOOK_AHEAD)].first);
 				bid = hash_val & mask;
-				_mm_prefetch((const char *)&(info_container[bid]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(info_container.data() + bid), _MM_HINT_T0);
 				//            if (((bid + 1) % 64) == info_align)
-				//              _mm_prefetch((const char *)&(info_container[bid + 1]), _MM_HINT_T0);
+				//              _mm_prefetch((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
 
 				hashes[(i + 2 * INSERT_LOOK_AHEAD)  & hash_mask] = hash_val;
 			}
@@ -2853,7 +2853,7 @@ public:
 				bid1 += get_offset(info_container[bid1]);
 
 				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 				}
 			}
 
@@ -3041,10 +3041,10 @@ protected:
 			h =  hash(get_key(it));
 			hashes[i] = h;
 			// prefetch the info_container entry for ii.
-			_mm_prefetch((const char *)&(info_container[h & mask]), _MM_HINT_T0);
+			_mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)&(container[h & mask]), _MM_HINT_T0);
+			_mm_prefetch((const char *)(container.data() + (h & mask)), _MM_HINT_T0);
 		}
 
 		size_t total = std::distance(begin, end);
@@ -3064,7 +3064,7 @@ protected:
 			// prefetch info_container.
 			h = hash(get_key(it + 2 * LOOK_AHEAD));
 			hashes[i] = h;
-			_mm_prefetch((const char *)&(info_container[h & mask]), _MM_HINT_T0);
+			_mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
 			// prefetch container
 			bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
@@ -3073,11 +3073,11 @@ protected:
 				bid += get_offset(info_container[bid]);
 
 //				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //				}
-				_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
 				if (bid1 > (bid + value_per_cacheline))
-					_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
+					_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 			}
 
 			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);
@@ -3101,11 +3101,11 @@ protected:
 				bid += get_offset(info_container[bid]);
 
 //				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//					_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //				}
-				_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+				_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
 				if (bid1 > (bid + value_per_cacheline))
-					_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
+					_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 			}
 
 			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);
@@ -3262,10 +3262,10 @@ public:
 //		for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
 //			hashes[ii] = hash(*it);
 //			// prefetch the info_container entry for ii.
-//			_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+//			_mm_prefetch((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //
 //			// prefetch container as well - would be NEAR but may not be exact.
-//			_mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
+//			_mm_prefetch((const char *)(container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //		}
 //
 //
@@ -3289,7 +3289,7 @@ public:
 //			if (i2 < total) {
 //				ii = i2 & hash_mask;
 //				hashes[ii] = hash(*it2);
-//				_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+//				_mm_prefetch((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //			}
 //			// prefetch container
 //			if (i1 < total) {
@@ -3299,7 +3299,7 @@ public:
 //					bid += get_offset(info_container[bid]);
 //
 //					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //					}
 //				}
 //			}
@@ -3417,10 +3417,10 @@ public:
 //		for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
 //			hashes[ii] = hash((*it).first);
 //			// prefetch the info_container entry for ii.
-//			_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+//			_mm_prefetch((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //
 //			// prefetch container as well - would be NEAR but may not be exact.
-//			_mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
+//			_mm_prefetch((const char *)(container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //		}
 //
 //
@@ -3444,7 +3444,7 @@ public:
 //			if (i2 < total) {
 //				ii = i2 & hash_mask;
 //				hashes[ii] = hash((*it2).first);
-//				_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+//				_mm_prefetch((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //			}
 //			// prefetch container
 //			if (i1 < total) {
@@ -3454,7 +3454,7 @@ public:
 //					bid += get_offset(info_container[bid]);
 //
 //					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //					}
 //				}
 //			}
@@ -3522,7 +3522,7 @@ public:
 //					bid += get_offset(info_container[bid]);
 //
 //					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //					}
 //				}
 //			}
@@ -3634,7 +3634,7 @@ public:
 //					bid += get_offset(info_container[bid]);
 //
 //					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//						_mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //					}
 //				}
 //			}
@@ -3687,7 +3687,7 @@ protected:
 //		  std::cout << "erasing " << k << " hash " << bid << " at " << found << " pos " << pos << " end is " << end << std::endl;
 
 		// move to backward shift.  move [found+1 ... end-1] to [found ... end - 2].  end is excluded because it has 0 dist.
-		memmove(&(container[pos]), &(container[pos1]), (end - pos1) * sizeof(value_type));
+		memmove((container.data() + pos), (container.data() + pos1), (end - pos1) * sizeof(value_type));
 
 
 
@@ -3767,10 +3767,10 @@ public:
       h =  hash(get_key(it));
       hashes[i] = h;
       // prefetch the info_container entry for ii.
-      _mm_prefetch((const char *)&(info_container[h & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
       // prefetch container as well - would be NEAR but may not be exact.
-      _mm_prefetch((const char *)&(container[h & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)(container.data() + (h & mask)), _MM_HINT_T0);
     }
 
 		size_t total = std::distance(begin, end);
@@ -3791,7 +3791,7 @@ public:
 			// prefetch info_container.
       h = hash(get_key(it + 2 * LOOK_AHEAD));
       hashes[i] = h;
-      _mm_prefetch((const char *)&(info_container[h & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
       // prefetch container
       bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
@@ -3800,11 +3800,11 @@ public:
         bid += get_offset(info_container[bid]);
 
 //        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//          _mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //        }
-		_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+		_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
 		if (bid1 > (bid + value_per_cacheline))
-			_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
+			_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
       }
 
 
@@ -3829,11 +3829,11 @@ public:
         bid += get_offset(info_container[bid]);
 
 //        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//          _mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //        }
-		_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+		_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
 		if (bid1 > (bid + value_per_cacheline))
-			_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
+			_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
       }
 
       erase_and_compact(get_key(it), id, out_pred, in_pred);
@@ -3923,12 +3923,12 @@ public:
       h =  hash(get_key(it));
       hashes[i] = h;
       // prefetch the info_container entry for ii.
-      _mm_prefetch((const char *)&(info_container[h & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
       // prefetch container as well - would be NEAR but may not be exact.
-      _mm_prefetch((const char *)&(container[h & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)(container.data() + (h & mask)), _MM_HINT_T0);
 
-      _mm_prefetch((const char *)&(deleted[h & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)(deleted.data() + (h & mask)), _MM_HINT_T0);
     }
 
 		size_t total = std::distance(begin, end);
@@ -3949,27 +3949,27 @@ public:
 			// prefetch info_container.
       h = hash(get_key(it + 2 * LOOK_AHEAD));
       hashes[i] = h;
-      _mm_prefetch((const char *)&(info_container[h & mask]), _MM_HINT_T0);
+      _mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
       // prefetch container
       bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
       if (is_normal(info_container[bid])) {
 
     	  // prefetch at bucket location
-          _mm_prefetch((const char *)&(deleted[bid]), _MM_HINT_T0);  // 64  of these in a cacheline
+          _mm_prefetch((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64  of these in a cacheline
 
     	  bid1 = bid + 1 + get_offset(info_container[bid + 1]);
         bid += get_offset(info_container[bid]);
 
 //        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//          _mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //        }
-		_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+		_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
 		if (bid1 > (bid + value_per_cacheline))
-			_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
+			_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 
         // prefetch at first element of bucket.
-        _mm_prefetch((const char *)&(deleted[bid]), _MM_HINT_T0);  // 64  of these in a cacheline
+        _mm_prefetch((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64  of these in a cacheline
       }
 
 		found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);  // get the matching position
@@ -3997,17 +3997,17 @@ public:
       // prefetch container
       bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
       if (is_normal(info_container[bid])) {
-          _mm_prefetch((const char *)&(deleted[bid]), _MM_HINT_T0);  // 64 * 8 of these in a cacheline.
+          _mm_prefetch((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64 * 8 of these in a cacheline.
         bid1 = bid + 1 + get_offset(info_container[bid + 1]);
         bid += get_offset(info_container[bid]);
 
 //        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//          _mm_prefetch((const char *)&(container[j]), _MM_HINT_T0);
+//          _mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
 //        }
-		_mm_prefetch((const char *)&(container[bid]), _MM_HINT_T0);
+		_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
 		if (bid1 > (bid + value_per_cacheline))
-			_mm_prefetch((const char *)&(container[bid + value_per_cacheline]), _MM_HINT_T1);
-        _mm_prefetch((const char *)&(deleted[bid]), _MM_HINT_T0);  // 64 * 8 of these in a cacheline.
+			_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+        _mm_prefetch((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64 * 8 of these in a cacheline.
       }
 
 		found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);  // get the matching position
@@ -4052,12 +4052,12 @@ public:
     max_pos = find_next_zero_offset_pos(info_container, max_pos + 1);  // then get the next zero offset pos from max_pos + 1
 
     for (i = min_pos; i < std::min(max_pos, min_pos + LOOK_AHEAD); ++i) {
-        _mm_prefetch((const char *)&(info_container[i]), _MM_HINT_T0);
+        _mm_prefetch((const char *)(info_container.data() + i), _MM_HINT_T0);
 
         // prefetch container as well - would be NEAR but may not be exact.
-        _mm_prefetch((const char *)&(container[i]), _MM_HINT_T0);
+        _mm_prefetch((const char *)(container.data() + i), _MM_HINT_T0);
 
-        _mm_prefetch((const char *)&(deleted[i]), _MM_HINT_T0);
+        _mm_prefetch((const char *)(deleted.data() + i), _MM_HINT_T0);
 
     }
 
@@ -4077,12 +4077,12 @@ public:
     for (i = min_pos; i < std::max(std::max(max_pos, static_cast<size_t>(LOOK_AHEAD)) - static_cast<size_t>(LOOK_AHEAD), min_pos); ++i) {
     	// NOTE:  not a complete compaction.   offset cannot go below zero.
 
-        _mm_prefetch((const char *)&(info_container[i + LOOK_AHEAD]), _MM_HINT_T0);
+        _mm_prefetch((const char *)(info_container.data() + i + LOOK_AHEAD), _MM_HINT_T0);
 
         // prefetch container as well - would be NEAR but may not be exact.
-        _mm_prefetch((const char *)&(container[i + LOOK_AHEAD]), _MM_HINT_T0);
+        _mm_prefetch((const char *)(container.data() + i + LOOK_AHEAD), _MM_HINT_T0);
 
-        _mm_prefetch((const char *)&(deleted[i + LOOK_AHEAD]), _MM_HINT_T0);
+        _mm_prefetch((const char *)(deleted.data() + i + LOOK_AHEAD), _MM_HINT_T0);
 
 
     	next_info = info_container[i + 1];
@@ -4099,7 +4099,7 @@ public:
 
 //			if (get_offset(deleted[i]) == 0) {
 //				// nothing was deleted from thsi bucket, so do simple copy.
-//				memmove(&(container[insert_pos]), &(container[read_pos]), sizeof(value_type) * (read_end - read_pos));
+//				memmove((container.data() + insert_pos), (container.data() + read_pos), sizeof(value_type) * (read_end - read_pos));
 //				insert_pos += (read_end - read_pos);
 //			} else {
 				for (; read_pos < read_end; ++read_pos) {
@@ -4136,7 +4136,7 @@ public:
 
 //			if (get_offset(deleted[i]) == 0) {
 //				// nothing was deleted from thsi bucket, so do simple copy.
-//				memmove(&(container[insert_pos]), &(container[read_pos]), sizeof(value_type) * (read_end - read_pos));
+//				memmove((container.data() + insert_pos), (container.data() + read_pos), sizeof(value_type) * (read_end - read_pos));
 //				insert_pos += (read_end - read_pos);
 //			} else {
 				for (; read_pos < read_end; ++read_pos) {
