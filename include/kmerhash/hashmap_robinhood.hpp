@@ -23,8 +23,8 @@
  *  for robin hood hashing
  */
 
-#ifndef KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_HPP_
-#define KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_HPP_
+#ifndef KMERHASH_HASHMAP_ROBINHOOD_HPP_
+#define KMERHASH_HASHMAP_ROBINHOOD_HPP_
 
 #include <vector>   // for vector.
 #include <type_traits> // for is_constructible
@@ -1443,4 +1443,4 @@ public:
 };
 
 }  // namespace fsc
-#endif /* KMERHASH_HASHMAP_ROBINHOOD_DOUBLING_HPP_ */
+#endif /* KMERHASH_HASHMAP_ROBINHOOD_HPP_ */

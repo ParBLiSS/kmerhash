@@ -21,8 +21,8 @@
  *      Author: tpan
  */
 
-#ifndef KMERHASH_HASHMAP_LINEARPROBE_DOUBLING_HPP_
-#define KMERHASH_HASHMAP_LINEARPROBE_DOUBLING_HPP_
+#ifndef KMERHASH_HASHMAP_LINEARPROBE_HPP_
+#define KMERHASH_HASHMAP_LINEARPROBE_HPP_
 
 #include <vector>   // for vector.
 #include <type_traits> // for is_constructible
@@ -1054,4 +1054,4 @@ public:
 };
 
 }  // namespace fsc
-#endif /* KMERHASH_HASHMAP_LINEARPROBE_DOUBLING_HPP_ */
+#endif /* KMERHASH_HASHMAP_LINEARPROBE_HPP_ */

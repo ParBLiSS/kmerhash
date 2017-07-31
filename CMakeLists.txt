@@ -549,6 +549,13 @@ endif()
 
 
 # Reprobe configuration.
+OPTION(ENABLE_PREFETCH "enable prefetching in hashmap" ON)
+if (ENABLE_PREFETCH)
+    add_definitions(-DENABLE_PREFETCH)
+endif(ENABLE_PREFETCH)
+
+
+# Reprobe configuration.
 CMAKE_DEPENDENT_OPTION(REPORT_REPROBES "Report reprobe counts.  Only when ENABLE_PROFILING is set to off" OFF "NOT ENABLE_PROFILING" OFF)
 if (REPORT_REPROBES)
     add_definitions(-DREPROBE_STAT)

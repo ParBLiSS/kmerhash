@@ -454,10 +454,17 @@ int main(int argc, char** argv) {
 #endif
   std::string queryname(filename);
 
-  int sample_ratio = 10;
+  int sample_ratio = 2;
 #ifdef VTUNE_ANALYSIS
   int measure_mode = MEASURE_INSERT;
 #endif
+
+  double max_load = 0.8;
+  double min_load = 0.35;
+  uint8_t insert_prefetch = 8;
+  uint8_t query_prefetch = 16;
+
+
 
   int reader_algo = -1;
   // Wrap everything in a try block.  Do this every time,
@@ -482,9 +489,14 @@ int main(int argc, char** argv) {
                                  "algo", "Reader Algorithm id. Fileloader w/o preload = 2, mmap = 5, posix=7, piio = 10. default is 7.",
                                  false, 7, "int", cmd);
 
-    TCLAP::ValueArg<int> sampleArg("S",
+    TCLAP::ValueArg<int> sampleArg("q",
                                  "query-sample", "sampling ratio for the query kmers. default=100",
                                  false, sample_ratio, "int", cmd);
+
+	  TCLAP::ValueArg<double> maxLoadArg("","max_load","maximum load factor", false, max_load, "double", cmd);
+	  TCLAP::ValueArg<double> minLoadArg("","min_load","minimum load factor", false, min_load, "double", cmd);
+	  TCLAP::ValueArg<unsigned char> insertPrefetchArg("","insert_prefetch","number of elements to prefetch during insert", false, insert_prefetch, "unsigned char", cmd);
+	  TCLAP::ValueArg<unsigned char> queryPrefetchArg("","query_prefetch","number of elements to prefetch during queries", false, query_prefetch, "unsigned char", cmd);
 
 #ifdef VTUNE_ANALYSIS
     std::vector<std::string> measure_modes;
@@ -493,7 +505,7 @@ int main(int argc, char** argv) {
     measure_modes.push_back("count");
     measure_modes.push_back("erase");
     TCLAP::ValuesConstraint<std::string> measureModeVals( measure_modes );
-    TCLAP::ValueArg<std::string> measureModeArg("s","measure_mode","function to measure (default insert)",false,"insert",&measureModeVals, cmd);
+    TCLAP::ValueArg<std::string> measureModeArg("","measured_op","function to measure (default insert)",false,"insert",&measureModeVals, cmd);
 #endif
 
 
@@ -509,6 +521,12 @@ int main(int argc, char** argv) {
     filename = fileArg.getValue();
     reader_algo = algoArg.getValue();
     sample_ratio = sampleArg.getValue();
+
+	  min_load = minLoadArg.getValue();
+	  max_load = maxLoadArg.getValue();
+	  insert_prefetch = insertPrefetchArg.getValue();
+	  query_prefetch = queryPrefetchArg.getValue();
+
 
 #ifdef VTUNE_ANALYSIS
     // set the default for query to filename, and reparse
@@ -540,6 +558,26 @@ int main(int argc, char** argv) {
 
   // ================  read and get file
   IndexType idx(comm);
+
+
+#if (pINDEX == COUNT)  // map
+  #if (pMAP == UNORDERED)
+	  // std unordered.
+	  idx.get_map().get_local_container().max_load_factor(max_load);
+	#elif (pMAP == ORDERED)
+	  // std unordered.
+	  idx.get_map().get_local_container().max_load_factor(max_load);
+  #elif (pMAP == ROBINHOOD)
+    idx.get_map().get_local_container().set_max_load_factor(max_load);
+    idx.get_map().get_local_container().set_min_load_factor(min_load);
+  #elif (pMAP == ROBINHOOD_BATCHED)
+    idx.get_map().get_local_container().set_max_load_factor(max_load);
+    idx.get_map().get_local_container().set_min_load_factor(min_load);
+    idx.get_map().get_local_container().set_insert_lookahead(insert_prefetch);
+    idx.get_map().get_local_container().set_query_lookahead(query_prefetch);
+
+  #endif
+#endif
 
   BL_BENCH_INIT(test);
 

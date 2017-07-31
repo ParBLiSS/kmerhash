@@ -26,10 +26,10 @@
 //#include "containers/hashed_vecmap.hpp"
 #include "containers/densehash_map.hpp"
 
-#include "kmerhash/hashmap_linearprobe_doubling.hpp"
-#include "kmerhash/hashmap_robinhood_doubling.hpp"
+#include "kmerhash/hashmap_linearprobe.hpp"
+#include "kmerhash/hashmap_robinhood.hpp"
 // experimental
-#include "kmerhash/experimental/hashmap_robinhood_noncircular3.hpp"
+#include "kmerhash/experimental/hashmap_robinhood_doubling_noncircular3.hpp"
 //#include "kmerhash/experimental/hashmap_robinhood_doubling_memmove.hpp"
 //#include "kmerhash/experimental/hashmap_robinhood_doubling_offsets2.hpp"
 #include "kmerhash/hashmap_robinhood_offsets_prefetch.hpp"
@@ -142,7 +142,8 @@ void generate_input(std::vector<::std::pair<Kmer, Value> > & output, size_t cons
 
 
 template <typename Kmer, typename Value>
-void benchmark_unordered_map(std::string name, size_t const count, size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
+void benchmark_unordered_map(std::string name, size_t const count, size_t const repeat_rate, size_t const query_frac,
+		double const max_load, ::mxx::comm const & comm) {
   BL_BENCH_INIT(map);
 
   std::vector<Kmer> query;
@@ -150,6 +151,8 @@ void benchmark_unordered_map(std::string name, size_t const count, size_t const 
   BL_BENCH_START(map);
   // no transform involved
   ::std::unordered_map<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false> > map;//(count * 2 / repeat_rate);
+  map.max_load_factor(max_load);
+
   BL_BENCH_END(map, "reserve", count);
 
   {
@@ -209,7 +212,8 @@ void benchmark_unordered_map(std::string name, size_t const count, size_t const 
 
 
 template <typename Kmer, typename Value>
-void benchmark_densehash_map(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
+void benchmark_densehash_map(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac,
+		::mxx::comm const & comm) {
   BL_BENCH_INIT(map);
 
   std::vector<Kmer> query;
@@ -220,6 +224,7 @@ void benchmark_densehash_map(std::string name, size_t const count,  size_t const
 	::bliss::kmer::hash::sparsehash::special_keys<Kmer, false>,
 	::bliss::transform::identity,
 	::bliss::kmer::hash::farm<Kmer, false> > map;//(count * 2 / repeat_rate);
+
   BL_BENCH_END(map, "reserve", count);
 
 
@@ -281,7 +286,8 @@ void benchmark_densehash_map(std::string name, size_t const count,  size_t const
 
 
 template <typename Kmer, typename Value, bool canonical = false>
-void benchmark_densehash_full_map(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
+void benchmark_densehash_full_map(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac,
+		::mxx::comm const & comm) {
   BL_BENCH_INIT(map);
 
   std::vector<Kmer> query;
@@ -427,7 +433,7 @@ void benchmark_flat_hash_map(std::string name, size_t const count,  size_t const
 
 
 template <typename Kmer, typename Value>
-void benchmark_google_densehash_map(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, ::mxx::comm const & comm) {
+void benchmark_google_densehash_map(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, double const max_load, double const min_load, ::mxx::comm const & comm) {
   BL_BENCH_INIT(map);
 
   std::vector<Kmer> query;
@@ -438,9 +444,8 @@ void benchmark_google_densehash_map(std::string name, size_t const count,  size_
 	::bliss::kmer::hash::farm<Kmer, false> > map; //(count * 2 / repeat_rate);
   BL_BENCH_END(map, "reserve", count);
 
-
-  map.max_load_factor(0.6);
-  map.min_load_factor(0.2);
+  map.max_load_factor(max_load);
+  map.min_load_factor(min_load);
 
   ::bliss::kmer::hash::sparsehash::special_keys<Kmer, false> special;
 
@@ -520,7 +525,8 @@ void benchmark_google_densehash_map(std::string name, size_t const count,  size_
 
 template <template <typename, typename, typename, typename, typename> class MAP,
 typename Kmer, typename Value>
-void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, int vector_mode, int measure_mode, ::mxx::comm const & comm) {
+void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, int vector_mode, int measure_mode,
+		double const max_load, double const min_load, ::mxx::comm const & comm) {
   BL_BENCH_INIT(map);
 
   std::vector<Kmer> query;
@@ -533,6 +539,10 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
 
   //MAP_TYPE map(count * 2 / repeat_rate);
   MAP_TYPE map;
+  map.set_max_load_factor(max_load);
+  map.set_min_load_factor(min_load);
+
+
   BL_BENCH_END(map, "reserve", count);
 
   {
@@ -672,9 +682,174 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
 
 
 
+
 template <template <typename, typename, typename, typename, typename> class MAP,
 typename Kmer, typename Value>
-void benchmark_hashmap(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, int vector_mode, int measure_mode, ::mxx::comm const & comm) {
+void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, int vector_mode, int measure_mode,
+		double const max_load, double const min_load, unsigned char const insert_prefetch, unsigned char const query_prefetch, ::mxx::comm const & comm) {
+  BL_BENCH_INIT(map);
+
+  std::vector<Kmer> query;
+
+  BL_BENCH_START(map);
+  // no transform involved.
+  using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
+
+  std::cout << " tuple size " << sizeof(typename MAP_TYPE::value_type) << std::endl;
+
+  //MAP_TYPE map(count * 2 / repeat_rate);
+  MAP_TYPE map;
+  map.set_max_load_factor(max_load);
+  map.set_min_load_factor(min_load);
+
+  map.set_insert_lookahead(insert_prefetch);
+  map.set_query_lookahead(query_prefetch);
+
+
+  BL_BENCH_END(map, "reserve", count);
+
+  {
+    BL_BENCH_START(map);
+    std::vector<::std::pair<Kmer, Value> > input;
+    input.reserve(count);
+    BL_BENCH_END(map, "reserve input", count);
+
+    BL_BENCH_START(map);
+    generate_input(input, count, repeat_rate);
+    query.resize(count / query_frac);
+    std::transform(input.begin(), input.begin() + input.size() / query_frac, query.begin(),
+                   [](::std::pair<Kmer, Value> const & x){
+      return x.first;
+    });
+    BL_BENCH_END(map, "generate input", input.size());
+
+
+    BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ESTIMATE)
+        __itt_resume();
+#endif
+
+	// compute hyperloglog estimate for reference.
+	hyperloglog64<Kmer, ::bliss::kmer::hash::farm<Kmer, false>, 12> hll;
+	for (size_t i = 0; i < input.size(); ++i) {
+		hll.update(input[i].first);
+	}
+
+	double est = hll.estimate();
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ESTIMATE)
+        __itt_pause();
+#endif
+    BL_BENCH_END(map, "estimate", static_cast<size_t>(est));
+
+	std::cout << "insert testing: estimated distinct = " << est << " in " << input.size() << std::endl;
+
+
+    std::string insert_type;
+    if (vector_mode == ITER_MODE) {
+    	insert_type = "insert";
+    } else if (vector_mode == INDEX_MODE) {
+    	insert_type = "v_insert";
+    } else if (vector_mode == INTEGRATED_MODE) {
+        insert_type = "insert_integrated";
+    } else if (vector_mode == SORT_MODE) {
+    	std::cout << "WARNING: SORTING ONLY, NO INSERTION.  4x slower on i5-4300U hashwell with 10M DNA 31-mers even without insertion." << std::endl;
+    	insert_type = "insert_sorted";
+    } else if (vector_mode == SHUFFLE_MODE) {
+    	std::cout << "WARNING: SHUFFLING ONLY, NO INSERTION.  2x slower on i5-4300U hashwell with 10M DNA 31-mers, even without insertion." << std::endl;
+    	insert_type =  "insert_shuffled";
+    } else {
+    	insert_type = "insert";
+    }
+
+    BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_INSERT)
+        __itt_resume();
+#endif
+    if (vector_mode == ITER_MODE) {
+    	map.insert(input.begin(), input.end());
+    } else if (vector_mode == INDEX_MODE) {
+    	map.insert(input);
+    } else if (vector_mode == INTEGRATED_MODE) {
+    	map.insert_integrated(input);
+    } else if (vector_mode == SORT_MODE) {
+    	map.insert_sort(input);
+    } else if (vector_mode == SHUFFLE_MODE) {
+    	map.insert_shuffled(input);
+    } else {
+    	map.insert(input.begin(), input.end());
+    }
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_INSERT)
+        __itt_pause();
+#endif
+    BL_BENCH_END(map, insert_type, map.size());
+  }
+
+  BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_resume();
+#endif
+  auto finds = map.find(query.begin(), query.end());
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_pause();
+#endif
+  BL_BENCH_END(map, "find", finds.size());
+
+  BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT)
+        __itt_resume();
+#endif
+  auto counts = map.count(query.begin(), query.end());
+  //result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT)
+        __itt_pause();
+#endif
+  BL_BENCH_END(map, "count", counts.size());
+
+  BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ERASE)
+        __itt_resume();
+#endif
+  size_t result = map.erase(query.begin(), query.end());
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ERASE)
+        __itt_pause();
+#endif
+  BL_BENCH_END(map, "erase", result);
+
+
+  BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT2)
+        __itt_resume();
+#endif
+  counts = map.count(query.begin(), query.end());
+  //result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT2)
+        __itt_pause();
+#endif
+  BL_BENCH_END(map, "count2", counts.size());
+
+
+  BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
+}
+
+
+
+
+template <template <typename, typename, typename, typename, typename> class MAP,
+typename Kmer, typename Value>
+void benchmark_hashmap(std::string name, size_t const count,  size_t const repeat_rate, size_t const query_frac, int vector_mode, int measure_mode,
+		double const max_load, double const min_load, ::mxx::comm const & comm) {
   BL_BENCH_INIT(map);
 
   std::vector<Kmer> query;
@@ -688,6 +863,10 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 
   //MAP_TYPE map(count * 2 / repeat_rate);
   MAP_TYPE map;
+
+  map.set_max_load_factor(max_load);
+  map.set_min_load_factor(min_load);
+
   BL_BENCH_END(map, "reserve", count);
 
   {
@@ -848,7 +1027,8 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 
 /// parse the parameters.  return int map type, int DNA type, bool full, and bool canonical
 /// size, query frac, repeat rate.  vector mode (input is vector, not iterator.), then measure_func
-std::tuple<int, int, bool, bool, size_t, size_t, size_t, int, int> parse_cmdline(int argc, char** argv) {
+std::tuple<int, int, bool, bool, size_t, size_t, size_t, int, int, double, double, unsigned char, unsigned char>
+parse_cmdline(int argc, char** argv) {
 
 	int map = ROBINHOOD_TYPE;
 	int dna = DNA_TYPE;
@@ -856,12 +1036,16 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, int, int> parse_cmdline
 	bool full = false;
 
 	  size_t count = 100000000;
-	//  size_t count = 100;
-	  size_t query_frac = 10;
+	  size_t query_frac = 2;
 	  size_t repeat_rate = 10;
 
-	  int insert_mode = INDEX_MODE;
+	  int insert_mode = ITER_MODE;
 	  int measure_mode = MEASURE_INSERT;
+
+	  double max_load = 0.8;
+	  double min_load = 0.35;
+	  uint8_t insert_prefetch = 8;
+	  uint8_t query_prefetch = 16;
 
 	// Wrap everything in a try block.  Do this every time,
 	// because exceptions will be thrown for problems.
@@ -882,13 +1066,13 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, int, int> parse_cmdline
 	  allowed.push_back("kmerind");
 	  allowed.push_back("linearprobe");
 	  allowed.push_back("robinhood");
-	  allowed.push_back("robinhood_noncirc");
+//	  allowed.push_back("robinhood_noncirc");
 	  allowed.push_back("robinhood_offset");
       allowed.push_back("robinhood_prefetch");
-	  allowed.push_back("robinhood_offset_sep");
+	  allowed.push_back("robinhood_offset_overflow");
 	  TCLAP::ValuesConstraint<std::string> allowedVals( allowed );
 
-	  TCLAP::ValueArg<std::string> mapArg("m","map_type","type of map to use (default robinhood)",false,"robinhood",&allowedVals, cmd);
+	  TCLAP::ValueArg<std::string> mapArg("m","map_type","type of map to use (default robinhood_offset_overflow)",false,"robinhood_offset_overflow",&allowedVals, cmd);
 
 	  std::vector<std::string> allowed_alphabet;
 	  allowed_alphabet.push_back("dna");
@@ -915,9 +1099,13 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, int, int> parse_cmdline
 
 
 	  TCLAP::ValueArg<size_t> countArg("N","num_elements","number of elements", false, count, "size_t", cmd);
-	  TCLAP::ValueArg<size_t> queryArg("q","query_fraction","percent of count to use for query", false, query_frac, "size_t", cmd);
+	  TCLAP::ValueArg<size_t> queryArg("Q","query_fraction","percent of count to use for query", false, query_frac, "size_t", cmd);
 	  TCLAP::ValueArg<size_t> repeatArg("R","repeate_rate","maximum number of repeats in data", false, repeat_rate, "size_t", cmd);
 
+	  TCLAP::ValueArg<double> maxLoadArg("","max_load","maximum load factor", false, max_load, "double", cmd);
+	  TCLAP::ValueArg<double> minLoadArg("","min_load","minimum load factor", false, min_load, "double", cmd);
+	  TCLAP::ValueArg<unsigned char> insertPrefetchArg("","insert_prefetch","number of elements to prefetch during insert", false, insert_prefetch, "unsigned char", cmd);
+	  TCLAP::ValueArg<unsigned char> queryPrefetchArg("","query_prefetch","number of elements to prefetch during queries", false, query_prefetch, "unsigned char", cmd);
 
 	  std::vector<std::string> measure_modes;
 	  measure_modes.push_back("estimate");
@@ -927,7 +1115,7 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, int, int> parse_cmdline
 	  measure_modes.push_back("erase");
 	  measure_modes.push_back("count2");
 	  TCLAP::ValuesConstraint<std::string> measureModeVals( measure_modes );
-	  TCLAP::ValueArg<std::string> measureModeArg("s","measure_mode","function to measure (default insert)",false,"insert",&measureModeVals, cmd);
+	  TCLAP::ValueArg<std::string> measureModeArg("","measured_op","function to measure (default insert)",false,"insert",&measureModeVals, cmd);
 
 
 	  // Parse the argv array.
@@ -971,6 +1159,12 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, int, int> parse_cmdline
 	  query_frac = queryArg.getValue();
 	  repeat_rate = repeatArg.getValue();
 
+	  min_load = minLoadArg.getValue();
+	  max_load = maxLoadArg.getValue();
+	  insert_prefetch = insertPrefetchArg.getValue();
+	  query_prefetch = queryPrefetchArg.getValue();
+
+
 	  std::string insert_mode_str = insertModeArg.getValue();
 	  if (insert_mode_str == "iter") {
 		  insert_mode = ITER_MODE;
@@ -1009,7 +1203,7 @@ std::tuple<int, int, bool, bool, size_t, size_t, size_t, int, int> parse_cmdline
 	  exit(-1);
 	}
 
-	return std::make_tuple(map, dna, full, canonical, count, query_frac, repeat_rate, insert_mode, measure_mode);
+	return std::make_tuple(map, dna, full, canonical, count, query_frac, repeat_rate, insert_mode, measure_mode, max_load, min_load, insert_prefetch, query_prefetch);
 }
 
 
@@ -1024,13 +1218,20 @@ int main(int argc, char** argv) {
 	bool full = false;
 
 	  size_t count = 100000000;
-	  size_t query_frac = 10;
+	  size_t query_frac = 2;
 	  size_t repeat_rate = 10;
 
-	  int batch_mode = INDEX_MODE;
+	  int batch_mode = ITER_MODE;
 	  int measure = MEASURE_INSERT;
 
-	  std::tie(map, dna, full, canonical, count, query_frac, repeat_rate, batch_mode, measure) = parse_cmdline(argc, argv);
+	  double max_load = 0.8;
+	  double min_load = 0.35;
+	  uint8_t insert_prefetch = 8;
+	  uint8_t query_prefetch = 16;
+
+
+	  std::tie(map, dna, full, canonical, count, query_frac, repeat_rate, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch) =
+			  parse_cmdline(argc, argv);
 
   mxx::env e(argc, argv);
   mxx::comm comm;
@@ -1060,20 +1261,20 @@ int main(int argc, char** argv) {
 	  if (dna == DNA_TYPE) {
 		  if (full) {
 			  BL_BENCH_START(test);
-			  benchmark_unordered_map<FullKmer, size_t>("unordered_map_full", count, repeat_rate, query_frac, comm);
+			  benchmark_unordered_map<FullKmer, size_t>("unordered_map_full", count, repeat_rate, query_frac, max_load, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "unordered_map_full", count, comm);
 		  } else {
 			  BL_BENCH_START(test);
-			  benchmark_unordered_map<Kmer, size_t>("unordered_map_DNA", count, repeat_rate, query_frac, comm);
+			  benchmark_unordered_map<Kmer, size_t>("unordered_map_DNA", count, repeat_rate, query_frac, max_load, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "unordered_map_DNA", count, comm);
 		  }
 	  } else if (dna == DNA5_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_unordered_map<DNA5Kmer, size_t>("unordered_map_DNA5", count, repeat_rate, query_frac, comm);
+		  benchmark_unordered_map<DNA5Kmer, size_t>("unordered_map_DNA5", count, repeat_rate, query_frac, max_load, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "unordered_map_DNA5", count, comm);
 	  } else if (dna == DNA16_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_unordered_map<DNA16Kmer, size_t>("unordered_map_DNA16", count, repeat_rate, query_frac, comm);
+		  benchmark_unordered_map<DNA16Kmer, size_t>("unordered_map_DNA16", count, repeat_rate, query_frac, max_load, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "unordered_map_DNA16", count, comm);
 	  } else {
 
@@ -1087,7 +1288,8 @@ int main(int argc, char** argv) {
 		  if (full) {
 			  if (canonical) {
 				  BL_BENCH_START(test);
-				  benchmark_densehash_full_map<FullKmer, size_t, true>("densehash_full_map_canonical", count, repeat_rate, query_frac, comm);
+				  benchmark_densehash_full_map<FullKmer, size_t, true>("densehash_full_map_canonical", count, repeat_rate, query_frac,
+						  comm);
 				  BL_BENCH_COLLECTIVE_END(test, "densehash_full_map_canonical", count, comm);
 			  } else {
 				  BL_BENCH_START(test);
@@ -1119,20 +1321,20 @@ int main(int argc, char** argv) {
 	  if (dna == DNA_TYPE) {
 		  if (full) {
 			  BL_BENCH_START(test);
-			  benchmark_google_densehash_map<FullKmer, size_t>("benchmark_google_densehash_map_Full", count, repeat_rate, query_frac, comm);
+			  benchmark_google_densehash_map<FullKmer, size_t>("benchmark_google_densehash_map_Full", count, repeat_rate, query_frac, max_load, min_load, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "benchmark_google_densehash_map_Full", count, comm);
 		  } else {
 			  BL_BENCH_START(test);
-			  benchmark_google_densehash_map<Kmer, size_t>("benchmark_google_densehash_map_DNA", count, repeat_rate, query_frac, comm);
+			  benchmark_google_densehash_map<Kmer, size_t>("benchmark_google_densehash_map_DNA", count, repeat_rate, query_frac, max_load, min_load, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "benchmark_google_densehash_map_DNA", count, comm);
 		  }
 	  } else if (dna == DNA5_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_google_densehash_map<DNA5Kmer, size_t>("benchmark_google_densehash_map_DNA5", count, repeat_rate, query_frac, comm);
+		  benchmark_google_densehash_map<DNA5Kmer, size_t>("benchmark_google_densehash_map_DNA5", count, repeat_rate, query_frac, max_load, min_load, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "benchmark_google_densehash_map_DNA5", count, comm);
 	  } else if (dna == DNA16_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_google_densehash_map<DNA16Kmer, size_t>("benchmark_google_densehash_map_DNA16", count, repeat_rate, query_frac, comm);
+		  benchmark_google_densehash_map<DNA16Kmer, size_t>("benchmark_google_densehash_map_DNA16", count, repeat_rate, query_frac, max_load, min_load, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "benchmark_google_densehash_map_DNA16", count, comm);
 	  } else {
 
@@ -1145,20 +1347,24 @@ int main(int argc, char** argv) {
 	  if (dna == DNA_TYPE) {
 		  if (full) {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap< ::fsc::hashmap_linearprobe_doubling, FullKmer, size_t>("hashmap_linearprobe_doubling_Full", count, repeat_rate, query_frac, batch_mode, measure, comm);
+			  benchmark_hashmap< ::fsc::hashmap_linearprobe_doubling, FullKmer, size_t>("hashmap_linearprobe_doubling_Full", count, repeat_rate, query_frac, batch_mode, measure,
+					  max_load, min_load, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_linearprobe_doubling_Full", count, comm);
 		  } else {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap< ::fsc::hashmap_linearprobe_doubling, Kmer, size_t>("hashmap_linearprobe_doubling_DNA", count, repeat_rate, query_frac, batch_mode, measure, comm);
+			  benchmark_hashmap< ::fsc::hashmap_linearprobe_doubling, Kmer, size_t>("hashmap_linearprobe_doubling_DNA", count, repeat_rate, query_frac, batch_mode, measure,
+					  max_load, min_load, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_linearprobe_doubling_DNA", count, comm);
 		  }
 	  } else if (dna == DNA5_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap< ::fsc::hashmap_linearprobe_doubling, DNA5Kmer, size_t>("hashmap_linearprobe_doubling_DNA5", count, repeat_rate, query_frac, batch_mode, measure, comm);
+		  benchmark_hashmap< ::fsc::hashmap_linearprobe_doubling, DNA5Kmer, size_t>("hashmap_linearprobe_doubling_DNA5", count, repeat_rate, query_frac, batch_mode, measure,
+				  max_load, min_load, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_linearprobe_doubling_DNA5", count, comm);
 	  } else if (dna == DNA16_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap< ::fsc::hashmap_linearprobe_doubling, DNA16Kmer, size_t>("hashmap_linearprobe_doubling_DNA16", count, repeat_rate, query_frac, batch_mode, measure, comm);
+		  benchmark_hashmap< ::fsc::hashmap_linearprobe_doubling, DNA16Kmer, size_t>("hashmap_linearprobe_doubling_DNA16", count, repeat_rate, query_frac, batch_mode, measure,
+				  max_load, min_load, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_linearprobe_doubling_DNA16", count, comm);
 	  } else {
 
@@ -1172,53 +1378,29 @@ int main(int argc, char** argv) {
 	  if (dna == DNA_TYPE) {
 		  if (full) {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, FullKmer, size_t>("hashmap_robinhood_doubling_Full", count, repeat_rate, query_frac, batch_mode, measure, comm);
+			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, FullKmer, size_t>("hashmap_robinhood_doubling_Full", count, repeat_rate, query_frac, batch_mode, measure,
+					  max_load, min_load, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_Full", count, comm);
 		  } else {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, Kmer, size_t>("hashmap_robinhood_doubling_DNA", count, repeat_rate, query_frac, batch_mode, measure, comm);
+			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, Kmer, size_t>("hashmap_robinhood_doubling_DNA", count, repeat_rate, query_frac, batch_mode, measure,
+					  max_load, min_load, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_DNA", count, comm);
 		  }
 	  } else if (dna == DNA5_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, DNA5Kmer, size_t>("hashmap_robinhood_doubling_DNA5", count, repeat_rate, query_frac, batch_mode, measure, comm);
+		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, DNA5Kmer, size_t>("hashmap_robinhood_doubling_DNA5", count, repeat_rate, query_frac, batch_mode, measure,
+				  max_load, min_load, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_DNA5", count, comm);
 	  } else if (dna == DNA16_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, DNA16Kmer, size_t>("hashmap_robinhood_doubling_DNA16", count, repeat_rate, query_frac, batch_mode, measure, comm);
+		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling, DNA16Kmer, size_t>("hashmap_robinhood_doubling_DNA16", count, repeat_rate, query_frac, batch_mode, measure,
+				  max_load, min_load, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_DNA16", count, comm);
 	  } else {
 
 		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 	  }
-
-  } else if (map == ROBINHOOD_NONCIRC_TYPE) {
-
-	    // experimental...
-	    //================ my new hashmap non_circular
-	  if (dna == DNA_TYPE) {
-		  if (full) {
-			  BL_BENCH_START(test);
-			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, FullKmer, size_t>("hashmap_robinhood_doubling_noncirc_Full", count, repeat_rate, query_frac, batch_mode, measure, comm);
-			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_Full", count, comm);
-		  } else {
-			  BL_BENCH_START(test);
-			  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, Kmer, size_t>("hashmap_robinhood_doubling_noncirc_DNA", count, repeat_rate, query_frac, batch_mode, measure, comm);
-			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_DNA", count, comm);
-		  }
-	  } else if (dna == DNA5_TYPE) {
-		  BL_BENCH_START(test);
-		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, DNA5Kmer, size_t>("hashmap_robinhood_doubling_noncirc_DNA5", count, repeat_rate, query_frac, batch_mode, measure, comm);
-		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_DNA5", count, comm);
-	  } else if (dna == DNA16_TYPE) {
-		  BL_BENCH_START(test);
-		  benchmark_hashmap< ::fsc::hashmap_robinhood_doubling_noncircular, DNA16Kmer, size_t>("hashmap_robinhood_doubling_noncirc_DNA16", count, repeat_rate, query_frac, batch_mode, measure, comm);
-		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_noncirc_DNA16", count, comm);
-	  } else {
-
-		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
-	  }
-
 
   } else if (map == ROBINHOOD_OFFSET_TYPE) {
 
@@ -1226,20 +1408,24 @@ int main(int argc, char** argv) {
 	  if (dna == DNA_TYPE) {
 		  if (full) {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, FullKmer, size_t>("hashmap_robinhood_doubling_offsets_Full", count, repeat_rate, query_frac, batch_mode, measure, comm);
+			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, FullKmer, size_t>("hashmap_robinhood_doubling_offsets_Full", count, repeat_rate, query_frac, batch_mode, measure,
+					  max_load, min_load, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_Full", count, comm);
 		  } else {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA", count, repeat_rate, query_frac, batch_mode, measure, comm);
+			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA", count, repeat_rate, query_frac, batch_mode, measure,
+					  max_load, min_load, comm);
 			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA", count, comm);
 		  }
 	  } else if (dna == DNA5_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, DNA5Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA5", count, repeat_rate, query_frac, batch_mode, measure, comm);
+		  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, DNA5Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA5", count, repeat_rate, query_frac, batch_mode, measure,
+				  max_load, min_load, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA5", count, comm);
 	  } else if (dna == DNA16_TYPE) {
 		  BL_BENCH_START(test);
-		  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, DNA16Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA16", count, repeat_rate, query_frac, batch_mode, measure, comm);
+		  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_doubling_offsets, DNA16Kmer, size_t>("hashmap_robinhood_doubling_offsets_DNA16", count, repeat_rate, query_frac, batch_mode, measure,
+				  max_load, min_load, comm);
 		  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_doubling_offsets_DNA16", count, comm);
 	  } else {
 
@@ -1251,21 +1437,21 @@ int main(int argc, char** argv) {
 		  if (dna == DNA_TYPE) {
 			  if (full) {
 				  BL_BENCH_START(test);
-				  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_offsets, FullKmer, size_t>("hashmap_robinhood_offsets_Full", count, repeat_rate, query_frac, batch_mode, measure, comm);
-				  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_Full", count, comm);
+				  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_offsets, FullKmer, size_t>("hashmap_robinhood_offsets_nooverflow_Full", count, repeat_rate, query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+				  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_nooverflow_Full", count, comm);
 			  } else {
 				  BL_BENCH_START(test);
-				  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_offsets, Kmer, size_t>("hashmap_robinhood_offsets_DNA", count, repeat_rate, query_frac, batch_mode, measure, comm);
-				  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_DNA", count, comm);
+				  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_offsets, Kmer, size_t>("hashmap_robinhood_offsets_nooverflow_DNA", count, repeat_rate, query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+				  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_nooverflow_DNA", count, comm);
 			  }
 		  } else if (dna == DNA5_TYPE) {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_offsets, DNA5Kmer, size_t>("hashmap_robinhood_offsets_DNA5", count, repeat_rate, query_frac, batch_mode, measure, comm);
-			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_DNA5", count, comm);
+			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_offsets, DNA5Kmer, size_t>("hashmap_robinhood_offsets_nooverflow_DNA5", count, repeat_rate, query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_nooverflow_DNA5", count, comm);
 		  } else if (dna == DNA16_TYPE) {
 			  BL_BENCH_START(test);
-			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_offsets, DNA16Kmer, size_t>("hashmap_robinhood_offsets_DNA16", count, repeat_rate, query_frac, batch_mode, measure, comm);
-			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_DNA16", count, comm);
+			  benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_offsets, DNA16Kmer, size_t>("hashmap_robinhood_offsets_nooverflow_DNA16", count, repeat_rate, query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+			  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_nooverflow_DNA16", count, comm);
 		  } else {
 
 			  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
@@ -1277,20 +1463,24 @@ int main(int argc, char** argv) {
     if (dna == DNA_TYPE) {
       if (full) {
         BL_BENCH_START(test);
-        benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, FullKmer, size_t>("hashmap_robinhood_prefetch_Full", count, repeat_rate, query_frac, batch_mode, measure, comm);
+        benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, FullKmer, size_t>("hashmap_robinhood_prefetch_Full", count, repeat_rate, query_frac, batch_mode, measure,
+        		max_load, min_load, comm);
         BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_prefetch_Full", count, comm);
       } else {
         BL_BENCH_START(test);
-        benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, Kmer, size_t>("hashmap_robinhood_prefetch_DNA", count, repeat_rate, query_frac, batch_mode, measure, comm);
+        benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, Kmer, size_t>("hashmap_robinhood_prefetch_DNA", count, repeat_rate, query_frac, batch_mode, measure,
+        		max_load, min_load, comm);
         BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_prefetch_DNA", count, comm);
       }
     } else if (dna == DNA5_TYPE) {
       BL_BENCH_START(test);
-      benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, DNA5Kmer, size_t>("hashmap_robinhood_prefetch_DNA5", count, repeat_rate, query_frac, batch_mode, measure, comm);
+      benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, DNA5Kmer, size_t>("hashmap_robinhood_prefetch_DNA5", count, repeat_rate, query_frac, batch_mode, measure,
+    		  max_load, min_load, comm);
       BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_prefetch_DNA5", count, comm);
     } else if (dna == DNA16_TYPE) {
       BL_BENCH_START(test);
-      benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, DNA16Kmer, size_t>("hashmap_robinhood_prefetch_DNA16", count, repeat_rate, query_frac, batch_mode, measure, comm);
+      benchmark_hashmap_insert_mode< ::fsc::hashmap_robinhood_prefetch, DNA16Kmer, size_t>("hashmap_robinhood_prefetch_DNA16", count, repeat_rate, query_frac, batch_mode, measure,
+    		  max_load, min_load, comm);
       BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_prefetch_DNA16", count, comm);
     } else {
 

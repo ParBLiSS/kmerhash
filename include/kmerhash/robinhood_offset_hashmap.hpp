@@ -50,9 +50,12 @@
 #include "kmerhash/hyperloglog64.hpp"  // for size estimation.
 
 // should be easier for prefetching
+#if ENABLE_PREFETCH
+#define KH_PREFETCH(ptr, level)  _mm_prefetch(ptr, level)
+#else
+#define KH_PREFETCH(ptr, level)
+#endif
 
-#define INSERT_LOOK_AHEAD 4
-#define LOOK_AHEAD 16
 
 namespace fsc {
 /// when inserting, does NOT replace existing.
@@ -162,6 +165,13 @@ public:
 	using reducer               = Reducer;
 
 protected:
+
+	mutable uint8_t INSERT_LOOKAHEAD;
+	mutable uint8_t QUERY_LOOKAHEAD;
+	mutable uint8_t INSERT_LOOKAHEAD_MASK;
+	mutable uint8_t QUERY_LOOKAHEAD_MASK;
+
+	mutable std::vector<uint64_t> lookahead_hashes;
 
 	//=========  start INFO_TYPE definitions.
 	// MSB is to indicate if current BUCKET is empty.  rest 7 bits indicate offset for the first BUCKET entry if not empty, or where it would have been.
@@ -321,8 +331,6 @@ protected:
 
 	static constexpr uint32_t info_per_cacheline = 64 / sizeof(info_type);
 	static constexpr uint32_t value_per_cacheline = 64 / sizeof(value_type);
-	static constexpr uint32_t info_prefetch_iters = (LOOK_AHEAD + info_per_cacheline - 1) / info_per_cacheline;
-	static constexpr uint32_t value_prefetch_iters = (LOOK_AHEAD + value_per_cacheline - 1) / value_per_cacheline;
 	// =========  END prefetech constants.
 
 
@@ -362,7 +370,12 @@ public:
 	 */
 	explicit hashmap_robinhood_offsets_reduction(size_t const & _capacity = 128,
 			double const & _min_load_factor = 0.4,
-			double const & _max_load_factor = 0.9) :
+			double const & _max_load_factor = 0.9,
+			uint8_t const & _insert_lookahead = 8,
+			uint8_t const & _query_lookahead = 16) :
+			INSERT_LOOKAHEAD(_insert_lookahead), QUERY_LOOKAHEAD(_query_lookahead),
+			INSERT_LOOKAHEAD_MASK(_insert_lookahead * 2 - 1), QUERY_LOOKAHEAD_MASK(_query_lookahead * 2 - 1),
+			lookahead_hashes(::std::max(_insert_lookahead, _query_lookahead) * 2),
 			lsize(0), buckets(next_power_of_2(_capacity)), mask(buckets - 1),
 #if defined (REPROBE_STAT)
 			upsize_count(0), downsize_count(0),
@@ -381,8 +394,10 @@ public:
 			::std::is_constructible<value_type, typename ::std::iterator_traits<Iter>::value_type>::value  ,int>::type >
 	hashmap_robinhood_offsets_reduction(Iter begin, Iter end,
 			double const & _min_load_factor = 0.4,
-			double const & _max_load_factor = 0.9) :
-			hashmap_robinhood_offsets_reduction(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor) {
+			double const & _max_load_factor = 0.9,
+			uint8_t const & _insert_lookahead = 8,
+			uint8_t const & _query_lookahead = 16) :
+			hashmap_robinhood_offsets_reduction(::std::distance(begin, end) / 4, _min_load_factor, _max_load_factor, _insert_lookahead, _query_lookahead) {
 
 		insert(begin, end);
 	}
@@ -397,6 +412,11 @@ public:
 
 
 	hashmap_robinhood_offsets_reduction(hashmap_robinhood_offsets_reduction const & other) :
+		INSERT_LOOKAHEAD(other.INSERT_LOOKAHEAD),
+		QUERY_LOOKAHEAD(other.QUERY_LOOKAHEAD),
+		INSERT_LOOKAHEAD_MASK(other.INSERT_LOOKAHEAD_MASK),
+		QUERY_LOOKAHEAD_MASK(other.QUERY_LOOKAHEAD_MASK),
+		lookahead_hashes(other.lookahead_hashes),
 		hll(other.hll),
 		lsize(other.lsize),
 		buckets(other.buckets),
@@ -424,6 +444,11 @@ public:
 		info_container(other.info_container) {};
 
 	hashmap_robinhood_offsets_reduction & operator=(hashmap_robinhood_offsets_reduction const & other) {
+		INSERT_LOOKAHEAD = other.INSERT_LOOKAHEAD;
+		QUERY_LOOKAHEAD = other.QUERY_LOOKAHEAD;
+		INSERT_LOOKAHEAD_MASK = other.INSERT_LOOKAHEAD_MASK;
+		QUERY_LOOKAHEAD_MASK = other.QUERY_LOOKAHEAD_MASK;
+		lookahead_hashes = other.lookahead_hashes;
 		hll = other.hll;
 		lsize = other.lsize;
 		buckets = other.buckets;
@@ -452,6 +477,12 @@ public:
 	}
 
 	hashmap_robinhood_offsets_reduction(hashmap_robinhood_offsets_reduction && other) :
+		INSERT_LOOKAHEAD(std::move(other.INSERT_LOOKAHEAD)),
+		QUERY_LOOKAHEAD(std::move(other.QUERY_LOOKAHEAD)),
+		INSERT_LOOKAHEAD_MASK(std::move(other.INSERT_LOOKAHEAD_MASK)),
+		QUERY_LOOKAHEAD_MASK(std::move(other.QUERY_LOOKAHEAD_MASK)),
+		lookahead_hashes(std::move(other.lookahead_hashes)),
+
 		hll(std::move(other.hll)),
 		lsize(std::move(other.lsize)),
 		buckets(std::move(other.buckets)),
@@ -479,6 +510,12 @@ public:
 		info_container(std::move(other.info_container)) {}
 
 	hashmap_robinhood_offsets_reduction & operator=(hashmap_robinhood_offsets_reduction && other) {
+		INSERT_LOOKAHEAD = std::move(other.INSERT_LOOKAHEAD);
+		QUERY_LOOKAHEAD = std::move(other.QUERY_LOOKAHEAD);
+		INSERT_LOOKAHEAD_MASK = std::move(other.INSERT_LOOKAHEAD_MASK);
+		QUERY_LOOKAHEAD_MASK = std::move(other.QUERY_LOOKAHEAD_MASK);
+		lookahead_hashes = std::move(other.lookahead_hashes);
+
 		hll = std::move(other.hll);
 		lsize = std::move(other.lsize);
 		buckets = std::move(other.buckets);
@@ -507,6 +544,11 @@ public:
 	}
 
 	void swap(hashmap_robinhood_offsets_reduction && other) {
+		std::swap(INSERT_LOOKAHEAD, std::move(other.INSERT_LOOKAHEAD));
+		std::swap(QUERY_LOOKAHEAD, std::move(other.QUERY_LOOKAHEAD));
+		std::swap(INSERT_LOOKAHEAD_MASK, std::move(other.INSERT_LOOKAHEAD_MASK));
+		std::swap(QUERY_LOOKAHEAD_MASK, std::move(other.QUERY_LOOKAHEAD_MASK));
+		std::swap(lookahead_hashes, std::move(other.lookahead_hashes));
 		std::swap(hll, std::move(other.hll));
 		std::swap(lsize, std::move(other.lsize));
 		std::swap(buckets, std::move(other.buckets));
@@ -548,6 +590,22 @@ public:
 		max_load_factor = _max_load_factor;
 		max_load = static_cast<size_t>(static_cast<double>(buckets) * max_load_factor);
 	}
+
+
+	/**
+	 * @brief set the lookahead values.
+	 */
+	inline void set_insert_lookahead(uint8_t const & _insert_lookahead) {
+		INSERT_LOOKAHEAD = _insert_lookahead;
+		INSERT_LOOKAHEAD_MASK = (INSERT_LOOKAHEAD << 1) - 1;
+		lookahead_hashes.resize(2 * ::std::max(_insert_lookahead, QUERY_LOOKAHEAD));
+	}
+	inline void set_query_lookahead(uint8_t const & _query_lookahead) {
+		QUERY_LOOKAHEAD = _query_lookahead;
+		QUERY_LOOKAHEAD_MASK = (QUERY_LOOKAHEAD << 1) - 1;
+		lookahead_hashes.resize(2 * ::std::max(_query_lookahead, INSERT_LOOKAHEAD));
+	}
+
 
 	/**
 	 * @brief get the load factors.
@@ -591,7 +649,9 @@ public:
 
 
 	void print() const {
-		std::cout << "lsize " << lsize << "\tbuckets " << buckets << "\tmax load factor " << max_load_factor << std::endl;
+		std::cout << "lsize " << lsize << "\tbuckets " << buckets << "\tmax load factor " << max_load_factor <<
+				"\tinsert_lookahead " << INSERT_LOOKAHEAD << "\tquery_lookahead " << QUERY_LOOKAHEAD <<
+				std::endl;
 		size_type i = 0, j = 0;
 
 		container_type tmp;
@@ -639,7 +699,9 @@ public:
 	}
 
 	void print_raw() const {
-		std::cout << "lsize " << lsize << "\tbuckets " << buckets << "\tmax load factor " << max_load_factor << std::endl;
+		std::cout << "lsize " << lsize << "\tbuckets " << buckets << "\tmax load factor " << max_load_factor <<
+				"\tinsert_lookahead " << INSERT_LOOKAHEAD << "\tquery_lookahead " << QUERY_LOOKAHEAD <<
+				std::endl;
 		size_type i = 0;
 
 		for (i = 0; i < buckets; ++i) {
@@ -674,7 +736,9 @@ public:
 				" lsize " << lsize <<
 				"\tbuckets " << buckets <<
 				"\tmax load factor " << max_load_factor <<
-				"\t printing [" << first << " .. " << last << "]" << std::endl;
+				"\t printing [" << first << " .. " << last << "]" <<
+				"\tinsert_lookahead " << INSERT_LOOKAHEAD << "\tquery_lookahead " << QUERY_LOOKAHEAD <<
+				std::endl;
 		size_type i = 0;
 
 		for (i = first; i <= last; ++i) {
@@ -697,7 +761,9 @@ public:
 				" lsize " << lsize <<
 				"\tbuckets " << buckets <<
 				"\tmax load factor " << max_load_factor <<
-				"\t printing [" << first << " .. " << last << "]" << std::endl;
+				"\t printing [" << first << " .. " << last << "]" <<
+				"\tinsert_lookahead " << INSERT_LOOKAHEAD << "\tquery_lookahead " << QUERY_LOOKAHEAD <<
+				std::endl;
 		size_type i = 0, j = 0;
 
 		container_type tmp;
@@ -1685,37 +1751,37 @@ protected:
 
 		size_t ii;
 
-		//prefetch only if target_buckets is larger than INSERT_LOOK_AHEAD
-		size_t max_prefetch = std::min(input_size, static_cast<size_t>(2 * INSERT_LOOK_AHEAD));
-		// prefetch 2*INSERT_LOOK_AHEAD of the info_container.
+		//prefetch only if target_buckets is larger than INSERT_LOOKAHEAD
+		size_t max_prefetch = std::min(input_size, static_cast<size_t>(2 * INSERT_LOOKAHEAD));
+		// prefetch 2*INSERT_LOOKAHEAD of the info_container.
 //		for (ii = 0; ii < max_prefetch; ++ii) {
-//			_mm_prefetch(reinterpret_cast<const char *>(&(*(hashes + ii))), _MM_HINT_T0);
+//			KH_PREFETCH(reinterpret_cast<const char *>(&(*(hashes + ii))), _MM_HINT_T0);
 //
 //			// prefetch input
-//			_mm_prefetch(reinterpret_cast<const char *>(&(*(input + ii))), _MM_HINT_T0);
+//			KH_PREFETCH(reinterpret_cast<const char *>(&(*(input + ii))), _MM_HINT_T0);
 //		}
 
 		for (ii = 0; ii < max_prefetch; ++ii) {
 
 			id = *(hashes + ii) & mask;
 			// prefetch the info_container entry for ii.
-      _mm_prefetch(reinterpret_cast<const char *>(info_container.data() + id), _MM_HINT_T0);
+      KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + id), _MM_HINT_T0);
 
-//			_mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(info_container.data() + id) & cache_align_mask), _MM_HINT_T0);
-//			_mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(info_container.data() + id + 1) & cache_align_mask), _MM_HINT_T0);
+//			KH_PREFETCH(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(info_container.data() + id) & cache_align_mask), _MM_HINT_T0);
+//			KH_PREFETCH(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(info_container.data() + id + 1) & cache_align_mask), _MM_HINT_T0);
 //			if ((reinterpret_cast<bucket_id_type>(info_container.data() + id + 1) & cache_align_mask) == 0)
-//			  _mm_prefetch((const char *)(info_container.data() + id + 1), _MM_HINT_T1);
+//			  KH_PREFETCH((const char *)(info_container.data() + id + 1), _MM_HINT_T1);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)(container.data() + id), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(container.data() + id), _MM_HINT_T0);
 
 		}
 
 
 		// iterate based on size between rehashes
-		size_t max2 = (input_size > (2*INSERT_LOOK_AHEAD)) ? input_size - (2*INSERT_LOOK_AHEAD) : 0;
-		size_t max1 = (input_size > INSERT_LOOK_AHEAD) ? input_size - INSERT_LOOK_AHEAD : 0;
-		size_t i = 0; //, i1 = INSERT_LOOK_AHEAD, i2 = 2*INSERT_LOOK_AHEAD;
+		size_t max2 = (input_size > (2*INSERT_LOOKAHEAD)) ? input_size - (2*INSERT_LOOKAHEAD) : 0;
+		size_t max1 = (input_size > INSERT_LOOKAHEAD) ? input_size - INSERT_LOOKAHEAD : 0;
+		size_t i = 0; //, i1 = INSERT_LOOKAHEAD, i2 = 2*INSERT_LOOKAHEAD;
 
 		size_t lmax;
 		size_t insert_bid;
@@ -1746,26 +1812,26 @@ protected:
 
 			for (; i < lmax; ++i) {
 
-//				_mm_prefetch(reinterpret_cast<const char *>(hashes + i + 2 * INSERT_LOOK_AHEAD), _MM_HINT_T0);
+//				KH_PREFETCH(reinterpret_cast<const char *>(hashes + i + 2 * INSERT_LOOKAHEAD), _MM_HINT_T0);
 //				// prefetch input
-//				_mm_prefetch(reinterpret_cast<const char *>(input + i + 2 * INSERT_LOOK_AHEAD), _MM_HINT_T0);
+//				KH_PREFETCH(reinterpret_cast<const char *>(input + i + 2 * INSERT_LOOKAHEAD), _MM_HINT_T0);
 
 
 				// prefetch container
-				bid = *(hashes + i + INSERT_LOOK_AHEAD) & mask;
+				bid = *(hashes + i + INSERT_LOOKAHEAD) & mask;
 				if (is_normal(info_container[bid])) {
 					bid1 = bid + 1;
 					bid += get_offset(info_container[bid]);
 					bid1 += get_offset(info_container[bid1]);
 
 //					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//						KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //					}
-					_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
+					KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
 
 					// NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH, bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
 					if (bid1 > (bid + value_per_cacheline))
-						_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+						KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 
 				}
 
@@ -1780,29 +1846,29 @@ protected:
 
 				//      std::cout << "insert vec lsize " << lsize << std::endl;
 				// prefetch info_container.
-				bid = *(hashes + i + 2 * INSERT_LOOK_AHEAD) & mask;
-	      _mm_prefetch(reinterpret_cast<const char *>((info_container.data() + bid)), _MM_HINT_T0);
-//	      _mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>((info_container.data() + bid)) & cache_align_mask), _MM_HINT_T0);
-//	      _mm_prefetch(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>((info_container.data() + bid + 1)) & cache_align_mask), _MM_HINT_T0);
+				bid = *(hashes + i + 2 * INSERT_LOOKAHEAD) & mask;
+	      KH_PREFETCH(reinterpret_cast<const char *>((info_container.data() + bid)), _MM_HINT_T0);
+//	      KH_PREFETCH(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>((info_container.data() + bid)) & cache_align_mask), _MM_HINT_T0);
+//	      KH_PREFETCH(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>((info_container.data() + bid + 1)) & cache_align_mask), _MM_HINT_T0);
 //	      if ((reinterpret_cast<bucket_id_type>(info_container.data() + bid + 1) & cache_align_mask) == 0)
-//	        _mm_prefetch((const char *)(info_container.data() + bid + 1), _MM_HINT_T1);
+//	        KH_PREFETCH((const char *)(info_container.data() + bid + 1), _MM_HINT_T1);
 
 				//            if (((bid + 1) % 64) == info_align)
-				//              _mm_prefetch((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
+				//              KH_PREFETCH((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
 			}
 		}
 
 
-		if ((lsize + 2 * INSERT_LOOK_AHEAD) >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
+		if ((lsize + 2 * INSERT_LOOKAHEAD) >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
 
-		// second to last INSERT_LOOK_AHEAD
+		// second to last INSERT_LOOKAHEAD
 		for (; i < max1; ++i) {
 
 
 			// === same code as in insert(1)..
 
-			bid = *(hashes + i + INSERT_LOOK_AHEAD) & mask;
+			bid = *(hashes + i + INSERT_LOOKAHEAD) & mask;
 
 
 			// prefetch container
@@ -1812,13 +1878,13 @@ protected:
 				bid1 += get_offset(info_container[bid1]);
 
 //				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//					KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //				}
-				_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
 
         // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH, bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
 				if (bid1 > (bid + value_per_cacheline))
-					_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+					KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 			}
 
 			insert_bid = insert_with_hint(container, info_container, *(hashes + i) & mask, *(input + i));
@@ -1830,12 +1896,10 @@ protected:
 				++lsize;
 
 			//      std::cout << "insert vec lsize " << lsize << std::endl;
-
-
 		}
 
 
-		// last INSERT_LOOK_AHEAD
+		// last INSERT_LOOKAHEAD
 		for (; i < input_size; ++i) {
 
 			// === same code as in insert(1)..
@@ -2022,30 +2086,27 @@ public:
 		size_t ii;
 		size_t hash_val;
 
-		std::array<size_t, 2 * INSERT_LOOK_AHEAD>  hashes;
-
-		//prefetch only if target_buckets is larger than INSERT_LOOK_AHEAD
-		size_t max_prefetch2 = std::min(info_container.size(), static_cast<size_t>(2 * INSERT_LOOK_AHEAD));
-		// prefetch 2*INSERT_LOOK_AHEAD of the info_container.
+		//prefetch only if target_buckets is larger than INSERT_LOOKAHEAD
+		size_t max_prefetch2 = std::min(info_container.size(), static_cast<size_t>(2 * INSERT_LOOKAHEAD));
+		// prefetch 2*INSERT_LOOKAHEAD of the info_container.
 		for (ii = 0; ii < max_prefetch2; ++ii) {
 			hash_val = hash(input[ii].first);
-			hashes[ii] = hash_val;
+			lookahead_hashes[ii] = hash_val;
 			id = hash_val & mask;
 			// prefetch the info_container entry for ii.
-			_mm_prefetch((const char *)(info_container.data() + id), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(info_container.data() + id), _MM_HINT_T0);
 			//		      if (((id + 1) % 64) == info_align)
-			//		        _mm_prefetch((const char *)(info_container.data() + id + 1), _MM_HINT_T0);
+			//		        KH_PREFETCH((const char *)(info_container.data() + id + 1), _MM_HINT_T0);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)(container.data() + id), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(container.data() + id), _MM_HINT_T0);
 
 		}
 
 		// iterate based on size between rehashes
-		constexpr size_t hash_mask = 2 * INSERT_LOOK_AHEAD - 1;
-		size_t max2 = (input.size() > (2*INSERT_LOOK_AHEAD)) ? input.size() - (2*INSERT_LOOK_AHEAD) : 0;
-		size_t max1 = (input.size() > INSERT_LOOK_AHEAD) ? input.size() - INSERT_LOOK_AHEAD : 0;
-		size_t i = 0; //, i1 = INSERT_LOOK_AHEAD, i2 = 2*INSERT_LOOK_AHEAD;
+		size_t max2 = (input.size() > (2*INSERT_LOOKAHEAD)) ? input.size() - (2*INSERT_LOOKAHEAD) : 0;
+		size_t max1 = (input.size() > INSERT_LOOKAHEAD) ? input.size() - INSERT_LOOKAHEAD : 0;
+		size_t i = 0; //, i1 = INSERT_LOOKAHEAD, i2 = 2*INSERT_LOOKAHEAD;
 
 		size_t lmax;
 
@@ -2075,44 +2136,44 @@ public:
 
 
 			for (; i < lmax; ++i) {
-				_mm_prefetch((const char *)(hashes.data() + ((i + 2 * INSERT_LOOK_AHEAD) & hash_mask)), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(lookahead_hashes.data() + ((i + 2 * INSERT_LOOKAHEAD) & INSERT_LOOKAHEAD_MASK)), _MM_HINT_T0);
 				// prefetch input
-				_mm_prefetch((const char *)(input.data() + i + 2 * INSERT_LOOK_AHEAD), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(input.data() + i + 2 * INSERT_LOOKAHEAD), _MM_HINT_T0);
 
 
 				// prefetch container
-				bid = hashes[(i + INSERT_LOOK_AHEAD) & hash_mask] & mask;
+				bid = lookahead_hashes[(i + INSERT_LOOKAHEAD) & INSERT_LOOKAHEAD_MASK] & mask;
 				if (is_normal(info_container[bid])) {
 					bid1 = bid + 1;
 					bid += get_offset(info_container[bid]);
 					bid1 += get_offset(info_container[bid1]);
 
 					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+						KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 					}
 				}
 
 				// first get the bucket id
-				id = hashes[i & hash_mask] & mask;  // target bucket id.
+				id = lookahead_hashes[i & INSERT_LOOKAHEAD_MASK] & mask;  // target bucket id.
 				if (missing(insert_with_hint_old2(container, info_container, id, input[i])))
 					++lsize;
 
 				//      std::cout << "insert vec lsize " << lsize << std::endl;
 				// prefetch info_container.
-				hash_val = hash(input[(i + 2 * INSERT_LOOK_AHEAD)].first);
+				hash_val = hash(input[(i + 2 * INSERT_LOOKAHEAD)].first);
 				bid = hash_val & mask;
-				_mm_prefetch((const char *)(info_container.data() + bid), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(info_container.data() + bid), _MM_HINT_T0);
 				//            if (((bid + 1) % 64) == info_align)
-				//              _mm_prefetch((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
+				//              KH_PREFETCH((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
 
-				hashes[(i + 2 * INSERT_LOOK_AHEAD)  & hash_mask] = hash_val;
+				lookahead_hashes[(i + 2 * INSERT_LOOKAHEAD)  & INSERT_LOOKAHEAD_MASK] = hash_val;
 			}
 
 		}
-		//if ((lsize + 2 * INSERT_LOOK_AHEAD) >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
+		//if ((lsize + 2 * INSERT_LOOKAHEAD) >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
 
-		// second to last INSERT_LOOK_AHEAD
+		// second to last INSERT_LOOKAHEAD
 		for (; i < max1; ++i) {
 
 
@@ -2121,10 +2182,10 @@ public:
 			// first check if we need to resize.
 			if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
-			bid = hashes[(i + INSERT_LOOK_AHEAD) & hash_mask] & mask;
+			bid = lookahead_hashes[(i + INSERT_LOOKAHEAD) & INSERT_LOOKAHEAD_MASK] & mask;
 
 			// first get the bucket id
-			id = hashes[i & hash_mask] & mask;  // target bucket id.
+			id = lookahead_hashes[i & INSERT_LOOKAHEAD_MASK] & mask;  // target bucket id.
 
 			// prefetch container
 			if (is_normal(info_container[bid])) {
@@ -2133,7 +2194,7 @@ public:
 				bid1 += get_offset(info_container[bid1]);
 
 				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+					KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 				}
 			}
 
@@ -2145,7 +2206,7 @@ public:
 		}
 
 
-		// last INSERT_LOOK_AHEAD
+		// last INSERT_LOOKAHEAD
 		for (; i < input.size(); ++i) {
 
 			// === same code as in insert(1)..
@@ -2154,7 +2215,7 @@ public:
 			if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
 			// first get the bucket id
-			id = hashes[i & hash_mask] & mask;  // target bucket id.
+			id = lookahead_hashes[i & INSERT_LOOKAHEAD_MASK] & mask;  // target bucket id.
 
 			if (missing(insert_with_hint_old2(container, info_container, id, input[i])))
 				++lsize;
@@ -2195,30 +2256,27 @@ public:
 		size_t ii;
 		size_t hash_val;
 
-		std::array<size_t, 2 * INSERT_LOOK_AHEAD>  hashes;
-
-		//prefetch only if target_buckets is larger than INSERT_LOOK_AHEAD
-		size_t max_prefetch2 = std::min(info_container.size(), static_cast<size_t>(2 * INSERT_LOOK_AHEAD));
-		// prefetch 2*INSERT_LOOK_AHEAD of the info_container.
+		//prefetch only if target_buckets is larger than INSERT_LOOKAHEAD
+		size_t max_prefetch2 = std::min(info_container.size(), static_cast<size_t>(2 * INSERT_LOOKAHEAD));
+		// prefetch 2*INSERT_LOOKAHEAD of the info_container.
 		for (ii = 0; ii < max_prefetch2; ++ii) {
 			hash_val = hash(input[ii].first);
-			hashes[ii] = hash_val;
+			lookahead_hashes[ii] = hash_val;
 			id = hash_val & mask;
 			// prefetch the info_container entry for ii.
-			_mm_prefetch((const char *)(info_container.data() + id), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(info_container.data() + id), _MM_HINT_T0);
 			//		      if (((id + 1) % 64) == info_align)
-			//		        _mm_prefetch((const char *)(info_container.data() + id + 1), _MM_HINT_T0);
+			//		        KH_PREFETCH((const char *)(info_container.data() + id + 1), _MM_HINT_T0);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)(container.data() + id), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(container.data() + id), _MM_HINT_T0);
 
 		}
 
 		// iterate based on size between rehashes
-		constexpr size_t hash_mask = 2 * INSERT_LOOK_AHEAD - 1;
-		size_t max2 = (input.size() > (2*INSERT_LOOK_AHEAD)) ? input.size() - (2*INSERT_LOOK_AHEAD) : 0;
-		size_t max1 = (input.size() > INSERT_LOOK_AHEAD) ? input.size() - INSERT_LOOK_AHEAD : 0;
-		size_t i = 0; //, i1 = INSERT_LOOK_AHEAD, i2 = 2*INSERT_LOOK_AHEAD;
+		size_t max2 = (input.size() > (2*INSERT_LOOKAHEAD)) ? input.size() - (2*INSERT_LOOKAHEAD) : 0;
+		size_t max1 = (input.size() > INSERT_LOOKAHEAD) ? input.size() - INSERT_LOOKAHEAD : 0;
+		size_t i = 0; //, i1 = INSERT_LOOKAHEAD, i2 = 2*INSERT_LOOKAHEAD;
 
 		size_t lmax;
 
@@ -2255,13 +2313,13 @@ public:
 
 
 			for (; i < lmax; ++i) {
-				_mm_prefetch((const char *)(hashes.data() + ((i + 2 * INSERT_LOOK_AHEAD) & hash_mask)), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(lookahead_hashes.data() + ((i + 2 * INSERT_LOOKAHEAD) & INSERT_LOOKAHEAD_MASK)), _MM_HINT_T0);
 				// prefetch input
-				_mm_prefetch((const char *)(input.data() + i + 2 * INSERT_LOOK_AHEAD), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(input.data() + i + 2 * INSERT_LOOKAHEAD), _MM_HINT_T0);
 
 
 				// prefetch container
-				id = hashes[(i + INSERT_LOOK_AHEAD) & hash_mask] & mask;
+				id = lookahead_hashes[(i + INSERT_LOOKAHEAD) & INSERT_LOOKAHEAD_MASK] & mask;
 				info = info_container[id];
 				if (is_normal(info)) {
 
@@ -2269,12 +2327,12 @@ public:
 					bid1 = id + 1 + get_offset(info_container[id + 1]);
 
 					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+						KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 					}
 				}
 
 				// first get the bucket id
-				id = hashes[i & hash_mask] & mask;  // target bucket id.
+				id = lookahead_hashes[i & INSERT_LOOKAHEAD_MASK] & mask;  // target bucket id.
 
 				//============= try to insert. ==============
 				// get the starting position
@@ -2383,20 +2441,20 @@ public:
 				//      std::cout << "insert vec lsize " << lsize << std::endl;
 
 				// prefetch info_container.
-				hash_val = hash(input[(i + 2 * INSERT_LOOK_AHEAD)].first);
+				hash_val = hash(input[(i + 2 * INSERT_LOOKAHEAD)].first);
 				id = hash_val & mask;
-				_mm_prefetch((const char *)(info_container.data() + id), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(info_container.data() + id), _MM_HINT_T0);
 				//            if (((bid + 1) % 64) == info_align)
-				//              _mm_prefetch((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
+				//              KH_PREFETCH((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
 
-				hashes[(i + 2 * INSERT_LOOK_AHEAD)  & hash_mask] = hash_val;
+				lookahead_hashes[(i + 2 * INSERT_LOOKAHEAD)  & INSERT_LOOKAHEAD_MASK] = hash_val;
 			}
 
 		}
-		//if ((lsize + 2 * INSERT_LOOK_AHEAD) >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
+		//if ((lsize + 2 * INSERT_LOOKAHEAD) >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
 
-		// second to last INSERT_LOOK_AHEAD
+		// second to last INSERT_LOOKAHEAD
 		for (; i < max1; ++i) {
 
 
@@ -2405,7 +2463,7 @@ public:
 			// first check if we need to resize.
 			if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
-			id = hashes[(i + INSERT_LOOK_AHEAD) & hash_mask] & mask;
+			id = lookahead_hashes[(i + INSERT_LOOKAHEAD) & INSERT_LOOKAHEAD_MASK] & mask;
 			info = info_container[id];
 			// prefetch container
 			if (is_normal(info)) {
@@ -2413,12 +2471,12 @@ public:
 				bid1 = id + 1 + get_offset(info_container[id + 1]);
 
 				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+					KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 				}
 			}
 
 			// first get the bucket id
-			id = hashes[i & hash_mask] & mask;  // target bucket id.
+			id = lookahead_hashes[i & INSERT_LOOKAHEAD_MASK] & mask;  // target bucket id.
 
 
 			//============= try to insert. ==============
@@ -2528,7 +2586,7 @@ public:
 		}
 
 
-		// last INSERT_LOOK_AHEAD
+		// last INSERT_LOOKAHEAD
 		for (; i < input.size(); ++i) {
 
 			// === same code as in insert(1)..
@@ -2537,7 +2595,7 @@ public:
 			if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
 			// first get the bucket id
-			id = hashes[i & hash_mask] & mask;  // target bucket id.
+			id = lookahead_hashes[i & INSERT_LOOKAHEAD_MASK] & mask;  // target bucket id.
 
 			//============= try to insert. ==============
 			// get the starting position
@@ -2742,30 +2800,27 @@ public:
 		size_t ii;
 		size_t hash_val;
 
-		std::array<size_t, 2 * INSERT_LOOK_AHEAD>  hashes;
-
-		//prefetch only if target_buckets is larger than INSERT_LOOK_AHEAD
-		size_t max_prefetch2 = std::min(info_container.size(), static_cast<size_t>(2 * INSERT_LOOK_AHEAD));
-		// prefetch 2*INSERT_LOOK_AHEAD of the info_container.
+		//prefetch only if target_buckets is larger than INSERT_LOOKAHEAD
+		size_t max_prefetch2 = std::min(info_container.size(), static_cast<size_t>(2 * INSERT_LOOKAHEAD));
+		// prefetch 2*INSERT_LOOKAHEAD of the info_container.
 		for (ii = 0; ii < max_prefetch2; ++ii) {
 			hash_val = hash(input[ii].first);
-			hashes[ii] = hash_val;
+			lookahead_hashes[ii] = hash_val;
 			id = hash_val & mask;
 			// prefetch the info_container entry for ii.
-			_mm_prefetch((const char *)(info_container.data() + id), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(info_container.data() + id), _MM_HINT_T0);
 			//          if (((id + 1) % 64) == info_align)
-			//            _mm_prefetch((const char *)(info_container.data() + id + 1), _MM_HINT_T0);
+			//            KH_PREFETCH((const char *)(info_container.data() + id + 1), _MM_HINT_T0);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)(container.data() + id), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(container.data() + id), _MM_HINT_T0);
 
 		}
 
 		// iterate based on size between rehashes
-		constexpr size_t hash_mask = 2 * INSERT_LOOK_AHEAD - 1;
-		size_t max2 = (input.size() > (2*INSERT_LOOK_AHEAD)) ? input.size() - (2*INSERT_LOOK_AHEAD) : 0;
-		size_t max1 = (input.size() > INSERT_LOOK_AHEAD) ? input.size() - INSERT_LOOK_AHEAD : 0;
-		size_t i = 0; //, i1 = INSERT_LOOK_AHEAD, i2 = 2*INSERT_LOOK_AHEAD;
+		size_t max2 = (input.size() > (2*INSERT_LOOKAHEAD)) ? input.size() - (2*INSERT_LOOKAHEAD) : 0;
+		size_t max1 = (input.size() > INSERT_LOOKAHEAD) ? input.size() - INSERT_LOOKAHEAD : 0;
+		size_t i = 0; //, i1 = INSERT_LOOKAHEAD, i2 = 2*INSERT_LOOKAHEAD;
 
 		size_t lmax;
 
@@ -2795,44 +2850,44 @@ public:
 
 
 			for (; i < lmax; ++i) {
-				_mm_prefetch((const char *)(hashes.data() + ((i + 2 * INSERT_LOOK_AHEAD) & hash_mask)), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(lookahead_hashes.data() + ((i + 2 * INSERT_LOOKAHEAD) & INSERT_LOOKAHEAD_MASK)), _MM_HINT_T0);
 				// prefetch input
-				_mm_prefetch((const char *)(input.data() + i + 2 * INSERT_LOOK_AHEAD), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(input.data() + i + 2 * INSERT_LOOKAHEAD), _MM_HINT_T0);
 
 
 				// prefetch container
-				bid = hashes[(i + INSERT_LOOK_AHEAD) & hash_mask] & mask;
+				bid = lookahead_hashes[(i + INSERT_LOOKAHEAD) & INSERT_LOOKAHEAD_MASK] & mask;
 				if (is_normal(info_container[bid])) {
 					bid1 = bid + 1;
 					bid += get_offset(info_container[bid]);
 					bid1 += get_offset(info_container[bid1]);
 
 					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+						KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 					}
 				}
 
 				// first get the bucket id
-				id = hashes[i & hash_mask] & mask;  // target bucket id.
+				id = lookahead_hashes[i & INSERT_LOOKAHEAD_MASK] & mask;  // target bucket id.
 				if (missing(insert_with_hint_old(container, info_container, id, input[i])))
 					++lsize;
 
 				//      std::cout << "insert vec lsize " << lsize << std::endl;
 				// prefetch info_container.
-				hash_val = hash(input[(i + 2 * INSERT_LOOK_AHEAD)].first);
+				hash_val = hash(input[(i + 2 * INSERT_LOOKAHEAD)].first);
 				bid = hash_val & mask;
-				_mm_prefetch((const char *)(info_container.data() + bid), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(info_container.data() + bid), _MM_HINT_T0);
 				//            if (((bid + 1) % 64) == info_align)
-				//              _mm_prefetch((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
+				//              KH_PREFETCH((const char *)(info_container.data() + bid + 1), _MM_HINT_T0);
 
-				hashes[(i + 2 * INSERT_LOOK_AHEAD)  & hash_mask] = hash_val;
+				lookahead_hashes[(i + 2 * INSERT_LOOKAHEAD)  & INSERT_LOOKAHEAD_MASK] = hash_val;
 			}
 
 		}
-		//if ((lsize + 2 * INSERT_LOOK_AHEAD) >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
+		//if ((lsize + 2 * INSERT_LOOKAHEAD) >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
 
-		// second to last INSERT_LOOK_AHEAD
+		// second to last INSERT_LOOKAHEAD
 		for (; i < max1; ++i) {
 
 
@@ -2841,10 +2896,10 @@ public:
 			// first check if we need to resize.
 			if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
-			bid = hashes[(i + INSERT_LOOK_AHEAD) & hash_mask] & mask;
+			bid = lookahead_hashes[(i + INSERT_LOOKAHEAD) & INSERT_LOOKAHEAD_MASK] & mask;
 
 			// first get the bucket id
-			id = hashes[i & hash_mask] & mask;  // target bucket id.
+			id = lookahead_hashes[i & INSERT_LOOKAHEAD_MASK] & mask;  // target bucket id.
 
 			// prefetch container
 			if (is_normal(info_container[bid])) {
@@ -2853,7 +2908,7 @@ public:
 				bid1 += get_offset(info_container[bid1]);
 
 				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+					KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 				}
 			}
 
@@ -2865,7 +2920,7 @@ public:
 		}
 
 
-		// last INSERT_LOOK_AHEAD
+		// last INSERT_LOOKAHEAD
 		for (; i < input.size(); ++i) {
 
 			// === same code as in insert(1)..
@@ -2874,7 +2929,7 @@ public:
 			if (lsize >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
 
 			// first get the bucket id
-			id = hashes[i & hash_mask] & mask;  // target bucket id.
+			id = lookahead_hashes[i & INSERT_LOOKAHEAD_MASK] & mask;  // target bucket id.
 
 			if (missing(insert_with_hint_old(container, info_container, id, input[i])))
 				++lsize;
@@ -3030,102 +3085,99 @@ protected:
 
 		size_t cnt = 0;
 
-		std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
-
-		//prefetch only if target_buckets is larger than LOOK_AHEAD
+		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
 		size_t i = 0;
 		size_t h;
 
-		// prefetch 2*LOOK_AHEAD of the info_container.
-		for (Iter it = begin; (i < (2* LOOK_AHEAD)) && (it != end); ++it, ++i) {
+		// prefetch 2*QUERY_LOOKAHEAD of the info_container.
+		for (Iter it = begin; (i < (2* QUERY_LOOKAHEAD)) && (it != end); ++it, ++i) {
 			h =  hash(get_key(it));
-			hashes[i] = h;
+			lookahead_hashes[i] = h;
 			// prefetch the info_container entry for ii.
-			_mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			_mm_prefetch((const char *)(container.data() + (h & mask)), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(container.data() + (h & mask)), _MM_HINT_T0);
 		}
 
 		size_t total = std::distance(begin, end);
 
 		size_t id, bid, bid1;
 		Iter it, new_end = begin;
-		std::advance(new_end, (total > (2 * LOOK_AHEAD)) ? (total - (2 * LOOK_AHEAD)) : 0);
+		std::advance(new_end, (total > (2 * QUERY_LOOKAHEAD)) ? (total - (2 * QUERY_LOOKAHEAD)) : 0);
 		i = 0;
-		constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
 		bucket_id_type found;
 
 		for (it = begin; it != new_end; ++it) {
 
 			// first get the bucket id
-			id = hashes[i] & mask;  // target bucket id.
+			id = lookahead_hashes[i] & mask;  // target bucket id.
 
 			// prefetch info_container.
-			h = hash(get_key(it + 2 * LOOK_AHEAD));
-			hashes[i] = h;
-			_mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
+			h = hash(get_key(it + 2 * QUERY_LOOKAHEAD));
+			lookahead_hashes[i] = h;
+			KH_PREFETCH((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
 			// prefetch container
-			bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
+			bid = lookahead_hashes[(i + QUERY_LOOKAHEAD) & QUERY_LOOKAHEAD_MASK] & mask;
 			if (is_normal(info_container[bid])) {
 				bid1 = bid + 1 + get_offset(info_container[bid + 1]);
 				bid += get_offset(info_container[bid]);
 
 //				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//					KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //				}
-				_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
 				if (bid1 > (bid + value_per_cacheline))
-					_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+					KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 			}
 
 			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);
 			cnt += eval(out, get_key(it), found);  // out is incremented here
 
 			++i;
-			i &= hash_mask;
+			i &= QUERY_LOOKAHEAD_MASK;
 		}
 
 		new_end = begin;
-		std::advance(new_end, (total > LOOK_AHEAD) ? (total - LOOK_AHEAD) : 0);
+		std::advance(new_end, (total > QUERY_LOOKAHEAD) ? (total - QUERY_LOOKAHEAD) : 0);
 		for (; it != new_end; ++it) {
 
 			// first get the bucket id
-			id = hashes[i] & mask;  // target bucket id.
+			id = lookahead_hashes[i] & mask;  // target bucket id.
 
 			// prefetch container
-			bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
+			bid = lookahead_hashes[(i + QUERY_LOOKAHEAD) & QUERY_LOOKAHEAD_MASK] & mask;
 			if (is_normal(info_container[bid])) {
 				bid1 = bid + 1 + get_offset(info_container[bid + 1]);
 				bid += get_offset(info_container[bid]);
 
 //				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//					_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//					KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //				}
-				_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
+				KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
 				if (bid1 > (bid + value_per_cacheline))
-					_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+					KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 			}
 
 			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);
 			cnt += eval(out, get_key(it), found);  // out is incremented here
 
 			++i;
-			i &= hash_mask;
+			i &= QUERY_LOOKAHEAD_MASK;
 		}
 
 
 		for (; it != end; ++it) {
 
 			// first get the bucket id
-			id = hashes[i] & mask;  // target bucket id.
+			id = lookahead_hashes[i] & mask;  // target bucket id.
 
 			found = find_pos_with_hint(get_key(it), id, out_pred, in_pred	);
 			cnt += eval(out, get_key(it), found);  // out is incremented here
 
 			++i;
-			i &= hash_mask;
+			i &= QUERY_LOOKAHEAD_MASK;
 		}
 
 
@@ -3254,18 +3306,18 @@ public:
 //#if defined(REPROBE_STAT)
 //		reset_reprobe_stats();
 //#endif
-//		std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+//		std::vector<size_t>  hashes(2 * QUERY_LOOKAHEAD, 0);
 //
-//		//prefetch only if target_buckets is larger than LOOK_AHEAD
+//		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
 //		size_t ii = 0;
-//		// prefetch 2*LOOK_AHEAD of the info_container.
-//		for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
+//		// prefetch 2*QUERY_LOOKAHEAD of the info_container.
+//		for (Iter it = begin; (ii < (2* QUERY_LOOKAHEAD)) && (it != end); ++it, ++ii) {
 //			hashes[ii] = hash(*it);
 //			// prefetch the info_container entry for ii.
-//			_mm_prefetch((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
+//			KH_PREFETCH((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //
 //			// prefetch container as well - would be NEAR but may not be exact.
-//			_mm_prefetch((const char *)(container.data() + hashes[ii] & mask), _MM_HINT_T0);
+//			KH_PREFETCH((const char *)(container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //		}
 //
 //
@@ -3276,9 +3328,9 @@ public:
 //		size_t id, bid, bid1;
 //		bucket_id_type found;
 //		Iter it2 = begin;
-//		std::advance(it2, 2 * LOOK_AHEAD);
-//		size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
-//		constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
+//		std::advance(it2, 2 * QUERY_LOOKAHEAD);
+//		size_t i = 0, i1 = QUERY_LOOKAHEAD, i2=2 * QUERY_LOOKAHEAD;
+//		constexpr size_t hash_mask = 2 * QUERY_LOOKAHEAD - 1;
 //
 //		for (auto it = begin; it != end; ++it, ++it2, ++i, ++i1, ++i2) {
 //
@@ -3289,7 +3341,7 @@ public:
 //			if (i2 < total) {
 //				ii = i2 & hash_mask;
 //				hashes[ii] = hash(*it2);
-//				_mm_prefetch((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
+//				KH_PREFETCH((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //			}
 //			// prefetch container
 //			if (i1 < total) {
@@ -3299,7 +3351,7 @@ public:
 //					bid += get_offset(info_container[bid]);
 //
 //					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//						KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //					}
 //				}
 //			}
@@ -3409,18 +3461,18 @@ public:
 //		reset_reprobe_stats();
 //#endif
 //
-//		std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+//		std::vector<size_t>  hashes(2 * QUERY_LOOKAHEAD, 0);
 //
-//		//prefetch only if target_buckets is larger than LOOK_AHEAD
+//		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
 //		size_t ii = 0;
-//		// prefetch 2*LOOK_AHEAD of the info_container.
-//		for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
+//		// prefetch 2*QUERY_LOOKAHEAD of the info_container.
+//		for (Iter it = begin; (ii < (2* QUERY_LOOKAHEAD)) && (it != end); ++it, ++ii) {
 //			hashes[ii] = hash((*it).first);
 //			// prefetch the info_container entry for ii.
-//			_mm_prefetch((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
+//			KH_PREFETCH((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //
 //			// prefetch container as well - would be NEAR but may not be exact.
-//			_mm_prefetch((const char *)(container.data() + hashes[ii] & mask), _MM_HINT_T0);
+//			KH_PREFETCH((const char *)(container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //		}
 //
 //
@@ -3431,9 +3483,9 @@ public:
 //		size_t id, bid, bid1;
 //		bucket_id_type found;
 //		Iter it2 = begin;
-//		std::advance(it2, 2 * LOOK_AHEAD);
-//		size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
-//		constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
+//		std::advance(it2, 2 * QUERY_LOOKAHEAD);
+//		size_t i = 0, i1 = QUERY_LOOKAHEAD, i2=2 * QUERY_LOOKAHEAD;
+//		constexpr size_t hash_mask = 2 * QUERY_LOOKAHEAD - 1;
 //
 //		for (auto it = begin; it != end; ++it, ++it2, ++i, ++i1, ++i2) {
 //
@@ -3444,7 +3496,7 @@ public:
 //			if (i2 < total) {
 //				ii = i2 & hash_mask;
 //				hashes[ii] = hash((*it2).first);
-//				_mm_prefetch((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
+//				KH_PREFETCH((const char *)(info_container.data() + hashes[ii] & mask), _MM_HINT_T0);
 //			}
 //			// prefetch container
 //			if (i1 < total) {
@@ -3454,7 +3506,7 @@ public:
 //					bid += get_offset(info_container[bid]);
 //
 //					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//						KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //					}
 //				}
 //			}
@@ -3477,18 +3529,18 @@ public:
 //#if defined(REPROBE_STAT)
 //		reset_reprobe_stats();
 //#endif
-//		std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+//		std::vector<size_t>  hashes(2 * QUERY_LOOKAHEAD, 0);
 //
-//		//prefetch only if target_buckets is larger than LOOK_AHEAD
+//		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
 //		size_t ii = 0;
-//		// prefetch 2*LOOK_AHEAD of the info_container.
-//		for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
+//		// prefetch 2*QUERY_LOOKAHEAD of the info_container.
+//		for (Iter it = begin; (ii < (2* QUERY_LOOKAHEAD)) && (it != end); ++it, ++ii) {
 //			hashes[ii] = hash(*it);
 //			// prefetch the info_container entry for ii.
-//			_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+//			KH_PREFETCH((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 //
 //			// prefetch container as well - would be NEAR but may not be exact.
-//			_mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
+//			KH_PREFETCH((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
 //		}
 //
 //
@@ -3499,9 +3551,9 @@ public:
 //		size_t id, bid, bid1;
 //		bucket_id_type found;
 //		Iter it2 = begin;
-//		std::advance(it2, 2 * LOOK_AHEAD);
-//		size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
-//		constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
+//		std::advance(it2, 2 * QUERY_LOOKAHEAD);
+//		size_t i = 0, i1 = QUERY_LOOKAHEAD, i2=2 * QUERY_LOOKAHEAD;
+//		constexpr size_t hash_mask = 2 * QUERY_LOOKAHEAD - 1;
 //
 //		for (auto it = begin; it != end; ++it, ++it2, ++i, ++i1, ++i2) {
 //
@@ -3512,7 +3564,7 @@ public:
 //			if (i2 < total) {
 //				ii = i2 & hash_mask;
 //				hashes[ii] = hash(*it2);
-//				_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+//				KH_PREFETCH((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 //			}
 //			// prefetch container
 //			if (i1 < total) {
@@ -3522,7 +3574,7 @@ public:
 //					bid += get_offset(info_container[bid]);
 //
 //					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//						KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //					}
 //				}
 //			}
@@ -3587,18 +3639,18 @@ public:
 //#if defined(REPROBE_STAT)
 //		reset_reprobe_stats();
 //#endif
-//		std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
+//		std::vector<size_t>  hashes(2 * QUERY_LOOKAHEAD, 0);
 //
-//		//prefetch only if target_buckets is larger than LOOK_AHEAD
+//		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
 //		size_t ii = 0;
-//		// prefetch 2*LOOK_AHEAD of the info_container.
-//		for (Iter it = begin; (ii < (2* LOOK_AHEAD)) && (it != end); ++it, ++ii) {
+//		// prefetch 2*QUERY_LOOKAHEAD of the info_container.
+//		for (Iter it = begin; (ii < (2* QUERY_LOOKAHEAD)) && (it != end); ++it, ++ii) {
 //			hashes[ii] = hash(*it);
 //			// prefetch the info_container entry for ii.
-//			_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+//			KH_PREFETCH((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 //
 //			// prefetch container as well - would be NEAR but may not be exact.
-//			_mm_prefetch((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
+//			KH_PREFETCH((const char *)&(container[hashes[ii] & mask]), _MM_HINT_T0);
 //		}
 //
 //
@@ -3607,9 +3659,9 @@ public:
 //		size_t id, bid, bid1;
 //		bucket_id_type found;
 //		Iter it2 = begin;
-//		std::advance(it2, 2 * LOOK_AHEAD);
-//		size_t i = 0, i1 = LOOK_AHEAD, i2=2 * LOOK_AHEAD;
-//		constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
+//		std::advance(it2, 2 * QUERY_LOOKAHEAD);
+//		size_t i = 0, i1 = QUERY_LOOKAHEAD, i2=2 * QUERY_LOOKAHEAD;
+//		constexpr size_t hash_mask = 2 * QUERY_LOOKAHEAD - 1;
 //
 //#if defined(REPROBE_STAT)
 //		size_t cc = 0;
@@ -3624,7 +3676,7 @@ public:
 //			if (i2 < total) {
 //				ii = i2 & hash_mask;
 //				hashes[ii] = hash(*it2);
-//				_mm_prefetch((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
+//				KH_PREFETCH((const char *)&(info_container[hashes[ii] & mask]), _MM_HINT_T0);
 //			}
 //			// prefetch container
 //			if (i1 < total) {
@@ -3634,7 +3686,7 @@ public:
 //					bid += get_offset(info_container[bid]);
 //
 //					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//						_mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//						KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //					}
 //				}
 //			}
@@ -3756,101 +3808,98 @@ public:
 
 		size_type before = lsize;
 
-		std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
-
-		//prefetch only if target_buckets is larger than LOOK_AHEAD
+		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
 		size_t i = 0;
 		size_t h;
 
-		// prefetch 2*LOOK_AHEAD of the info_container.
-    for (Iter it = begin; (i < (2* LOOK_AHEAD)) && (it != end); ++it, ++i) {
+		// prefetch 2*QUERY_LOOKAHEAD of the info_container.
+    for (Iter it = begin; (i < (2* QUERY_LOOKAHEAD)) && (it != end); ++it, ++i) {
       h =  hash(get_key(it));
-      hashes[i] = h;
+      lookahead_hashes[i] = h;
       // prefetch the info_container entry for ii.
-      _mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
+      KH_PREFETCH((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
       // prefetch container as well - would be NEAR but may not be exact.
-      _mm_prefetch((const char *)(container.data() + (h & mask)), _MM_HINT_T0);
+      KH_PREFETCH((const char *)(container.data() + (h & mask)), _MM_HINT_T0);
     }
 
 		size_t total = std::distance(begin, end);
 
 		size_t id, bid, bid1;
 		Iter it, new_end = begin;
-		std::advance(new_end, (total > (2 * LOOK_AHEAD)) ? (total - (2 * LOOK_AHEAD)) : 0);
+		std::advance(new_end, (total > (2 * QUERY_LOOKAHEAD)) ? (total - (2 * QUERY_LOOKAHEAD)) : 0);
     i = 0;
-    constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
     bucket_id_type found;
 
 
 		for (it = begin; it != new_end; ++it) {
 
 			// first get the bucket id
-			id = hashes[i] & mask;  // target bucket id.
+			id = lookahead_hashes[i] & mask;  // target bucket id.
 
 			// prefetch info_container.
-      h = hash(get_key(it + 2 * LOOK_AHEAD));
-      hashes[i] = h;
-      _mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
+      h = hash(get_key(it + 2 * QUERY_LOOKAHEAD));
+      lookahead_hashes[i] = h;
+      KH_PREFETCH((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
       // prefetch container
-      bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
+      bid = lookahead_hashes[(i + QUERY_LOOKAHEAD) & QUERY_LOOKAHEAD_MASK] & mask;
       if (is_normal(info_container[bid])) {
         bid1 = bid + 1 + get_offset(info_container[bid + 1]);
         bid += get_offset(info_container[bid]);
 
 //        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//          _mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//          KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //        }
-		_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
+		KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
 		if (bid1 > (bid + value_per_cacheline))
-			_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+			KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
       }
 
 
 			erase_and_compact(get_key(it), id, out_pred, in_pred);
 
       ++i;
-      i &= hash_mask;
+      i &= QUERY_LOOKAHEAD_MASK;
 		}
 
 
     new_end = begin;
-    std::advance(new_end, (total > LOOK_AHEAD) ? (total - LOOK_AHEAD) : 0);
+    std::advance(new_end, (total > QUERY_LOOKAHEAD) ? (total - QUERY_LOOKAHEAD) : 0);
     for (; it != new_end; ++it) {
 
       // first get the bucket id
-      id = hashes[i] & mask;  // target bucket id.
+      id = lookahead_hashes[i] & mask;  // target bucket id.
 
       // prefetch container
-      bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
+      bid = lookahead_hashes[(i + QUERY_LOOKAHEAD) & QUERY_LOOKAHEAD_MASK] & mask;
       if (is_normal(info_container[bid])) {
         bid1 = bid + 1 + get_offset(info_container[bid + 1]);
         bid += get_offset(info_container[bid]);
 
 //        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//          _mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//          KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //        }
-		_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
+		KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
 		if (bid1 > (bid + value_per_cacheline))
-			_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+			KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
       }
 
       erase_and_compact(get_key(it), id, out_pred, in_pred);
 
       ++i;
-      i &= hash_mask;
+      i &= QUERY_LOOKAHEAD_MASK;
     }
 
     for (; it != end; ++it) {
 
       // first get the bucket id
-      id = hashes[i] & mask;  // target bucket id.
+      id = lookahead_hashes[i] & mask;  // target bucket id.
 
       erase_and_compact(get_key(it), id, out_pred, in_pred);
 
       ++i;
-      i &= hash_mask;
+      i &= QUERY_LOOKAHEAD_MASK;
     }
 
 
@@ -3910,66 +3959,63 @@ public:
 
 		size_type before = lsize;
 
-		std::vector<size_t>  hashes(2 * LOOK_AHEAD, 0);
-
-		//prefetch only if target_buckets is larger than LOOK_AHEAD
+		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
 		size_t i = 0;
 		size_t h;
 
 		size_t min_pos = std::numeric_limits<size_t>::max(), max_pos = 0;
 
-		// prefetch 2*LOOK_AHEAD of the info_container.
-    for (Iter it = begin; (i < (2* LOOK_AHEAD)) && (it != end); ++it, ++i) {
+		// prefetch 2*QUERY_LOOKAHEAD of the info_container.
+    for (Iter it = begin; (i < (2* QUERY_LOOKAHEAD)) && (it != end); ++it, ++i) {
       h =  hash(get_key(it));
-      hashes[i] = h;
+      lookahead_hashes[i] = h;
       // prefetch the info_container entry for ii.
-      _mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
+      KH_PREFETCH((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
       // prefetch container as well - would be NEAR but may not be exact.
-      _mm_prefetch((const char *)(container.data() + (h & mask)), _MM_HINT_T0);
+      KH_PREFETCH((const char *)(container.data() + (h & mask)), _MM_HINT_T0);
 
-      _mm_prefetch((const char *)(deleted.data() + (h & mask)), _MM_HINT_T0);
+      KH_PREFETCH((const char *)(deleted.data() + (h & mask)), _MM_HINT_T0);
     }
 
 		size_t total = std::distance(begin, end);
 
 		size_t id, bid, bid1;
 		Iter it, new_end = begin;
-		std::advance(new_end, (total > (2 * LOOK_AHEAD)) ? (total - (2 * LOOK_AHEAD)) : 0);
+		std::advance(new_end, (total > (2 * QUERY_LOOKAHEAD)) ? (total - (2 * QUERY_LOOKAHEAD)) : 0);
     i = 0;
-    constexpr size_t hash_mask = 2 * LOOK_AHEAD - 1;
     bucket_id_type found;
 
 
 		for (it = begin; it != new_end; ++it) {
 
 			// first get the bucket id
-			id = hashes[i] & mask;  // target bucket id.
+			id = lookahead_hashes[i] & mask;  // target bucket id.
 
 			// prefetch info_container.
-      h = hash(get_key(it + 2 * LOOK_AHEAD));
-      hashes[i] = h;
-      _mm_prefetch((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
+      h = hash(get_key(it + 2 * QUERY_LOOKAHEAD));
+      lookahead_hashes[i] = h;
+      KH_PREFETCH((const char *)(info_container.data() + (h & mask)), _MM_HINT_T0);
 
       // prefetch container
-      bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
+      bid = lookahead_hashes[(i + QUERY_LOOKAHEAD) & QUERY_LOOKAHEAD_MASK] & mask;
       if (is_normal(info_container[bid])) {
 
     	  // prefetch at bucket location
-          _mm_prefetch((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64  of these in a cacheline
+          KH_PREFETCH((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64  of these in a cacheline
 
     	  bid1 = bid + 1 + get_offset(info_container[bid + 1]);
         bid += get_offset(info_container[bid]);
 
 //        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//          _mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//          KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //        }
-		_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
+		KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
 		if (bid1 > (bid + value_per_cacheline))
-			_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+			KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 
         // prefetch at first element of bucket.
-        _mm_prefetch((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64  of these in a cacheline
+        KH_PREFETCH((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64  of these in a cacheline
       }
 
 		found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);  // get the matching position
@@ -3983,31 +4029,31 @@ public:
 		}
 
       ++i;
-      i &= hash_mask;
+      i &= QUERY_LOOKAHEAD_MASK;
 		}
 
 
     new_end = begin;
-    std::advance(new_end, (total > LOOK_AHEAD) ? (total - LOOK_AHEAD) : 0);
+    std::advance(new_end, (total > QUERY_LOOKAHEAD) ? (total - QUERY_LOOKAHEAD) : 0);
     for (; it != new_end; ++it) {
 
       // first get the bucket id
-      id = hashes[i] & mask;  // target bucket id.
+      id = lookahead_hashes[i] & mask;  // target bucket id.
 
       // prefetch container
-      bid = hashes[(i + LOOK_AHEAD) & hash_mask] & mask;
+      bid = lookahead_hashes[(i + QUERY_LOOKAHEAD) & QUERY_LOOKAHEAD_MASK] & mask;
       if (is_normal(info_container[bid])) {
-          _mm_prefetch((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64 * 8 of these in a cacheline.
+          KH_PREFETCH((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64 * 8 of these in a cacheline.
         bid1 = bid + 1 + get_offset(info_container[bid + 1]);
         bid += get_offset(info_container[bid]);
 
 //        for (size_t j = bid; j < bid1; j += value_per_cacheline) {
-//          _mm_prefetch((const char *)(container.data() + j), _MM_HINT_T0);
+//          KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
 //        }
-		_mm_prefetch((const char *)(container.data() + bid), _MM_HINT_T0);
+		KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
 		if (bid1 > (bid + value_per_cacheline))
-			_mm_prefetch((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
-        _mm_prefetch((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64 * 8 of these in a cacheline.
+			KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+        KH_PREFETCH((const char *)(deleted.data() + bid), _MM_HINT_T0);  // 64 * 8 of these in a cacheline.
       }
 
 		found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);  // get the matching position
@@ -4022,13 +4068,13 @@ public:
 
 
       ++i;
-      i &= hash_mask;
+      i &= QUERY_LOOKAHEAD_MASK;
     }
 
     for (; it != end; ++it) {
 
       // first get the bucket id
-      id = hashes[i] & mask;  // target bucket id.
+      id = lookahead_hashes[i] & mask;  // target bucket id.
 
 		found = find_pos_with_hint(get_key(it), id, out_pred, in_pred);  // get the matching position
 
@@ -4041,7 +4087,7 @@ public:
 		}
 
       ++i;
-      i &= hash_mask;
+      i &= QUERY_LOOKAHEAD_MASK;
     }
 
 
@@ -4051,13 +4097,13 @@ public:
 	// advance max_pos to next zero.
     max_pos = find_next_zero_offset_pos(info_container, max_pos + 1);  // then get the next zero offset pos from max_pos + 1
 
-    for (i = min_pos; i < std::min(max_pos, min_pos + LOOK_AHEAD); ++i) {
-        _mm_prefetch((const char *)(info_container.data() + i), _MM_HINT_T0);
+    for (i = min_pos; i < std::min(max_pos, min_pos + QUERY_LOOKAHEAD); ++i) {
+        KH_PREFETCH((const char *)(info_container.data() + i), _MM_HINT_T0);
 
         // prefetch container as well - would be NEAR but may not be exact.
-        _mm_prefetch((const char *)(container.data() + i), _MM_HINT_T0);
+        KH_PREFETCH((const char *)(container.data() + i), _MM_HINT_T0);
 
-        _mm_prefetch((const char *)(deleted.data() + i), _MM_HINT_T0);
+        KH_PREFETCH((const char *)(deleted.data() + i), _MM_HINT_T0);
 
     }
 
@@ -4074,15 +4120,15 @@ public:
     // iterate between min pos and max pos (which is the last position past max_pos that had a non info_empty or info_normal entry
     // for each occupied bucket, iteratively walk though, compacting compacting each bucket.  the insert position is upshifted to i
     // when there is a stretch of empty buckets.
-    for (i = min_pos; i < std::max(std::max(max_pos, static_cast<size_t>(LOOK_AHEAD)) - static_cast<size_t>(LOOK_AHEAD), min_pos); ++i) {
+    for (i = min_pos; i < std::max(std::max(max_pos, static_cast<size_t>(QUERY_LOOKAHEAD)) - static_cast<size_t>(QUERY_LOOKAHEAD), min_pos); ++i) {
     	// NOTE:  not a complete compaction.   offset cannot go below zero.
 
-        _mm_prefetch((const char *)(info_container.data() + i + LOOK_AHEAD), _MM_HINT_T0);
+        KH_PREFETCH((const char *)(info_container.data() + i + QUERY_LOOKAHEAD), _MM_HINT_T0);
 
         // prefetch container as well - would be NEAR but may not be exact.
-        _mm_prefetch((const char *)(container.data() + i + LOOK_AHEAD), _MM_HINT_T0);
+        KH_PREFETCH((const char *)(container.data() + i + QUERY_LOOKAHEAD), _MM_HINT_T0);
 
-        _mm_prefetch((const char *)(deleted.data() + i + LOOK_AHEAD), _MM_HINT_T0);
+        KH_PREFETCH((const char *)(deleted.data() + i + QUERY_LOOKAHEAD), _MM_HINT_T0);
 
 
     	next_info = info_container[i + 1];
@@ -4192,10 +4238,6 @@ template <typename Key, typename T, typename Hash, typename Equal, typename Allo
 constexpr uint32_t hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::info_per_cacheline;
 template <typename Key, typename T, typename Hash, typename Equal, typename Allocator, typename Reducer >
 constexpr uint32_t hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::value_per_cacheline;
-template <typename Key, typename T, typename Hash, typename Equal, typename Allocator, typename Reducer >
-constexpr uint32_t hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::info_prefetch_iters;
-template <typename Key, typename T, typename Hash, typename Equal, typename Allocator, typename Reducer >
-constexpr uint32_t hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::value_prefetch_iters;
 
 
 //========== ALIASED TYPES

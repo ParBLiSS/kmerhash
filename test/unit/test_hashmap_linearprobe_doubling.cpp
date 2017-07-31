@@ -17,7 +17,7 @@
 
 // include google test
 #include <gtest/gtest.h>
-#include "kmerhash/hashmap_linearprobe_doubling.hpp"
+#include "kmerhash/hashmap_linearprobe.hpp"
 
 #include <string>
 #include <unordered_map>

@@ -6,11 +6,11 @@
 #include <RobinHoodInfobyte.h>
 #include <RobinHoodInfobyteJumpheuristic.h>
 #include <RobinHoodInfobyteFastforward.h>
-#include "kmerhash/hashmap_robinhood_doubling.hpp"
+#include "kmerhash/hashmap_robinhood.hpp"
 #include "kmerhash/hashmap_robinhood_prefetch.hpp"
 #include "kmerhash/hashmap_robinhood_offsets_prefetch.hpp"
 #include "kmerhash/robinhood_offset_hashmap.hpp"
-#include "kmerhash/hashmap_linearprobe_doubling.hpp"
+#include "kmerhash/hashmap_linearprobe.hpp"
 #include "kmerhash/hash.hpp"
 
 #include <robinhood.h>
@@ -1215,7 +1215,7 @@ void bench_batch_insert_integrated(HS& r, MicroBenchmark& mb, const std::string&
 
 
 template<class K, class V, class H>
-std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t times) {
+std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t times, double max_load, double min_load) {
     std::cout << "Title;1M inserts [sec];find 1M existing [sec];find 1M nonexisting [sec];memory usage [MB];foundcount" << std::endl;
     std::vector<std::vector<Stats>> all_stats;
 
@@ -1224,70 +1224,99 @@ std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t time
 
 	{
 		::fsc::hashmap_robinhood_doubling<K, V, H> m;
-		bench_sequential_insert_pair(m, mb, "Tony Robinhood 0.9", upTo, times, all_stats);
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+		bench_sequential_insert_pair(m, mb, "Tony Robinhood", upTo, times, all_stats);
 	}
 	{
 		::fsc::hashmap_robinhood_doubling<K, V, H> m;
-		bench_batch_insert(m, mb, "Tony Robinhood BATCH 0.9", upTo, times, all_stats);
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+		bench_batch_insert(m, mb, "Tony Robinhood BATCH", upTo, times, all_stats);
 	}
 	{
 		::fsc::hashmap_robinhood_doubling<K, V, H> m;
-		bench_batch_insert_integrated(m, mb, "Tony Robinhood BATCH integrated 0.9", upTo, times, all_stats);
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+		bench_batch_insert_integrated(m, mb, "Tony Robinhood BATCH integrated", upTo, times, all_stats);
 	}
 
 //	{
 //		::fsc::hashmap_robinhood_prefetch<K, V, H> m;
-//		bench_sequential_insert_pair(m, mb, "Tony RHPre 0.9", upTo, times, all_stats);
+//	m.set_max_load_factor(max_load);
+//	m.set_min_load_factor(min_load);
+//		bench_sequential_insert_pair(m, mb, "Tony RHPre", upTo, times, all_stats);
 //	}
 	{
 		::fsc::hashmap_robinhood_prefetch<K, V, H> m;
-		bench_batch_insert(m, mb, "Tony RHPre BATCH 0.9", upTo, times, all_stats);
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+		bench_batch_insert(m, mb, "Tony RHPre BATCH", upTo, times, all_stats);
 	}
 	{
 		::fsc::hashmap_robinhood_prefetch<K, V, H> m;
-		bench_batch_insert_integrated(m, mb, "Tony RHPre BATCH integrated 0.9", upTo, times, all_stats);
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+
+		bench_batch_insert_integrated(m, mb, "Tony RHPre BATCH integrated", upTo, times, all_stats);
 	}
 
 //    {
 //        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H> m;
-//        bench_sequential_insert_pair(m, mb, "Tony RHOffPre 0.9", upTo, times, all_stats);
+	//	m.set_max_load_factor(max_load);
+	//	m.set_min_load_factor(min_load);
+//        bench_sequential_insert_pair(m, mb, "Tony RHOffPre", upTo, times, all_stats);
 //    }
     {
         ::fsc::hashmap_robinhood_doubling_offsets<K, V, H> m;
-        bench_batch_insert(m, mb, "Tony RHOffPre BATCH 0.9", upTo, times, all_stats);
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+        bench_batch_insert(m, mb, "Tony RHOffPre BATCH", upTo, times, all_stats);
     }
     {
         ::fsc::hashmap_robinhood_doubling_offsets<K, V, H> m;
-        bench_batch_insert_integrated(m, mb, "Tony RHOffPre BATCH integrated 0.9", upTo, times, all_stats);
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+        bench_batch_insert_integrated(m, mb, "Tony RHOffPre BATCH integrated", upTo, times, all_stats);
     }
 
 //    {
 //        ::fsc::hashmap_robinhood_offsets<K, V, H> m;
-//        bench_sequential_insert_pair(m, mb, "Tony RHOffPreNoOverflow 0.9", upTo, times, all_stats);
+    //	m.set_max_load_factor(max_load);
+    //	m.set_min_load_factor(min_load);
+//        bench_sequential_insert_pair(m, mb, "Tony RHOffPreNoOverflow", upTo, times, all_stats);
 //    }
     {
         ::fsc::hashmap_robinhood_offsets<K, V, H> m;
-        bench_batch_insert(m, mb, "Tony RHOffPreNoOverflow BATCH 0.9", upTo, times, all_stats);
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+        bench_batch_insert(m, mb, "Tony RHOffPreNoOverflow BATCH", upTo, times, all_stats);
     }
     {
         ::fsc::hashmap_robinhood_offsets<K, V, H> m;
-        bench_batch_insert_integrated(m, mb, "Tony RHOffPreNoOverflow BATCH integrated 0.9", upTo, times, all_stats);
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+        bench_batch_insert_integrated(m, mb, "Tony RHOffPreNoOverflow BATCH integrated", upTo, times, all_stats);
     }
 
 
     {
         ::fsc::hashmap_linearprobe_doubling<K, V, H> m;
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
         bench_sequential_insert_pair(m, mb, "Tony LP", upTo, times, all_stats);
     }
     {
         ::fsc::hashmap_linearprobe_doubling<K, V, H> m;
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
         bench_batch_insert(m, mb, "Tony LP BATCH", upTo, times, all_stats);
     }
 
     {
         RobinHoodInfobytePairNoOverflow::Map<K, V, H> m;
-        m.max_load_factor(0.9f);
-        bench_sequential_insert(m, mb, "RobinHoodInfobytePairNoOverflow 0.9", upTo, times, all_stats);
+		m.max_load_factor(max_load);
+        bench_sequential_insert(m, mb, "RobinHoodInfobytePairNoOverflow", upTo, times, all_stats);
     }
 
 ////    {
@@ -1311,8 +1340,9 @@ std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t time
         google::dense_hash_map<K, V, H> googlemap;
         googlemap.set_empty_key(-1);
         googlemap.set_deleted_key(-2);
-        googlemap.max_load_factor(0.9f);
-        bench_sequential_insert(googlemap, mb, "google::dense_hash_map 0.9", upTo, times, all_stats);
+        googlemap.max_load_factor(max_load);
+        googlemap.min_load_factor(min_load);
+        bench_sequential_insert(googlemap, mb, "google::dense_hash_map", upTo, times, all_stats);
     }
 
 ////    {
@@ -1325,8 +1355,8 @@ std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t time
 
     {
         std::unordered_map<K, V, H> m;
-        m.max_load_factor(0.9f);
-        bench_sequential_insert(m, mb, "std::unordered_map 0.9", upTo, times, all_stats);
+        m.max_load_factor(max_load);
+        bench_sequential_insert(m, mb, "std::unordered_map", upTo, times, all_stats);
     }
 
 ////    {
@@ -1642,9 +1672,9 @@ int main(int argc, char** argv) {
     size_t iterations = 1000;
     size_t cnt_per_iter = 100 * 1000;
     {
-		auto stats64 = bench_sequential_insert<uint64_t, uint32_t, ::fsc::hash::farm<uint64_t> >(cnt_per_iter, iterations);
+		auto stats64 = bench_sequential_insert<uint64_t, uint32_t, ::fsc::hash::farm<uint64_t> >(cnt_per_iter, iterations, 0.8, 0.35);
 		print(std::cout, stats64);
-		std::ofstream fout("datascaling_benchmark_64_32_farmhash.txt");
+		std::ofstream fout("datascaling_benchmark_64_32_farmhash-0.8-0.35.txt");
 		print(fout, stats64);
     }
 //    {
