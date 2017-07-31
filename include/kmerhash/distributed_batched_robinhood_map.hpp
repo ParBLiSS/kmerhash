@@ -71,7 +71,7 @@
 
 #include "containers/dsc_container_utils.hpp"
 
-#include "io/incremental_mxx.hpp"
+#include "incremental_mxx.hpp"
 
 namespace dsc  // distributed std container
 {
@@ -351,8 +351,16 @@ namespace dsc  // distributed std container
         }
 
         BL_BENCH_START(insert);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_resume();
+#endif
         this->transform_input(input);
-        BL_BENCH_END(insert, "transform_intput", input.size());
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_pause();
+#endif
+        BL_BENCH_END(insert, "transform_input", input.size());
 
         // communication part
         if (this->comm.size() > 1) {
@@ -361,10 +369,18 @@ namespace dsc  // distributed std container
           // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
 //          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
 //          BLISS_UNUSED(recv_counts);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
           std::vector<size_t> recv_counts;
 			  std::vector<size_t> i2o;
 			  std::vector<::std::pair<Key, T> > buffer;
-			  ::imxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+			  ::khmxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
 			  input.swap(buffer);
           BL_BENCH_END(insert, "dist_data", input.size());
         }
@@ -378,7 +394,15 @@ namespace dsc  // distributed std container
 //          std::cerr << "WARNING: not implemented to filter by predicate." << std::endl;
 //        	count = this->c.insert(input, pred);
 //        } else
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_INSERT)
+        __itt_resume();
+#endif
         	this->c.insert(input);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_INSERT)
+        __itt_pause();
+#endif
         BL_BENCH_END(insert, "insert", this->c.size());
 
         BL_BENCH_REPORT_MPI_NAMED(insert, "hashmap:insert", this->comm);
@@ -412,74 +436,112 @@ namespace dsc  // distributed std container
           BL_BENCH_START(count);
           ::fsc::back_emplace_iterator<::std::vector<::std::pair<Key, size_type> > > emplace_iter(results);
           // even if count is 0, still need to participate in mpi calls.  if (keys.size() == 0) return results;
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_resume();
+#endif
           this->transform_input(keys);
-          BL_BENCH_END(count, "transform_intput", keys.size());
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_pause();
+#endif
+          BL_BENCH_END(count, "transform_input", keys.size());
 
 
             BL_BENCH_START(count);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_UNIQUE)
+      __itt_resume();
+#endif
             if (remove_duplicate)
             	::fsc::unique(keys, sorted_input,
                     typename Base::StoreTransformedFunc(),
                     typename Base::StoreTransformedEqual());
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_UNIQUE)
+      __itt_pause();
+#endif
             BL_BENCH_END(count, "unique", keys.size());
 
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
+              std::vector<size_t> recv_counts;
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
 
           if (this->comm.size() > 1) {
 
               BL_BENCH_COLLECTIVE_START(count, "dist_query", this->comm);
               // distribute (communication part)
-              std::vector<size_t> recv_counts;
+
               {
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
                 std::vector<size_t> i2o;
                 std::vector<Key > buffer;
-                ::imxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+                ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
                 keys.swap(buffer);
 	  //            ::dsc::distribute_unique(keys, this->key_to_rank, sorted_input, this->comm,
 	  //            				typename Base::StoreTransformedFunc(),
 	  //            				typename Base::StoreTransformedEqual()).swap(recv_counts);
               }
               BL_BENCH_END(count, "dist_query", keys.size());
-
+          }
 
             // local count. memory utilization a potential problem.
             // do for each src proc one at a time.
             BL_BENCH_START(count);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
             results.reserve(keys.size() );                   // TODO:  should estimate coverage.
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
             BL_BENCH_END(count, "reserve", results.capacity());
 
             BL_BENCH_START(count);
             {
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT)
+        __itt_resume();
+#endif
             	this->c.count(emplace_iter, keys.begin(), keys.end(), pred, pred);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT)
+        __itt_pause();
+#endif
             }
             BL_BENCH_END(count, "local_count", results.size());
+
+            if (this->comm.size() > 1) {
 
             // send back using the constructed recv count
             BL_BENCH_COLLECTIVE_START(count, "a2a2", this->comm);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_A2A)
+        __itt_resume();
+#endif
             mxx::all2allv(results, recv_counts, this->comm).swap(results);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_A2A)
+        __itt_pause();
+#endif
             BL_BENCH_END(count, "a2a2", results.size());
-          } else {
-
-            BL_BENCH_START(count);
-            // keep unique keys
-            if (remove_duplicate)
-				::fsc::unique(keys, sorted_input,
-						typename Base::StoreTransformedFunc(),
-						typename Base::StoreTransformedEqual());
-            BL_BENCH_END(count, "uniq1", keys.size());
-
-
-            BL_BENCH_START(count);
-            results.reserve(keys.size());                   // TODO:  should estimate coverage.
-            BL_BENCH_END(count, "reserve", results.capacity());
-
-
-            BL_BENCH_START(count);
-            // within start-end, values are unique, so don't need to set unique to true.
-            {
-              this->c.count(emplace_iter, keys.begin(), keys.end(), pred, pred);
-            }
-            BL_BENCH_END(count, "local_count", results.size());
           }
+
 
           BL_BENCH_REPORT_MPI_NAMED(count, "base_hashmap:count", this->comm);
 
@@ -522,25 +584,57 @@ namespace dsc  // distributed std container
           BL_BENCH_START(find);
           ::fsc::back_emplace_iterator<::std::vector<::std::pair<Key, T> > > emplace_iter(results);
           // even if count is 0, still need to participate in mpi calls.  if (keys.size() == 0) return results;
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_resume();
+#endif
           this->transform_input(keys);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_pause();
+#endif
           BL_BENCH_END(find, "input_transform", keys.size());
 
         BL_BENCH_START(find);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_UNIQUE)
+      __itt_resume();
+#endif
         if (remove_duplicate)
         	::fsc::unique(keys, sorted_input,
         				typename Base::StoreTransformedFunc(),
 						typename Base::StoreTransformedEqual());
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_UNIQUE)
+      __itt_pause();
+#endif
         BL_BENCH_END(find, "unique", keys.size());
 
               if (this->comm.size() > 1) {
 
                 BL_BENCH_COLLECTIVE_START(find, "dist_query", this->comm);
                 // distribute (communication part)
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
                 std::vector<size_t> recv_counts;
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
                 {
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
             std::vector<size_t> i2o;
             std::vector<Key > buffer;
-            ::imxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+            ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
             keys.swap(buffer);
       //            ::dsc::distribute_unique(keys, this->key_to_rank, sorted_input, this->comm,
       //                    typename Base::StoreTransformedFunc(),
@@ -553,36 +647,44 @@ namespace dsc  // distributed std container
             // do for each src proc one at a time.
 
             BL_BENCH_START(find);
-            results.reserve(keys.size() * 10);                   // TODO:  should estimate coverage.
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
+            results.reserve(keys.size());                   // TODO:  should estimate coverage, but at most same as number of keys.
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
             BL_BENCH_END(find, "reserve", results.capacity());
 
             BL_BENCH_START(find);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
             std::vector<size_t> send_counts(this->comm.size(), 0);
             auto start = keys.begin();
             auto end = start;
-            size_t new_est = 0;
-            size_t req_sofar = 0;
-            size_t req_total = ::std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
 
             for (int i = 0; i < this->comm.size(); ++i) {
               ::std::advance(end, recv_counts[i]);
 
-              // estimate the local intermediate results size after the first 3 iterations.
-              //if (i == std::ceil(static_cast<double>(this->comm.size()) * 0.05)) {
-              if (req_sofar > 0) {
-                new_est = std::ceil((static_cast<double>(results.size()) /
-                    static_cast<double>(req_sofar)) *
-                                    static_cast<double>(req_total) * 1.1f);
-                if (new_est > results.capacity()) {
-                  if (this->comm.rank() == 0) printf("rank %d nkeys %lu nresuts %lu est result size %lu original estimate %lu\n", this->comm.rank(), keys.size(), results.size(), new_est, results.capacity());
-                  results.reserve(new_est);  // if new_est is lower than capacity, nothing happens.
-                }
-              }
-              req_sofar += recv_counts[i];
-
               // work on query from process i.
 
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_resume();
+#endif
               send_counts[i] = this->c.find(emplace_iter, start, end, pred, pred);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_pause();
+#endif
               // if (this->comm.rank() == 0) BL_DEBUGF("R %d added %d results for %d queries for process %d\n", this->comm.rank(), send_counts[i], recv_counts[i], i);
 
               start = end;
@@ -592,38 +694,44 @@ namespace dsc  // distributed std container
 
 
             BL_BENCH_COLLECTIVE_START(find, "a2a2", this->comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_resume();
+#endif
             // send back using the constructed recv count
             mxx::all2allv(results, send_counts, this->comm).swap(results);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_pause();
+#endif
             BL_BENCH_END(find, "a2a2", results.size());
 
           } else {
 
-            BL_BENCH_START(find);
-            // keep unique keys
-            if (remove_duplicate)
-            	::fsc::unique(keys, sorted_input,
-            			typename Base::StoreTransformedFunc(),
-						typename Base::StoreTransformedEqual());
-            BL_BENCH_END(find, "uniq1", keys.size());
 
             BL_BENCH_START(find);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
             results.reserve(keys.size());                   // TODO:  should estimate coverage.
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
             //printf("reserving %lu\n", keys.size() * this->key_multiplicity);
             BL_BENCH_END(find, "reserve", results.capacity() );
 
-            size_t estimating = std::ceil(static_cast<double>(keys.size()) * 0.05);
-
             BL_BENCH_START(find);
-            size_t res_size = this->c.find(emplace_iter, keys.begin(), keys.begin() + estimating, pred, pred);
-            BL_BENCH_END(find, "local_find_0.1", estimating);
-
-            BL_BENCH_START(find);
-            size_t est = std::ceil((static_cast<double>(res_size) / static_cast<double>(estimating)) * static_cast<double>(keys.size()) * 1.1f);
-            results.reserve(est);
-            BL_BENCH_END(find, "reserve_est", results.capacity());
-
-            BL_BENCH_START(find);
-            this->c.find(emplace_iter, keys.begin() + estimating, keys.end(), pred, pred);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_resume();
+#endif
+            this->c.find(emplace_iter, keys.begin(), keys.end(), pred, pred);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_pause();
+#endif
             BL_BENCH_END(find, "local_find", results.size());
 
             if (this->comm.rank() == 0) printf("rank %d result size %lu capacity %lu\n", this->comm.rank(), results.size(), results.capacity());
@@ -666,18 +774,42 @@ namespace dsc  // distributed std container
           }
 
           BL_BENCH_START(erase);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_resume();
+#endif
           this->transform_input(keys);
-          BL_BENCH_END(erase, "transform_intput", keys.size());
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_pause();
+#endif
+          BL_BENCH_END(erase, "transform_input", keys.size());
 
           if (this->comm.size() > 1) {
 
               BL_BENCH_START(erase);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
               std::vector<size_t> recv_counts;
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
               {
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
           std::vector<size_t> i2o;
           std::vector<Key > buffer;
-          ::imxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
-          //::imxx::destructive_distribute(input, this->key_to_rank, recv_counts, buffer, this->comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+          ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+          //::khmxx::destructive_distribute(input, this->key_to_rank, recv_counts, buffer, this->comm);
           keys.swap(buffer);
               }
               BL_BENCH_END(erase, "dist_query", keys.size());
@@ -687,17 +819,33 @@ namespace dsc  // distributed std container
           }
 
           BL_BENCH_START(erase);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_UNIQUE)
+      __itt_resume();
+#endif
           if (remove_duplicate)
 			  // then call local remove.
 			  ::fsc::unique(keys, sorted_input,
                                                   typename Base::StoreTransformedFunc(),
                                                   typename Base::StoreTransformedEqual());
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_UNIQUE)
+      __itt_pause();
+#endif
           BL_BENCH_END(erase, "unique", keys.size());
 
 
           BL_BENCH_START(erase);
           // then call local remove.
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ERASE)
+        __itt_resume();
+#endif
           this->c.erase(keys.begin(), keys.end(), pred, pred);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ERASE)
+        __itt_pause();
+#endif
           BL_BENCH_END(erase, "erase", keys.size());
 
           BL_BENCH_REPORT_MPI_NAMED(erase, "base_hashmap:erase", this->comm);
@@ -876,15 +1024,35 @@ namespace dsc  // distributed std container
           return 0;
         }
 
+        BL_BENCH_START(insert);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_TRANSFORM)
+      __itt_resume();
+#endif
+        this->transform_input(input);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_TRANSFORM)
+      __itt_pause();
+#endif
+        BL_BENCH_END(insert, "transform_input", input.size());
+
         // then send the raw k-mers.
         // communication part
         if (this->comm.size() > 1) {
           BL_BENCH_START(insert);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
           // first remove duplicates.  sort, then get unique, finally remove the rest.  may not be needed
           std::vector<size_t> recv_counts;
           std::vector<size_t> i2o;
           std::vector<Key > buffer;
-          ::imxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+          ::khmxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
           input.swap(buffer);
 
           BL_BENCH_END(insert, "dist_data", input.size());
@@ -893,12 +1061,29 @@ namespace dsc  // distributed std container
         typename Base::Base::Base::Base::InputTransform trans;
 
         BL_BENCH_START(insert);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
         ::std::vector<::std::pair<Key, T> > temp;
         temp.reserve(input.size());
         ::fsc::back_emplace_iterator<::std::vector<::std::pair<Key, T> > > emplace_iter(temp);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_TRANSFORM)
+      __itt_resume();
+#endif
         ::std::transform(input.begin(), input.end(), emplace_iter, [&trans](Key const & x) {
           return ::std::make_pair(trans(x), T(1));
         });
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_TRANSFORM)
+      __itt_pause();
+#endif
         BL_BENCH_END(insert, "convert", input.size());
 
 
@@ -914,7 +1099,15 @@ namespace dsc  // distributed std container
 //        	std::cerr << "WARNING, predicated insert not implemented yet. using normal" << std::endl;
 //          count = this->c.insert(temp, pred);
 //        } else
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_INSERT)
+        __itt_resume();
+#endif
           count = this->c.insert(temp);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_INSERT)
+        __itt_pause();
+#endif
         BL_BENCH_END(insert, "local_insert", this->local_size());
 
 
@@ -1083,7 +1276,7 @@ namespace dsc  // distributed std container
 //          {
 //      std::vector<size_t> i2o;
 //      std::vector<Key > buffer;
-//      ::imxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+//      ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
 //      keys.swap(buffer);
 ////            ::dsc::distribute_unique(keys, this->key_to_rank, sorted_input, this->comm,
 ////                    typename Base::StoreTransformedFunc(),
@@ -1371,7 +1564,7 @@ namespace dsc  // distributed std container
 //
 //        BL_BENCH_START(insert);
 //        this->transform_input(input);
-//        BL_BENCH_END(insert, "transform_intput", input.size());
+//        BL_BENCH_END(insert, "transform_input", input.size());
 //
 //
 //        //        printf("r %d key size %lu, val size %lu, pair size %lu, tuple size %lu\n", this->comm.rank(), sizeof(Key), sizeof(T), sizeof(::std::pair<Key, T>), sizeof(::std::tuple<Key, T>));
@@ -1386,7 +1579,7 @@ namespace dsc  // distributed std container
 //          std::vector<size_t> recv_counts;
 //          std::vector<size_t> i2o;
 //          std::vector<::std::pair<Key, T> > buffer;
-//          ::imxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+//          ::khmxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
 //          input.swap(buffer);
 //
 //          //auto recv_counts = ::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm);

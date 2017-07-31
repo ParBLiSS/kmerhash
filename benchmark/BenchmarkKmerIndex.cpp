@@ -26,6 +26,26 @@
 
 #include "bliss-config.hpp"
 
+#ifdef VTUNE_ANALYSIS
+#define MEASURE_DISABLED 0
+
+#define MEASURE_RESERVE 10
+#define MEASURE_TRANSFORM 11
+#define MEASURE_UNIQUE 12
+#define MEASURE_BUCKET 13
+#define MEASURE_PERMUTE 14
+#define MEASURE_A2A 15
+
+#define MEASURE_INSERT 1
+#define MEASURE_FIND 2
+#define MEASURE_COUNT 3
+#define MEASURE_ERASE 4
+
+static int measure_mode = MEASURE_DISABLED;
+
+#include <ittnotify.h>
+
+#endif
 
 
 #include <functional>
@@ -59,9 +79,9 @@
 #include "index/quality_score_iterator.hpp"
 #include "index/kmer_hash.hpp"   // workaround for distributed_map_base requiring farm hash.
 
-
 #include "kmerhash/distributed_robinhood_map.hpp"
 #include "kmerhash/distributed_batched_robinhood_map.hpp"
+
 
 #include "index/kmer_index.hpp"
 
@@ -73,9 +93,6 @@
 #include "mxx/env.hpp"
 #include "mxx/comm.hpp"
 
-#ifdef VTUNE_ANALYSIS
-#include <ittnotify.h>
-#endif
 
 
 // ================ define preproc macro constants
@@ -108,6 +125,8 @@
 #define SINGLE 51
 #define CANONICAL 52
 #define BIMOLECULE 53
+
+
 
 
 
@@ -410,13 +429,6 @@ void sample(std::vector<KmerType> &query, size_t n, unsigned int seed, mxx::comm
 }
 
 
-#ifdef VTUNE_ANALYSIS
-
-#define MEASURE_INSERT 1
-#define MEASURE_FIND 2
-#define MEASURE_COUNT 3
-#define MEASURE_ERASE 4
-#endif
 
 /**
  *
@@ -455,9 +467,6 @@ int main(int argc, char** argv) {
   std::string queryname(filename);
 
   int sample_ratio = 2;
-#ifdef VTUNE_ANALYSIS
-  int measure_mode = MEASURE_INSERT;
-#endif
 
   double max_load = 0.8;
   double min_load = 0.35;
@@ -504,6 +513,13 @@ int main(int argc, char** argv) {
     measure_modes.push_back("find");
     measure_modes.push_back("count");
     measure_modes.push_back("erase");
+    measure_modes.push_back("reserve");
+    measure_modes.push_back("transform");
+    measure_modes.push_back("unique");
+    measure_modes.push_back("bucket");
+    measure_modes.push_back("permute");
+    measure_modes.push_back("a2a");
+    measure_modes.push_back("disabled");
     TCLAP::ValuesConstraint<std::string> measureModeVals( measure_modes );
     TCLAP::ValueArg<std::string> measureModeArg("","measured_op","function to measure (default insert)",false,"insert",&measureModeVals, cmd);
 #endif
@@ -540,6 +556,20 @@ int main(int argc, char** argv) {
       measure_mode = MEASURE_COUNT;
     } else if (measure_mode_str == "erase") {
       measure_mode = MEASURE_ERASE;
+    } else if (measure_mode_str == "reserve") {
+      measure_mode = MEASURE_RESERVE;
+    } else if (measure_mode_str == "transform") {
+      measure_mode = MEASURE_TRANSFORM;
+    } else if (measure_mode_str == "unique") {
+      measure_mode = MEASURE_UNIQUE;
+    } else if (measure_mode_str == "bucket") {
+      measure_mode = MEASURE_BUCKET;
+    } else if (measure_mode_str == "permute") {
+      measure_mode = MEASURE_PERMUTE;
+    } else if (measure_mode_str == "a2a") {
+      measure_mode = MEASURE_A2A;
+    } else {
+      measure_mode = MEASURE_DISABLED;
     }
 #endif
 
@@ -621,18 +651,10 @@ int main(int argc, char** argv) {
 	  size_t total = mxx::allreduce(temp.size(), comm);
 	  if (comm.rank() == 0) printf("total size is %lu\n", total);
 
-#ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_INSERT)
-        __itt_resume();
-#endif
 
 	  BL_BENCH_START(test);
 	  idx.insert(temp);
 	  BL_BENCH_COLLECTIVE_END(test, "insert", idx.local_size(), comm);
-#ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_INSERT)
-        __itt_pause();
-#endif
 
     total = idx.size();
     if (comm.rank() == 0) printf("total size after insert/rehash is %lu\n", total);
@@ -640,48 +662,24 @@ int main(int argc, char** argv) {
 
   {
 
-#ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_COUNT)
-        __itt_resume();
-#endif
 	  {
 		  auto lquery = query;
 		  BL_BENCH_START(test);
 		  auto counts = idx.count(lquery);
 		  BL_BENCH_COLLECTIVE_END(test, "count", counts.size(), comm);
 	  }
-#ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_COUNT)
-        __itt_pause();
-#endif
 
-#ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_FIND)
-        __itt_resume();
-#endif
 	  {
 		  auto lquery = query;
 		  BL_BENCH_START(test);
 		  auto found = idx.find(lquery);
 		  BL_BENCH_COLLECTIVE_END(test, "find", found.size(), comm);
 	  }
-#ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_FIND)
-        __itt_pause();
-#endif
 
 
-#ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_ERASE)
-        __itt_resume();
-#endif
 	  BL_BENCH_START(test);
 	  idx.erase(query);
 	  BL_BENCH_COLLECTIVE_END(test, "erase", idx.local_size(), comm);
-#ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_ERASE)
-        __itt_pause();
-#endif
 
   }
 
