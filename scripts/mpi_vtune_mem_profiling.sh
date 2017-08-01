@@ -7,7 +7,6 @@ else
 	cores_per_socket=`expr $1 / 4`
 fi
 
-mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.log \
 amplxe-cl -collect-with runsa -knob event-config=\
 INST_RETIRED.ANY,\
 CPU_CLK_UNHALTED.THREAD,\
@@ -20,8 +19,10 @@ MEM_LOAD_UOPS_RETIRED.L1_MISS,\
 MEM_LOAD_UOPS_RETIRED.L2_MISS,\
 MEM_LOAD_UOPS_RETIRED.L3_MISS,\
 OFFCORE_RESPONSE:request=ALL_REQUESTS:response=LLC_MISS.LOCAL_DRAM \
--r ${2}.vtune -- ${@:3}
+-r ${2}.vtune -- \
+mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.log \
+${@:3}
 
 
-#amplxe-cl -report summary
+amplxe-cl -report summary
 

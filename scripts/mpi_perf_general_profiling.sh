@@ -6,8 +6,7 @@ else
 	cores_per_socket=`expr $1 / 4`
 fi 
 
-
-mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.log \
+# collect data for all MPI processes at the same time.
 perf record -e \
 instructions,\
 cycles,\
@@ -29,5 +28,7 @@ iTLB-loads,\
 iTLB-load-misses,\
 mem-loads,\
 mem-stores \
---call-graph lbr -o ${2}.perf ${@:3}
+--call-graph lbr -o ${2}.perf \
+mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.log \
+${@:3}
 

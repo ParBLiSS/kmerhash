@@ -7,8 +7,9 @@ else
 	cores_per_socket=`expr $1 / 4`
 fi 
 
+amplxe-cl -collect advanced-hotspots -r ${2}.vtune -- \
 mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.log \
-amplxe-cl -collect advanced-hotspots -r ${2}.vtune -- ${@:3} 
+${@:3} 
 
 amplxe-cl -report summary
 amplxe-cl -report hotspots
