@@ -1,17 +1,15 @@
 #!/bin/bash
 source /opt/intel/vtune_amplifier_xe_2017/amplxe-vars.sh
 
-#echo "0" | sudo tee /proc/sys/kernel/yama/ptrace_scope
-#echo "0" | sudo tee /proc/sys/kernel/nmi_watchdog
-#echo "0" | sudo tee /proc/sys/kernel/kptr_restrict
-rm -rf vtunes-ah
-
-
-if [ $1 -eq 1 ]; then
-	mpirun -np 1 --map-by core --bind-to core --rank-by core amplxe-cl -collect advanced-hotspots -r vtunes-ah -- ${@:2} 
+if [ $1 -le 4 ]; then
+	cores_per_socket=1
 else
-	mpirun -np 1 --map-by core --bind-to core --rank-by core amplxe-cl -collect advanced-hotspots -r vtunes-ah -- ${@:2} : -np `expr $1 - 1` --map-by core --bind-to core --rank-by core ${@:2}
-fi
+	cores_per_socket=`expr $1 / 4`
+fi 
+
+mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.log \
+amplxe-cl -collect advanced-hotspots -r ${2}.vtune -- ${@:3} 
+
 amplxe-cl -report summary
 amplxe-cl -report hotspots
 

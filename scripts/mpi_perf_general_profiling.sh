@@ -1,9 +1,33 @@
 #!/bin/sh
 
-if [ $1 -eq 1 ]; then
-	echo "mpirun -np 1 --map-by core --bind-to core --rank-by core perf record -e instructions,cycles,cache-misses --call-graph lbr -o ${2} ${@:3} " > ${2}.log
-	mpirun -np 1 --map-by ppr:1:socket --bind-to core --rank-by core perf record -e instructions,cycles,cache-misses --call-graph lbr -o ${2} ${@:3} >> ${2}.log
-else 
-	echo "mpirun -np 1 --map-by core --bind-to core --rank-by core perf record -e instructions,cycles,cache-misses --call-graph lbr -o ${2} ${@:3} : -np `expr $1 - 1` --map-by core --bind-to core --rank-by core ${@:3}" > ${2}.log
-	mpirun -np 1 --map-by ppr:1:socket --bind-to core --rank-by core perf record -e instructions,cycles,cache-misses --call-graph lbr -o ${2} ${@:3} : -np `expr $1 - 1` --map-by ppr:1:socket --bind-to core --rank-by core ${@:3} >> ${2}.log
-fi
+if [ $1 -le 4 ]; then
+	cores_per_socket=1
+else
+	cores_per_socket=`expr $1 / 4`
+fi 
+
+
+mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.log \
+perf record -e \
+instructions,\
+cycles,\
+cache-misses,\
+cache-references,\
+L1-dcache-loads,\
+L1-dcache-stores,\
+L1-dcache-load-misses,\
+L1-icache-load-misses,\
+LLC-loads,\
+LLC-load-misses,\
+LLC-stores,\
+LLC-store-misses,\
+dTLB-loads,\
+dTLB-load-misses,\
+dTLB-stores,\
+dTLB-store-misses,\
+iTLB-loads,\
+iTLB-load-misses,\
+mem-loads,\
+mem-stores \
+--call-graph lbr -o ${2}.perf ${@:3}
+
