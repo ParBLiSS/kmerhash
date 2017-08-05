@@ -49,6 +49,8 @@
 
 #include "kmerhash/hyperloglog64.hpp"  // for size estimation.
 
+#include "utils/benchmark_utils.hpp"
+
 // should be easier for prefetching
 #if ENABLE_PREFETCH
 #define KH_PREFETCH(ptr, level)  _mm_prefetch(ptr, level)
@@ -588,7 +590,7 @@ public:
 
 	inline void set_max_load_factor(double const & _max_load_factor) {
 		max_load_factor = _max_load_factor;
-		max_load = static_cast<size_t>(static_cast<double>(buckets) * max_load_factor);
+		max_load = static_cast<size_t>(::std::ceil(static_cast<double>(buckets) * max_load_factor));
 	}
 
 
@@ -836,7 +838,7 @@ public:
 	 */
 	void reserve(size_type n) {
 		//    if (n > this->max_load) {   // if requested more than current max load, then we need to resize up.
-		rehash(static_cast<size_t>(static_cast<double>(n) / this->max_load_factor));
+		rehash(static_cast<size_t>(::std::ceil(static_cast<double>(n) / this->max_load_factor)));
 		// rehash to the new size.    current bucket count should be less than next_power_of_2(n).
 		//    }  // do not resize down.  do so only when erase.
 	}
@@ -869,7 +871,7 @@ public:
 //		}
 
 		size_t max_offset;
-		if ((n != buckets) && (lsize < static_cast<size_type>(max_load_factor * static_cast<double>(n)))) {  // don't resize if lsize is larger than the new max load.
+		if ((n != buckets) && (lsize < static_cast<size_t>(::std::ceil(max_load_factor * static_cast<double>(n))))) {  // don't resize if lsize is larger than the new max load.
 
 			if ((lsize > 0) && (n < buckets)) {  // down sizing. check if we overflow info
 				while ((max_offset = this->copy_downsize_max_offset(n)) > 127)  { // if downsizing creates offset > 127, then increase n and check again.
@@ -906,8 +908,8 @@ public:
 			buckets = n;
 			mask = n - 1;
 
-			min_load = static_cast<size_type>(static_cast<double>(n) * min_load_factor);
-			max_load = static_cast<size_type>(static_cast<double>(n) * max_load_factor);
+			min_load = static_cast<size_t>(::std::ceil(static_cast<double>(n) * min_load_factor));
+			max_load = static_cast<size_t>(::std::ceil(static_cast<double>(n) * max_load_factor));
 
 			// swap in.
 			container.swap(tmp);
@@ -2068,7 +2070,7 @@ public:
 	/// batch insert, minimizing number of loop conditionals and rehash checks.
 	// NOT REALLY SORT.  JUST PREFETCHED VERSION AND AVOIDING RESIZE CHECKS.
 	template <typename LESS = ::std::less<key_type> >
-	void insert_sort(::std::vector<value_type> const & input) {
+	void insert_sort2(::std::vector<value_type> const & input) {
 
 #if defined(REPROBE_STAT)
 		std::cout << "INSERT MIN REHASH CHECK (not really sort)" << std::endl;
@@ -2231,6 +2233,238 @@ public:
 
 	}
 
+	/// batch insert, minimizing number of loop conditionals and rehash checks.
+	// hash first, then sort within each bucket.
+	template <typename LESS = ::std::less<key_type> >
+	void insert_sort(::std::vector<value_type> const & input) {
+
+		assert(lsize == 0);
+
+		BL_BENCH_INIT(insert_sort);
+
+#if defined(REPROBE_STAT)
+		std::cout << "INSERT_SEARCH.  NOTE: DOES NOT INCRMENETALLY INSERT YEY" << std::endl;
+
+		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+		} else {
+			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+		}
+		reset_reprobe_stats();
+		size_type before = lsize;
+#endif
+
+		size_t input_size = input.size();
+
+		BL_BENCH_START(insert_sort);
+		//===  hashing only.
+		size_t* hash_vals = nullptr;
+		int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 64, sizeof(size_t) * input_size);
+		if (ret) {
+			free(hash_vals);
+			throw std::length_error("failed to allocate aligned memory");
+		}
+		BL_BENCH_END(insert_sort, "alloc_hash", input.size());
+
+		BL_BENCH_START(insert_sort);
+		hyperloglog64<key_type, hasher, 12> hll_local;
+
+		size_t hval;
+		auto it = input.begin();
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+		for (size_t i = 0; i < input.size(); ++i, ++it) {
+			hval = hash(it->first);
+			hll_local.update_via_hashval(hval);
+			// using mm_stream here does not make a differnece.
+			_mm_stream_si64(reinterpret_cast<long long int*>(hash_vals + i), *(reinterpret_cast<long long int*>(&hval)));
+			//hash_vals[i] = hval;
+		}
+#pragma GCC diagnostic pop
+
+		// estimate the number of unique entries in input.
+#if defined(REPROBE_STAT)
+		double distinct_input_est = hll_local.estimate();
+#endif
+
+		hll_local.merge(hll);
+		double distinct_total_est = hll_local.estimate();
+		BL_BENCH_END(insert_sort, "hash_hll", input.size());
+
+#if defined(REPROBE_STAT)
+		std::cout << " estimate input cardinality as " << distinct_input_est << " total after insertion " << distinct_total_est << std::endl;
+#endif
+
+		BL_BENCH_START(insert_sort);
+		// ========= now count, including duplicates
+		size_t new_buckets = next_power_of_2(static_cast<size_t>(::std::ceil(static_cast<double>(distinct_total_est) / max_load_factor)));
+		size_t padded_buckets = new_buckets + std::numeric_limits<info_type>::max() + 1;
+
+		std::cout << "EST distinct " << distinct_total_est << " buckets " << new_buckets << " padded " << padded_buckets << std::endl;
+
+		// ========= count in O(N) time and O(B) space.   using 2x bucket size, first entry is starting offset,
+		// second entry begins as count and then is changed to ending offset.
+		size_t* offsets = nullptr;
+		ret = posix_memalign(reinterpret_cast<void **>(&offsets), 64, sizeof(size_t) * (2 * new_buckets));
+		if (ret) {
+			free(offsets);
+			throw std::length_error("failed to allocate aligned memory");
+		}
+		memset(offsets, 0, sizeof(size_t) * (2 * new_buckets));  // initialize to zero count.
+
+		size_t new_mask = new_buckets - 1;
+		size_t ii = 0;
+		size_t* counts = offsets + 1;  // put the counts in the same array.
+		for (size_t i = 0; i < input.size(); ++i) {
+			KH_PREFETCH(counts + ((hash_vals[i + INSERT_LOOKAHEAD] & new_mask) * 2), _MM_HINT_T0);
+			KH_PREFETCH(hash_vals + i + 2 * INSERT_LOOKAHEAD, _MM_HINT_T0);
+
+			ii = (hash_vals[i] & new_mask) * 2;
+			++counts[ii];   // random access here.  counts already offset by 1.
+		}
+		BL_BENCH_END(insert_sort, "count", input.size());
+
+		// ======= compute offsets in O(B) time and space.
+		BL_BENCH_START(insert_sort);
+		size_t* off_ends = counts;
+		for (size_t i = 0; i < (2 * new_buckets); i += 2) {
+			offsets[i + 2] = offsets[i] + counts[i];   // counts already offset by 1.
+			off_ends[i] = offsets[i];  // copy to establish current end of a bucket.
+//			std::cout << "initial bucket " << (i/2) << " start " << offsets[i] << " end " << off_ends[i] << std::endl;
+		}
+		BL_BENCH_END(insert_sort, "offsets", new_buckets);
+
+
+		// ======== now walk though and sort the input and corresponding hash a
+		BL_BENCH_START(insert_sort);
+		value_type* elements = nullptr;
+		ret = posix_memalign(reinterpret_cast<void **>(&elements), 64, sizeof(value_type) * input.size());
+		if (ret) {
+			free(elements);
+			throw std::length_error("failed to allocate aligned memory");
+		}
+		size_t* hashes = nullptr;
+		ret = posix_memalign(reinterpret_cast<void **>(&hashes), 64, sizeof(size_t) * input.size());
+		if (ret) {
+			free(hashes);
+			throw std::length_error("failed to allocate aligned memory");
+		}
+		BL_BENCH_END(insert_sort, "alloc", input.size());
+
+		BL_BENCH_START(insert_sort);
+		// how to handle duplicates? - keep items sorted. start with original size, then compact later.
+		size_t start, end;
+		size_t hashval;
+		size_t found;
+		size_t l_size = 0;
+		for (size_t i = 0; i < input.size(); ++i) {
+			KH_PREFETCH(hash_vals + i + 3 * INSERT_LOOKAHEAD, _MM_HINT_T1);
+			KH_PREFETCH(offsets + ((hash_vals[i + 2 * INSERT_LOOKAHEAD] & new_mask) * 2), _MM_HINT_T0);
+
+			// bucket id.
+			hashval = hash_vals[i];
+			ii = (hashval & new_mask) * 2;
+			start = offsets[ii];
+			end = off_ends[ii];
+
+			KH_PREFETCH(elements + offsets[(hash_vals[i + INSERT_LOOKAHEAD] & new_mask) * 2], _MM_HINT_T0);
+
+			// search by hash values first
+			found = ::std::distance(hashes, ::std::lower_bound(hashes + start, hashes + end, hashval));
+
+
+
+			// shuffle, but also maintain order.
+			if (found == end) {
+//				std::cout << i << " at end pos " << found << " key " << input[i].first <<
+//						" so insert val " << input[i].second << " directly." << std::endl;
+				elements[end] = input[i];
+				hashes[end] = hashval;
+				++off_ends[ii];
+				++l_size;
+			} else {  // found a place to insert, may be matched.
+				if ((hashes[found] == hashval) && eq(input[i].first, elements[found].first))  {
+//					std::cout << i << " matched hash " << hashval << " and key " << input[i].first <<
+//							", pos " << found << " so reduce input val " << input[i].second << " with existing " << elements[found].second << std::endl;
+					// if hash matched, then check if value matches.
+					elements[found].second = reduc(elements[found].second, input[i].second);
+				} else {
+//					std::cout << i << " not matched, hash " << hashval << " and key " << input[i].first <<
+//							", pos " << found << " end at " << end << " so insert input val " << input[i].second << " directly." << std::endl;
+					// not matched. so insert here.
+					memmove((elements + found + 1), (elements + found), sizeof(value_type) * (end - found));
+					memmove((hashes + found + 1), (hashes + found), sizeof(size_t) * (end - found));
+
+					elements[found] = input[i];
+					hashes[found] = hashval;
+					++off_ends[ii];
+					++l_size;
+				}
+			}
+		}
+
+		free(hash_vals);
+
+		BL_BENCH_END(insert_sort, "reorder", input.size());
+
+
+		// now calc info
+		assert(l_size <= padded_buckets);
+
+		//============= compute prefix sum to form info array
+		BL_BENCH_START(insert_sort);
+		info_container.resize(padded_buckets, info_empty);
+		container.resize(padded_buckets);
+		size_t offset = 0;
+		size_t count = 0;
+		for (size_t i = 0; i < new_buckets; ++i) {
+			start = offsets[2 * i];
+			end = off_ends[2 * i];
+
+			count = end - start;
+
+
+			// calculate the start position
+			offset = ::std::max(offset, i);
+
+//			std::cout << "final bucket " << i << " offset " << offset << " start " << start << " end " << end << std::endl;
+
+			if ((offset - i) > info_mask) throw ::std::logic_error("overflowing!");
+			// convert count to offset, max with i indicates that offset should advance even for series of empty entries.
+			info_container[i] = (count == 0 ? info_empty : info_normal) + // check the count to see if empty.
+					static_cast<info_type>(offset - i); 					// now calculate offset from current index.
+
+			if (count > 0)
+				memcpy(container.data() + offset, elements + start, sizeof(value_type) * count);
+
+			offset += count;
+		}
+		for (size_t i = new_buckets; i < offset; ++i) {
+			info_container[i] = info_empty + static_cast<info_type>(offset - i);
+		}
+
+		lsize = l_size;
+		buckets = new_buckets;
+		mask = buckets - 1;
+
+		min_load = static_cast<size_t>(::std::ceil(static_cast<double>(buckets) * min_load_factor));
+		max_load = static_cast<size_t>(::std::ceil(static_cast<double>(buckets) * max_load_factor));
+
+		BL_BENCH_END(insert_sort, "sorted to buckets", new_buckets);
+
+#if defined(REPROBE_STAT)
+		print_reprobe_stats("INSERT SORT", input.size(), (lsize - before));
+#endif
+		free(offsets);
+
+		free(hashes);
+		free(elements);
+
+
+		  BL_BENCH_REPORT_NAMED(insert_sort, "insert_sort");
+
+
+	}
 
 
 
@@ -3607,7 +3841,8 @@ public:
 
 		if (present(bid)) {  // not inserted and no exception, so an equal entry has been found.
 
-			if (! std::is_same<Reducer, ::fsc::DiscardReducer>::value)  container[get_pos(bid)].second = r(container[get_pos(bid)].second, val);   // so update.
+			if (! std::is_same<Reducer, ::fsc::DiscardReducer>::value)  container[get_pos(bid)].second =
+					reduc(container[get_pos(bid)].second, val);   // so update.
 
 		}
 	}

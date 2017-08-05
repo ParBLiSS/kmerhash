@@ -495,7 +495,7 @@ int main(int argc, char** argv) {
     TCLAP::ValueArg<std::string> queryArg("Q", "query", "FASTQ file path for query. default to same file as index file", false, "", "string", cmd);
 
     TCLAP::ValueArg<int> algoArg("A",
-                                 "algo", "Reader Algorithm id. Fileloader w/o preload = 2, mmap = 5, posix=7, piio = 10. default is 7.",
+                                 "algo", "Reader Algorithm id. Fileloader w/o preload = 2, mmap = 5, posix=7, mpiio = 10. default is 7.",
                                  false, 7, "int", cmd);
 
     TCLAP::ValueArg<int> sampleArg("q",

@@ -7,6 +7,8 @@ else
 	cores_per_socket=`expr $1 / 4`
 fi
 
+# see https://software.intel.com/en-us/forums/intel-vtune-amplifier-xe/topic/532405
+
 amplxe-cl -collect-with runsa -knob event-config=\
 INST_RETIRED.ANY,\
 CPU_CLK_UNHALTED.THREAD,\

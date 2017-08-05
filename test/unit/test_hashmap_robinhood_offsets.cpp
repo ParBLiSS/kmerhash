@@ -120,11 +120,11 @@ class Hashtable_OARHDO_PrefixTest : public ::testing::Test
     		  break;
     	  }
 
-    	//   test.print();
+    	  // test.print();
 
     	   test.reserve(test.size());
 
-    	   test.print();
+//    	   test.print_raw();
     	   using value_type = ::std::pair<T, T>;
     	   ::std::vector<value_type > test_vals(test.to_vector());
     	   ::std::vector<value_type > gold_vals(this->gold.begin(), this->gold.end());
@@ -151,16 +151,19 @@ class Hashtable_OARHDO_PrefixTest : public ::testing::Test
     	     same &= ::std::equal(gold_vals.begin(), gold_vals.end(), test_vals.begin());
 
     	      if (!same) {
-    	    	  test.print();
-    	        for (size_t i = 0; i < gold_vals.size(); ++i) {
-    	          if ((test_vals[i].first != gold_vals[i].first) ||
-    	              (test_vals[i].second != gold_vals[i].second))
+    	    	  for (size_t i = 0; i < this->temp.size(); ++i) {
+    	    		  std::cout << "input " << this->temp[i].first << "->" << this->temp[i].second << std::endl;
+    	    	  }
+    	    	  for (size_t i = 0; i < gold_vals.size(); ++i) {
+//    	          if ((test_vals[i].first != gold_vals[i].first) ||
+//    	              (test_vals[i].second != gold_vals[i].second))
 
     	            std::cout <<
     	        		  test_vals[i].first << "->" << test_vals[i].second << "\t" <<
     	        		  gold_vals[i].first << "->" << gold_vals[i].second << "," <<
     	        		  (gold_vals[i].first % (test.capacity())) << std::endl;
     	        }
+//  	    	  test.print_raw();
     	      }
 
     	      ASSERT_TRUE(same);
@@ -435,7 +438,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 	  }
 
 
-      test.print();
+//      test.print();
       // check unique items in list.
       std::stable_sort(entries.begin(), entries.end(), Less());
       auto new_end = std::unique(entries.begin(), entries.end(), Equal());
@@ -598,7 +601,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 		same &= ::std::equal(gold_vals.begin(), gold_vals.end(), test_vals.begin());
 
 		  if (!same) {
-			  test.print();
+//			  test.print();
 
 			  std::cout << " test count " << test.size() << " gold count " << gold_vals.size() << std::endl;
 			  size_t min = std::min(test_vals.size(), gold_vals.size());

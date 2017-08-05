@@ -1137,10 +1137,10 @@ parse_cmdline(int argc, char** argv) {
 		  map = ROBINHOOD_NONCIRC_TYPE;
 	  } else if (map_type == "robinhood_offset") {
 		  map = ROBINHOOD_OFFSET_TYPE;
-	  } else if (map_type == "robinhood_offset_sep") {
+	  } else if (map_type == "robinhood_offset_overflow") {
 		  map = ROBINHOOD_OFFSET2_TYPE;
-    } else if (map_type == "robinhood_prefetch") {
-      map = ROBINHOOD_PREFETCH_TYPE;
+	  } else if (map_type == "robinhood_prefetch") {
+		  map = ROBINHOOD_PREFETCH_TYPE;
 	  }
 
 	  std::string alpha = alphabetArg.getValue();

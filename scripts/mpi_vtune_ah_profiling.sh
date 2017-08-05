@@ -7,6 +7,8 @@ else
 	cores_per_socket=`expr $1 / 4`
 fi 
 
+# see https://software.intel.com/en-us/forums/intel-vtune-amplifier-xe/topic/532405
+
 amplxe-cl -collect advanced-hotspots -r ${2}.vtune -- \
 mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.log \
 ${@:3} 

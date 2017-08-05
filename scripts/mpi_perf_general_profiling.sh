@@ -6,6 +6,9 @@ else
 	cores_per_socket=`expr $1 / 4`
 fi 
 
+# see https://software.intel.com/en-us/forums/intel-vtune-amplifier-xe/topic/532405
+
+
 # collect data for all MPI processes at the same time.
 perf record -e \
 instructions,\
