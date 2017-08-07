@@ -51,6 +51,11 @@
 
 #include "utils/benchmark_utils.hpp"
 
+#ifdef VTUNE_ANALYSIS
+#include <ittnotify.h>
+#endif
+
+
 // should be easier for prefetching
 #if ENABLE_PREFETCH
 #define KH_PREFETCH(ptr, level)  _mm_prefetch(ptr, level)
@@ -259,38 +264,21 @@ protected:
 	// failed insert (pos_flag set) means the same as successful find.
 
 	using bucket_id_type = size_t;
-	//    static constexpr bucket_id_type bid_pos_mask = ~(static_cast<bucket_id_type>(0)) >> 9;   // lower 55 bits set.
-	//    static constexpr bucket_id_type bid_pos_exists = 1UL << 55;  // 56th bit set.
 	static constexpr bucket_id_type bid_pos_mask = ~(static_cast<bucket_id_type>(0)) >> 1;   // lower 63 bits set.
 	static constexpr bucket_id_type bid_pos_exists = 1ULL << 63;  // 64th bit set.
 	// failed is speial, correspond to all bits set (max distnace failed).  not using 0x800000... because that indicates failed inserting due to occupied.
 	static constexpr bucket_id_type insert_failed = bid_pos_mask;  // unrealistic value that also indicates it's missing.
 	static constexpr bucket_id_type find_failed = bid_pos_mask;  // unrealistic value that also indicates it's missing.
-	//    static constexpr bucket_id_type bid_info_mask = static_cast<bucket_id_type>(info_mask) << 56;   // lower 55 bits set.
-	//    static constexpr bucket_id_type bid_info_empty = static_cast<bucket_id_type>(info_empty) << 56;  // 56th bit set.
 
 
 	inline bucket_id_type make_missing_bucket_id(size_t const & pos) const { //, info_type const & info) const {
-		//      assert(pos <= bid_pos_mask);
-		//      return (static_cast<bucket_id_type>(info) << 56) | pos;
 		assert(pos < bid_pos_exists);
 		return static_cast<bucket_id_type>(pos);
 	}
 	inline bucket_id_type make_existing_bucket_id(size_t & pos) const { //, info_type const & info) const {
-		//      return make_missing_bucket_id(pos, info) | bid_pos_exists;
 		return static_cast<bucket_id_type>(pos) | bid_pos_exists;
-		//      reinterpret_cast<uint32_t*>(&pos)[1] |= 0x80000000U;
-		//      return static_cast<bucket_id_type>(pos);
 	}
 
-	// NOT USED
-	//    inline bool is_empty(bucket_id_type const & x) const {
-	//      return x >= bid_info_empty;  // empty 0x80....
-	//    }
-	// NOT USED
-	//    inline bool is_normal(bucket_id_type const & x) const {
-	//      return x < bid_info_empty;  // normal. both top bits are set. 0xC0
-	//    }
 	inline bool present(bucket_id_type const & x) const {
 		//return (x & bid_pos_exists) > 0;
 		return x > bid_pos_mask;
@@ -299,29 +287,15 @@ protected:
 		// return (x & bid_pos_exists) == 0;
 		return x < bid_pos_exists;
 	}
-	// NOT USED
-	//    inline info_type get_info(bucket_id_type const & x) const {
-	//      return static_cast<info_type>(x >> 56);
-	//    }
 
 	inline size_t get_pos(bucket_id_type const & x) const {
 		return x & bid_pos_mask;
 	}
-	// NOT USED
-	//    inline size_t get_offset(bucket_id_type const & x) const {
-	//      return (x & bid_info_mask) >> 56;
-	//    }
 
 	// make above explicit by preventing automatic type conversion.
-	//    template <typename SS, typename TT>
-	//    inline bucket_id_type make_missing_bucket_id(SS const & pos /*, TT const & info */) const  = delete;
-	//    template <typename SS, typename TT>
-	//    inline bucket_id_type make_existing_bucket_id(SS const & pos /*, TT const & info */) const  = delete;
 	template <typename TT> inline bool present(TT const & x) const = delete;
 	template <typename TT> inline bool missing(TT const & x) const = delete;
-	// NOT USED.	template <typename TT> inline info_type get_info(TT const & x) const = delete;
 	template <typename TT> inline size_t get_pos(TT const & x) const = delete;
-	// NOT USED.	template <typename TT> inline size_t get_offset(TT const & x) const = delete;
 
 
 	//=========  end BUCKET_ID_TYPE definitions.
@@ -1918,8 +1892,6 @@ protected:
 
 		}
 
-
-
 	}
 
 #if defined(REPROBE_STAT)
@@ -2236,7 +2208,10 @@ public:
 	/// batch insert, minimizing number of loop conditionals and rehash checks.
 	// hash first, then sort within each bucket.
 	template <typename LESS = ::std::less<key_type> >
-	void insert_sort(::std::vector<value_type> const & input) {
+	void insert_shuffled(::std::vector<value_type> const & input) {
+//#ifdef VTUNE_ANALYSIS
+//	__itt_pause();
+//#endif
 
 		assert(lsize == 0);
 
@@ -2269,10 +2244,12 @@ public:
 		BL_BENCH_START(insert_sort);
 		hyperloglog64<key_type, hasher, 12> hll_local;
 
+
 		size_t hval;
 		auto it = input.begin();
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
+		// compbio (xeon e7-8870 v3, haswell, 2.1GHz.  1.5s for 100M elements, ~32 cycles per element (prob majority going to hash).
 		for (size_t i = 0; i < input.size(); ++i, ++it) {
 			hval = hash(it->first);
 			hll_local.update_via_hashval(hval);
@@ -2281,6 +2258,8 @@ public:
 			//hash_vals[i] = hval;
 		}
 #pragma GCC diagnostic pop
+
+
 
 		// estimate the number of unique entries in input.
 #if defined(REPROBE_STAT)
@@ -2352,13 +2331,16 @@ public:
 		BL_BENCH_END(insert_sort, "alloc", input.size());
 
 		BL_BENCH_START(insert_sort);
+//#ifdef VTUNE_ANALYSIS
+//	__itt_resume();
+//#endif
 		// how to handle duplicates? - keep items sorted. start with original size, then compact later.
 		size_t start, end;
 		size_t hashval;
 		size_t found;
 		size_t l_size = 0;
 		for (size_t i = 0; i < input.size(); ++i) {
-			KH_PREFETCH(hash_vals + i + 3 * INSERT_LOOKAHEAD, _MM_HINT_T1);
+			KH_PREFETCH(hash_vals + i + 3 * INSERT_LOOKAHEAD, _MM_HINT_T0);
 			KH_PREFETCH(offsets + ((hash_vals[i + 2 * INSERT_LOOKAHEAD] & new_mask) * 2), _MM_HINT_T0);
 
 			// bucket id.
@@ -2368,11 +2350,12 @@ public:
 			end = off_ends[ii];
 
 			KH_PREFETCH(elements + offsets[(hash_vals[i + INSERT_LOOKAHEAD] & new_mask) * 2], _MM_HINT_T0);
+			KH_PREFETCH(hashes 	 + offsets[(hash_vals[i + INSERT_LOOKAHEAD] & new_mask) * 2], _MM_HINT_T0);
+			KH_PREFETCH(elements + off_ends[(hash_vals[i + INSERT_LOOKAHEAD] & new_mask) * 2], _MM_HINT_T0);
+			KH_PREFETCH(hashes 	 + off_ends[(hash_vals[i + INSERT_LOOKAHEAD] & new_mask) * 2], _MM_HINT_T0);
 
 			// search by hash values first
 			found = ::std::distance(hashes, ::std::lower_bound(hashes + start, hashes + end, hashval));
-
-
 
 			// shuffle, but also maintain order.
 			if (found == end) {
@@ -2404,6 +2387,9 @@ public:
 		}
 
 		free(hash_vals);
+//#ifdef VTUNE_ANALYSIS
+//	__itt_pause();
+//#endif
 
 		BL_BENCH_END(insert_sort, "reorder", input.size());
 
@@ -2463,9 +2449,265 @@ public:
 
 		  BL_BENCH_REPORT_NAMED(insert_sort, "insert_sort");
 
+//#ifdef VTUNE_ANALYSIS
+//	__itt_resume();
+//#endif
 
 	}
 
+	template <typename LESS = ::std::less<key_type> >
+	void insert_sort(::std::vector<value_type> const & input) {
+#ifdef VTUNE_ANALYSIS
+	__itt_pause();
+#endif
+
+		assert(lsize == 0);
+
+		BL_BENCH_INIT(insert_sort);
+
+#if defined(REPROBE_STAT)
+		std::cout << "INSERT_SEARCH.  NOTE: DOES NOT INCRMENETALLY INSERT YEY" << std::endl;
+
+		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+		} else {
+			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+		}
+		reset_reprobe_stats();
+		size_type before = lsize;
+#endif
+
+		size_t input_size = input.size();
+
+		BL_BENCH_START(insert_sort);
+		//===  hashing only.
+		size_t* hash_vals = nullptr;
+		int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 64, sizeof(size_t) * input_size);
+		if (ret) {
+			free(hash_vals);
+			throw std::length_error("failed to allocate aligned memory");
+		}
+		BL_BENCH_END(insert_sort, "alloc_hash", input.size());
+
+		BL_BENCH_START(insert_sort);
+#ifdef VTUNE_ANALYSIS
+	__itt_resume();
+#endif
+		hyperloglog64<key_type, hasher, 12> hll_local;
+
+
+		size_t hval;
+//		auto it = input.begin();
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+		// compbio (xeon e7-8870 v3, haswell, 2.1GHz.  1.5s for 100M elements, ~32 cycles per element (prob majority going to hash).
+		for (size_t i = 0; i < input.size(); ++i) {
+			hval = hash(input[i].first);
+			hll_local.update_via_hashval(hval);
+			// using mm_stream here does not make a differnece.
+			//_mm_stream_si64(reinterpret_cast<long long int*>(hash_vals + i), *(reinterpret_cast<long long int*>(&hval)));
+			hash_vals[i] = hval;
+		}
+#pragma GCC diagnostic pop
+
+
+
+		// estimate the number of unique entries in input.
+#if defined(REPROBE_STAT)
+		double distinct_input_est = hll_local.estimate();
+#endif
+
+		hll_local.merge(hll);
+		double distinct_total_est = hll_local.estimate();
+#ifdef VTUNE_ANALYSIS
+	__itt_resume();
+#endif
+		BL_BENCH_END(insert_sort, "hash_hll", input.size());
+
+#if defined(REPROBE_STAT)
+		std::cout << " estimate input cardinality as " << distinct_input_est << " total after insertion " << distinct_total_est << std::endl;
+#endif
+
+		BL_BENCH_START(insert_sort);
+//#ifdef VTUNE_ANALYSIS
+//	__itt_resume();
+//#endif
+		// ========= now count, including duplicates
+		size_t new_buckets = next_power_of_2(static_cast<size_t>(::std::ceil(static_cast<double>(distinct_total_est) / max_load_factor)));
+		size_t padded_buckets = new_buckets + std::numeric_limits<info_type>::max() + 1;
+
+		std::cout << "EST distinct " << distinct_total_est << " buckets " << new_buckets << " padded " << padded_buckets << std::endl;
+
+		// ========= count in O(N) time and O(B) space.   using 2x bucket size, first entry is starting offset,
+		// second entry begins as count and then is changed to ending offset.
+		size_t* offsets = nullptr;
+		ret = posix_memalign(reinterpret_cast<void **>(&offsets), 64, sizeof(size_t) * (new_buckets + 2));
+		if (ret) {
+			free(offsets);
+			throw std::length_error("failed to allocate aligned memory");
+		}
+		memset(offsets, 0, sizeof(size_t) * (new_buckets + 2));  // initialize to zero count.
+
+		size_t new_mask = new_buckets - 1;
+		size_t ii = 0;
+		size_t* counts = offsets + 2;  // put the counts in the same array.
+		for (size_t i = 0; i < input.size(); ++i) {
+			KH_PREFETCH(hash_vals + i + 2 * INSERT_LOOKAHEAD, _MM_HINT_T0);
+			KH_PREFETCH(counts + ((hash_vals[i + INSERT_LOOKAHEAD] & new_mask)), _MM_HINT_T0);
+
+			ii = hash_vals[i] & new_mask;
+			++counts[ii];   // random access here.  counts already offset by 1.
+		}
+//#ifdef VTUNE_ANALYSIS
+//	__itt_pause();
+//#endif
+		BL_BENCH_END(insert_sort, "count", input.size());
+
+		// ======= compute offsets in O(B) time and space.
+		BL_BENCH_START(insert_sort);
+		size_t* off_ends = offsets + 1;
+		for (size_t i = 0; i < new_buckets; ++i) {
+			off_ends[i + 1] += off_ends[i];   // prefix sum
+		}
+		BL_BENCH_END(insert_sort, "offsets", new_buckets);
+
+
+		// ======== now walk though and sort the input and corresponding hash a
+		BL_BENCH_START(insert_sort);
+		value_type* elements = nullptr;
+		ret = posix_memalign(reinterpret_cast<void **>(&elements), 64, sizeof(value_type) * input.size());
+		if (ret) {
+			free(elements);
+			throw std::length_error("failed to allocate aligned memory");
+		}
+		BL_BENCH_END(insert_sort, "alloc", input.size());
+
+		BL_BENCH_START(insert_sort);
+//#ifdef VTUNE_ANALYSIS
+//	__itt_resume();
+//#endif
+		// how to handle duplicates? - keep items sorted. start with original size, then compact later.
+		size_t start, end;
+		for (size_t i = 0; i < input.size(); ++i) {
+			KH_PREFETCH(hash_vals + i + 3 * INSERT_LOOKAHEAD, _MM_HINT_T0);
+			KH_PREFETCH(off_ends + (hash_vals[i + 2 * INSERT_LOOKAHEAD] & new_mask), _MM_HINT_T0);
+			KH_PREFETCH(elements + off_ends[(hash_vals[i + INSERT_LOOKAHEAD] & new_mask)], _MM_HINT_T0);
+
+			// bucket id.
+			ii = hash_vals[i] & new_mask;
+			end = off_ends[ii]++;
+
+			elements[end] = input[i];
+		}
+
+		free(hash_vals);
+//#ifdef VTUNE_ANALYSIS
+//	__itt_pause();
+//#endif
+		BL_BENCH_END(insert_sort, "reorder", input.size());
+
+
+		// now calc info
+		//assert(l_size <= padded_buckets);
+
+		LESS less;
+
+		//============= compute prefix sum to form info array
+		BL_BENCH_START(insert_sort);
+//#ifdef VTUNE_ANALYSIS
+//	__itt_resume();
+//#endif
+		info_container.resize(padded_buckets, info_empty);
+		container.resize(padded_buckets);
+		size_t offset = 0;
+		size_t orig_offset, curr_pos;
+
+		for (size_t i = 0; i < new_buckets; ++i) {
+//			KH_PREFETCH(offsets + i + 2 * INSERT_LOOKAHEAD, _MM_HINT_T0);
+//			KH_PREFETCH(off_ends + i + 2 * INSERT_LOOKAHEAD, _MM_HINT_T0);
+//
+//			KH_PREFETCH(elements + (offsets[i + INSERT_LOOKAHEAD]), _MM_HINT_T0);
+//			KH_PREFETCH(elements + (off_ends[i + INSERT_LOOKAHEAD]), _MM_HINT_T0);
+
+			start = offsets[i];
+			end = off_ends[i];
+
+			// calculate the start position
+			// max with i indicates that offset should advance even for series of empty entries.
+			offset = ::std::max(offset, i);
+			if ((offset - i) > info_mask) throw ::std::logic_error("overflowing!");
+
+			// update info container
+			info_container[i] = (start == end ? info_empty : info_normal) + // check the count to see if empty.
+					static_cast<info_type>(offset - i); 					// now calculate offset from current index.
+
+			// reduce duplicates and insert value into container.
+			if (start < end) {
+
+				// sort the elements
+				std::stable_sort(elements + start, elements + end,
+						[&less](value_type const & x, value_type const & y){
+					return less(x.first, y.first);
+				});
+
+				// then copy to container and also reduce duplicates
+				// copy first entry.
+				orig_offset = offset;
+				curr_pos = start;
+				container[offset] = std::move(elements[curr_pos]);
+				++curr_pos;
+
+				for (; curr_pos < end; ++curr_pos) {
+					if (eq(container[offset].first, elements[curr_pos].first)) {
+						// if same, then reduce
+						container[offset].second = reduc(container[offset].second, elements[curr_pos].second);
+
+					} else {
+						// different.  increment insert pos.
+						++offset;
+						// move the curr_pos entry  over
+						container[offset] = std::move(elements[curr_pos]);
+					}
+				}
+				// now update the real entries.
+				++offset;  // there is at least 1 entry.
+				lsize += offset - orig_offset;
+
+			} // else count is 0.
+
+//			std::cout << "final bucket " << i << " offset " << offset << " start " << start << " end " << end << std::endl;
+		}
+
+		for (size_t i = new_buckets; i < offset; ++i) {
+			info_container[i] = info_empty + static_cast<info_type>(offset - i);
+		}
+
+		buckets = new_buckets;
+		mask = buckets - 1;
+
+		min_load = static_cast<size_t>(::std::ceil(static_cast<double>(buckets) * min_load_factor));
+		max_load = static_cast<size_t>(::std::ceil(static_cast<double>(buckets) * max_load_factor));
+//#ifdef VTUNE_ANALYSIS
+//	__itt_pause();
+//#endif
+
+		BL_BENCH_END(insert_sort, "sorted to buckets", new_buckets);
+
+#if defined(REPROBE_STAT)
+		print_reprobe_stats("INSERT SORT", input.size(), (lsize - before));
+#endif
+		free(offsets);
+
+		free(elements);
+
+
+		  BL_BENCH_REPORT_NAMED(insert_sort, "insert_sort");
+
+#ifdef VTUNE_ANALYSIS
+	__itt_resume();
+#endif
+
+	}
 
 
 	/// batch insert, minimizing number of loop conditionals and rehash checks.
@@ -3016,7 +3258,7 @@ public:
 
 	/// insert with prefetch, checks maxload each iteration, also with old insert_with_hint
 	// similar to insert_sorted
-	void insert_shuffled(::std::vector<value_type> const & input) {
+	void insert_shuffled2(::std::vector<value_type> const & input) {
 
 #if defined(REPROBE_STAT)
 		std::cout << "INSERT SHUFFLED" << std::endl;
@@ -4463,10 +4705,6 @@ template <typename Key, typename T, typename Hash, typename Equal, typename Allo
 constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::insert_failed;
 template <typename Key, typename T, typename Hash, typename Equal, typename Allocator, typename Reducer >
 constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::find_failed;
-//template <typename Key, typename T, typename Hash, typename Equal, typename Allocator, typename Reducer >
-//constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bid_info_mask;
-//template <typename Key, typename T, typename Hash, typename Equal, typename Allocator, typename Reducer >
-//constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bid_info_empty;
 template <typename Key, typename T, typename Hash, typename Equal, typename Allocator, typename Reducer >
 constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::cache_align_mask;
 template <typename Key, typename T, typename Hash, typename Equal, typename Allocator, typename Reducer >
