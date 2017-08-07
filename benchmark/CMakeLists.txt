@@ -44,9 +44,6 @@ target_link_libraries(benchmark_hashtables ${EXTRA_LIBS})
 
 message(STATUS "VTUNE_ANALYSIS set to ${VTUNE_ANALYSIS}")
 if (ENABLE_VTUNE_PROFILING)
-	ADD_LIBRARY(ittnotify STATIC IMPORTED)
-	SET_TARGET_PROPERTIES(ittnotify PROPERTIES
-	    IMPORTED_LOCATION ${VTUNE_LIB})
 	target_link_libraries(benchmark_hashtables ittnotify dl)
 	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)
 	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)

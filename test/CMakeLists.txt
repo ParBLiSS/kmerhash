@@ -7,6 +7,7 @@ include("${PROJECT_SOURCE_DIR}/cmake/ExtraWarnings.cmake")
 if (BUILD_TESTS)
 
 
+
 # load the testing:
 if (IS_DIRECTORY ${PROJECT_SOURCE_DIR}/test/unit)
 
@@ -24,7 +25,7 @@ if (IS_DIRECTORY ${PROJECT_SOURCE_DIR}/test/unit)
     kmerhash_add_test(kmerhash_RH FALSE unit/test_hashmap_robinhood_doubling.cpp)
 #    kmerhash_add_test(kmerhash_RH_NonCirc FALSE unit/test_hashmap_robinhood_doubling_noncirc.cpp)
     kmerhash_add_test(kmerhash_RH_Offsets FALSE unit/test_hashmap_robinhood_doubling_offsets.cpp)
-    kmerhash_add_test(kmerhash_RH_Offsets2 FALSE unit/test_hashmap_robinhood_offsets.cpp)
+	kmerhash_add_test(kmerhash_RH_Offsets2 FALSE unit/test_hashmap_robinhood_offsets.cpp)
     kmerhash_add_test(kmerhash_RH_Prefetch FALSE unit/test_hashmap_robinhood_prefetch.cpp)
 
     # get all mpi test files from ./test

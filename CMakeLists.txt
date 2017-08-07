@@ -634,6 +634,13 @@ endif(ENABLE_MEMUSE_BENCHMARK)
   
 
 
+message(STATUS "VTUNE_ANALYSIS set to ${VTUNE_ANALYSIS}")
+if (ENABLE_VTUNE_PROFILING)
+	ADD_LIBRARY(ittnotify STATIC IMPORTED)
+	SET_TARGET_PROPERTIES(ittnotify PROPERTIES
+	    IMPORTED_LOCATION ${VTUNE_LIB})
+endif(ENABLE_VTUNE_PROFILING)
+
 
                         
 if (BUILD_TESTS)
@@ -666,6 +673,9 @@ if (BUILD_TESTS)
       target_link_libraries(${test_target_name} gcov)
     endif(ENABLE_COVERAGE)
 
+	if (ENABLE_VTUNE_PROFILING)
+	  target_link_libraries(${test_target_name} ittnotify dl)
+	endif(ENABLE_VTUNE_PROFILING)
 
     # generate google test XML results, to be parsed by Jenkins
     # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
@@ -712,6 +722,11 @@ if (BUILD_TESTS)
       if (ENABLE_COVERAGE)
         target_link_libraries(${test_target_name} gcov)
       endif(ENABLE_COVERAGE)
+
+	if (ENABLE_VTUNE_PROFILING)
+	  target_link_libraries(${test_target_name} ittnotify dl)
+	endif(ENABLE_VTUNE_PROFILING)
+
 
       # generate google test XML results, to be parsed by Jenkins
       # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
@@ -763,6 +778,9 @@ if (BUILD_TESTS)
           target_link_libraries(${test_target_name} gcov)
         endif(ENABLE_COVERAGE)
     
+    	if (ENABLE_VTUNE_PROFILING)
+	  target_link_libraries(${test_target_name} ittnotify dl)
+	endif(ENABLE_VTUNE_PROFILING)
     
         # generate google test XML results, to be parsed by Jenkins
         # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
@@ -803,6 +821,10 @@ if (BUILD_TESTS)
         if (ENABLE_COVERAGE)
           target_link_libraries(${test_target_name} gcov)
         endif(ENABLE_COVERAGE)
+        
+    	if (ENABLE_VTUNE_PROFILING)
+	  target_link_libraries(${test_target_name} ittnotify dl)
+	endif(ENABLE_VTUNE_PROFILING)
     
         # generate google test XML results, to be parsed by Jenkins
         # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
@@ -850,6 +872,9 @@ if (BUILD_BENCHMARKS)
       target_link_libraries(${test_target_name} gcov)
     endif(ENABLE_COVERAGE)
 
+	if (ENABLE_VTUNE_PROFILING)
+	  target_link_libraries(${test_target_name} ittnotify dl)
+	endif(ENABLE_VTUNE_PROFILING)
 
     # generate google test XML results, to be parsed by Jenkins
     # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
