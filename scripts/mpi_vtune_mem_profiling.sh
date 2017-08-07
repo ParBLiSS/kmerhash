@@ -20,11 +20,18 @@ MEM_LOAD_UOPS_RETIRED.L3_HIT,\
 MEM_LOAD_UOPS_RETIRED.L1_MISS,\
 MEM_LOAD_UOPS_RETIRED.L2_MISS,\
 MEM_LOAD_UOPS_RETIRED.L3_MISS,\
+MEM_TRANS_RETIRED.LOAD_LATENCY_GT_16,\
+MEM_TRANS_RETIRED.LOAD_LATENCY_GT_32,\
+MEM_TRANS_RETIRED.LOAD_LATENCY_GT_64,\
+MEM_TRANS_RETIRED.LOAD_LATENCY_GT_128,\
+MEM_TRANS_RETIRED.LOAD_LATENCY_GT_256,\
+MEM_TRANS_RETIRED.LOAD_LATENCY_GT_512,\
 OFFCORE_RESPONSE:request=ALL_REQUESTS:response=LLC_MISS.LOCAL_DRAM \
 -r ${2}.vtune -- \
-mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.log \
+mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.core \
 ${@:3}
 
-
-amplxe-cl -report summary
+amplxe-cl -report summary -r ${2}.vtune -report-output ${2}.sum.log
+amplxe-cl -report hw-events -r ${2}.vtune -report-output ${2}.hw.log
+amplxe-cl -report top-down -r ${2}.vtune -report-output ${2}.top.log
 
