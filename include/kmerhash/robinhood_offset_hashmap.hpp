@@ -23,6 +23,11 @@
  * 3. using offsets
  * 4. separate key and value arrays did not work - prob more mem usage...
  *
+ * attempts to use _mm_stream_load_si128 will not succeed on x86 with write back memory.  see
+ * https://software.intel.com/en-us/forums/intel-isa-extensions/topic/597075
+ * https://stackoverflow.com/questions/40140728/why-intel-compiler-ignores-the-non-temporal-prefetch-pragma-directive-for-intel
+ * https://stackoverflow.com/questions/40096894/do-current-x86-architectures-support-non-temporal-loads-from-normal-memory
+ * on KNL there is some hope.
  *
  *  Created on: July 13, 2017
  *      Author: tpan
