@@ -260,7 +260,9 @@ namespace dsc  // distributed std container
     public:
 
       batched_robinhood_map_base(const mxx::comm& _comm) : Base(_comm),
-          key_to_rank(_comm.size()), local_changed(false) {}
+          key_to_rank(_comm.size()), local_changed(false) {
+    	  this->c.set_ignored_msb(ceilLog2(_comm.size()));   // NOTE THAT THIS SHOULD MATCH KEY_TO_RANK use of bits in hash table.
+      }
 
 
 

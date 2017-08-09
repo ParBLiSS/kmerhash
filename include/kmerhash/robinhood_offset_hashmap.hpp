@@ -229,7 +229,7 @@ protected:
 
 	using container_type		= ::std::vector<value_type, Allocator>;
 	using info_container_type	= ::std::vector<info_type, Allocator>;
-	hyperloglog64<key_type, hasher, 12> hll;  // precision of 6bits  uses 4096 bytes, which should fit in L1 cache.  error rate : 1.03/(2^12)
+	hyperloglog64<key_type, hasher, 12> hll;  // precision of 12bits  error rate : 1.04/(2^6)
 
 
 public:
@@ -580,6 +580,10 @@ public:
 		QUERY_LOOKAHEAD = _query_lookahead;
 		QUERY_LOOKAHEAD_MASK = (QUERY_LOOKAHEAD << 1) - 1;
 		lookahead_hashes.resize(2 * ::std::max(_query_lookahead, INSERT_LOOKAHEAD));
+	}
+
+	inline void set_ignored_msb(uint8_t const & ignore_msb) {
+		this->hll.set_ignored_msb(ignore_msb);
 	}
 
 
@@ -1998,7 +2002,7 @@ public:
 			throw std::length_error("failed to allocate aligned memory");
 		}
 
-		hyperloglog64<key_type, hasher, 12> hll_local;
+		auto hll_local = this->hll.make_empty_copy();
 
 		size_t hval;
 		Iter it = begin;
@@ -2242,7 +2246,7 @@ public:
 		BL_BENCH_END(insert_sort, "alloc_hash", input.size());
 
 		BL_BENCH_START(insert_sort);
-		hyperloglog64<key_type, hasher, 12> hll_local;
+		auto hll_local = this->hll.make_empty_copy();
 
 
 		size_t hval;
@@ -2493,7 +2497,7 @@ public:
 #ifdef VTUNE_ANALYSIS
 	__itt_resume();
 #endif
-		hyperloglog64<key_type, hasher, 12> hll_local;
+		auto hll_local = this->hll.make_empty_copy();
 
 
 		size_t hval;
@@ -3216,7 +3220,7 @@ public:
 			throw std::length_error("failed to allocate aligned memory");
 		}
 
-		hyperloglog64<key_type, hasher, 12> hll_local;
+		auto hll_local = this->hll.make_empty_copy();
 
 		size_t hval;
 		for (size_t i = 0; i < input.size(); ++i) {
