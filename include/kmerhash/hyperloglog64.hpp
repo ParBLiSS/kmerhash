@@ -33,7 +33,13 @@
  *
  * this is structured as a class because we want to be able to merge instances
  *
- * this implementation is not yet correct:  accuracy of prediction is not within 2 % yet.  would prefer to have a
+ * the precision is a function of the number of buckets, 1.04/sqrt(m), where m = 2^precision.
+ *
+ * TODO:
+ * [ ] distributed estimation
+ * [ ] exclude some leading bits (for use e.g. after data is distributed.)
+ * [ ] exclude some trailing bits....
+ * [ ] batch processing (to allow prefetching later.)
  *
  *  Created on: Mar 1, 2017
  *      Author: tpan
@@ -83,94 +89,148 @@ inline uint8_t leftmost_set_bit(uint64_t x) {
 #endif /* defined(__GNUC__) */
 
 
-template <typename T, typename Hash, uint8_t precision = 4>
+
+
+//========= specializations for std::hash. std::hash passes through primitive types, e.g. uint8_t.
+//   this creates problems in that the high bits are all 0.  so for std::hash,
+//   we use the lower bits for register and upper bits for the bit counts.
+//   also, for small datatypes, the number of leading zeros may be artificially large.
+//      we can fix this by tracking the minimum leading zero as well.
+// make the unused_msb be 0 for data type larger than 64, else 64  - actual data size.
+//========== non-std::hash
+//   the unused msb is 0.
+
+template <typename T, typename Hash,
+		uint8_t precision = 12U,
+		uint8_t unused_msb = (std::is_same<::std::hash<T>, Hash>::value) ?
+				((sizeof(T) >= 8ULL) ? 0U : (64U - (sizeof(T) * 8ULL))) :
+				0U
+		>
 class hyperloglog64 {
-	  static_assert((precision >= 4) && (precision <= 16),
+	  static_assert((precision >= 4ULL) && (precision <= 16ULL),
 			  "ERROR: precision for hyperloglog should be in [4, 16].");
 
 protected:
-	// don't need because of 64 bit.  0xRRVVVVVV  // high bits: reg.  low: values
-	static constexpr uint64_t val_mask = ~(0x0ULL) >> precision;  // e.g. 0x00FFFFFF
+	using REG_T = uint8_t;
+
+	// 64 bit.  0xIIRRVVVVVV  // MSB: ignored bits II,  high bits: reg, RR.  low: values, VVVVVV
+	static constexpr uint8_t value_bits = 64U - precision;  // e.g. 0x00FFFFFF
 	static constexpr uint64_t nRegisters = 0x1ULL << precision;   // e.g. 0x00000100
 	mutable double amm;
 
-	using REG_T = uint8_t;
-	std::array<REG_T, nRegisters> registers;  // stores count of leading zeros
+	mutable uint8_t ignored_msb; // MSB to ignore.
+	mutable uint64_t lzc_mask;   // lowest bits set to 1 to prevent counting into that region.
+
+	::std::vector<REG_T> registers;  // stores count of leading zeros
 
 	Hash h;
 
-public:
-
-  static constexpr double est_error_rate = 1.04 / static_cast<double>(0x1ULL << (precision >> 1));   // avoid std::sqrt in constexpr.
-
-	hyperloglog64() {
-		registers.fill(static_cast<REG_T>(0));
-
-        switch (precision) {
-            case 4:
-                amm = 0.673;
-                break;
-            case 5:
-                amm = 0.697;
-                break;
-            case 6:
-                amm = 0.709;
-                break;
-            default:
-                amm = 0.7213 / (1.0 + 1.079 / nRegisters);
-                break;
-        }
-        amm *= static_cast<double>(0x1ULL << (precision + precision));
-	}
-
-	hyperloglog64(hyperloglog64 const & other) :
-		amm(other.amm), registers(other.registers) {
-	}
-
-	hyperloglog64(hyperloglog64 && other) :
-		amm(other.amm), registers(std::move(other.registers)) {
-	}
-
-	hyperloglog64& operator=(hyperloglog64 const & other) {
-		amm = other.amm;
-		registers = other.registers;
-	}
-
-	hyperloglog64& operator=(hyperloglog64 && other) {
-		amm = other.amm;
-		registers.swap(std::move(other.registers));
-	}
-
-	void swap(hyperloglog64 & other) {
-		std::swap(amm, other.amm);
-		std::swap(registers, other.registers);
-
-	}
-
-	inline void update(T const & val) {
-        update_via_hashval(h(val));
-	}
-	inline void update_via_hashval(uint64_t const & hash) {
-        uint64_t i = hash >> (64 - precision);   // first precision bits are for register id
-        REG_T rank = leftmost_set_bit(hash & val_mask) - precision;  // then find leading 1 in remaining
+	inline void internal_update(uint64_t const & no_ignore) {
+		// bits we have are 0xRRVVVVVV0000
+		// extract RR:      0x0000000000RR
+        uint64_t i = no_ignore >> value_bits;   // first precision bits are for register id
+        // next count:  want to count 0xVVVVVV111111.
+        // compute lzcnt +1 from VVVVVV
+        REG_T rank = leftmost_set_bit((no_ignore << precision) | lzc_mask);  // then find leading 1 in remaining
         if (rank > registers[i]) {
             registers[i] = rank;
         }
 	}
 
+
+public:
+
+  static constexpr double est_error_rate = static_cast<double>(1.04) / static_cast<double>(0x1ULL << (precision >> 1ULL));   // avoid std::sqrt in constexpr.
+
+  	/// constructor.  ignore_leading does not count the leading bits.  ignore_trailing does not count the trailing bits.
+  	  /// these are for use when the leading and/or trailing bits are identical in an input set.
+	hyperloglog64(uint8_t const & ignore_msb = 0) :
+		ignored_msb(ignore_msb + unused_msb), lzc_mask( ~(0x0ULL) >> (64 - precision - ignore_msb - unused_msb)),
+		registers(nRegisters, static_cast<REG_T>(0)) {
+
+        switch (precision) {
+            case 4:
+                amm = static_cast<double>(0.673);
+                break;
+            case 5:
+                amm = static_cast<double>(0.697);
+                break;
+            case 6:
+                amm = static_cast<double>(0.709);
+                break;
+            default:
+                amm = static_cast<double>(0.7213) / (static_cast<double>(1.0) + (static_cast<double>(1.079) / static_cast<double>(nRegisters)));
+                break;
+        }
+        amm *= static_cast<double>(0x1ULL << (precision << 1ULL));  // 2^(2*precision)
+	}
+
+	hyperloglog64(hyperloglog64 const & other) :
+		amm(other.amm), ignored_msb(other.ignored_msb), lzc_mask(other.lzc_mask), registers(other.registers) {
+	}
+
+	hyperloglog64(hyperloglog64 && other) :
+		amm(other.amm), ignored_msb(other.ignored_msb), lzc_mask(other.lzc_mask), registers(std::move(other.registers)) {
+	}
+
+	hyperloglog64& operator=(hyperloglog64 const & other) {
+		amm = other.amm;
+		registers = other.registers;
+		ignored_msb = other.ignored_msb;
+		lzc_mask = other.lzc_mask;
+
+		return *this;
+	}
+
+	hyperloglog64& operator=(hyperloglog64 && other) {
+		amm = other.amm;
+		registers.swap(other.registers);
+		ignored_msb = other.ignored_msb;
+		lzc_mask = other.lzc_mask;
+
+		return *this;
+	}
+
+	void swap(hyperloglog64 & other) {
+		std::swap(amm, other.amm);
+		std::swap(registers, other.registers);
+		std::swap(ignored_msb, other.ignored_msb);
+		std::swap(lzc_mask, other.lzc_mask);
+	}
+
+	inline void set_ignored_msb(uint8_t const & ignored_msb) {
+		this->ignored_msb = ignored_msb;
+	}
+	inline uint8_t get_ignored_msb() {
+		return this->ignored_msb;
+	}
+	hyperloglog64 make_empty_copy() {
+		return hyperloglog64(this->ignored_msb);
+	}
+
+
+	inline void update(T const & val) {
+        internal_update(h(val) << ignored_msb);
+	}
+
+	inline void update_via_hashval(uint64_t const & hash) {
+        internal_update(hash << ignored_msb);
+	}
+
+
 	double estimate() const {
-        double estimate = 0.0;
-        double sum = 0.0;
+        double estimate = static_cast<double>(0.0);
+        double sum = static_cast<double>(0.0);
 
         // compute the denominator of the harmonic mean
         for (size_t i = 0; i < nRegisters; i++) {
-            sum += 1.0 / static_cast<double>(1ULL << registers[i]);
+            sum += static_cast<double>(1.0) / static_cast<double>(1ULL << registers[i]);
         }
         estimate = amm / sum; // E in the original paper
 
-        if (estimate <= (5 * (nRegisters >> 1))) {
+        if (estimate <= static_cast<double>(5ULL * (nRegisters >> 1ULL))) {  // 5m/2
         	size_t zeros = count_zeros();
-        	if (zeros > 0) {
+        	if (zeros > 0ULL) {
 //        		std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
 				return linear_count(zeros);
         	} else
@@ -207,149 +267,153 @@ public:
 	}
 
 	void clear() {
-		registers.fill(static_cast<REG_T>(0));
+		registers.assign(nRegisters, static_cast<REG_T>(0));
 	}
 
 };
 
-//========= specializations for std::hash. std::hash passes through primitive types, e.g. uint8_t.
-//   this creates problems in that the high bits are all 0.  so for std::hash,
-//   we use the lower bits for register and upper bits for the bit counts.
-//   also, for small datatypes, the number of leading zeros may be artificially large.
-//      we can fix this by tracking the minimum leading zero as well.
-
-template <typename T, uint8_t precision>
-class hyperloglog64<T, std::hash<T>, precision> {
-
-	  static_assert((precision < (sizeof(T) * 8)) && (precision >= 4) && (precision <= 16),
-			  "precision must be set to lower than sizeof(T) * 8 and in range [4, 16]");
-
-protected:
-	  static constexpr uint8_t data_bits = ((sizeof(T) * 8) > 64) ? 64 : (sizeof(T) * 8);
-	  static constexpr uint8_t value_bits = data_bits - precision;
-	  static constexpr uint8_t lead_zero_bits = 64 - value_bits;  // in case sizeof(T) < 8.  exclude reg bits.
-
-	  // register mask is the upper most precision bits.
-  static constexpr uint64_t nRegisters = 0x1ULL << precision;
-  static constexpr uint64_t reg_mask = nRegisters - 1;   // need to shift right value_bits first.
-  static constexpr uint64_t val_mask = ~(0x0ULL) >> lead_zero_bits;
-
-  double amm;
-
-	using REG_T = uint8_t;
-	std::array<REG_T, nRegisters> registers;  // stores count of leading zeros
-
-  std::hash<T> h;
-
-public:
-  static constexpr double est_error_rate = 1.04 / static_cast<double>(0x1ULL << (precision >> 1));   // avoid std::sqrt in constexpr.
-
-
-  hyperloglog64() {
-    registers.fill(static_cast<REG_T>(0));
-
-        switch (precision) {
-            case 4:
-                amm = 0.673;
-                break;
-            case 5:
-                amm = 0.697;
-                break;
-            case 6:
-                amm = 0.709;
-                break;
-            default:
-                amm = 0.7213 / (1.0 + 1.079 / nRegisters);
-                break;
-        }
-        amm *= static_cast<double>(0x1ULL << (precision + precision));
-  }
-
-  hyperloglog64(hyperloglog64 const & other) : amm(other.amm), registers(other.registers) {}
-
-  hyperloglog64(hyperloglog64 && other) : amm(other.amm),
-      registers(std::move(other.registers)) {}
-
-
-  hyperloglog64& operator=(hyperloglog64 const & other) {
-    amm = other.amm;
-    registers = other.registers;
-  }
-
-  hyperloglog64& operator=(hyperloglog64 && other) {
-    amm = other.amm;
-    registers.swap(std::move(other.registers));
-  }
-
-  void swap(hyperloglog64 & other) {
-    std::swap(amm, other.amm);
-    std::swap(registers, other.registers);
-  }
-
-  inline void update(T const & val) {
-        update_via_hashval(h(val));
-  }
-  inline void update_via_hashval(uint64_t const & hash) {
-        uint64_t i = (hash >> value_bits) & reg_mask;   // first precision bits are for register id
-        uint8_t rank = leftmost_set_bit(hash & val_mask) - lead_zero_bits;  // then find leading 1 in remaining
-        if (rank > registers[i]) {
-            registers[i] = rank;
-        }
-  }
-
-  double estimate() const {
-        double estimate = 0.0;
-        double sum = 0.0;
-
-        // compute the denominator of the harmonic mean
-        for (size_t i = 0; i < nRegisters; i++) {
-            sum += 1.0 / static_cast<double>(1ULL << registers[i] );
-        }
-        estimate = amm / sum; // E in the original paper
-
-        if (estimate <= (5 * (nRegisters >> 1))) {
-        	size_t zeros = count_zeros();
-        	if (zeros > 0) {
-//        		std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
-				return linear_count(zeros);
-        	} else
-        		return estimate;
-//        } else if (estimate > (1.0 / 30.0) * pow_2_32) {
-            // don't need below because of 64bit.
-//            estimate = neg_pow_2_32 * log(1.0 - (estimate / pow_2_32));
-        } else
-          return estimate;
-  }
 
 
 
-  void merge(hyperloglog64 const & other) {
-    // precisions identical, so don't need to check number of registers either.
 
-    // iterate over both, merge, and update the zero count.
-    for (size_t i = 0; i < nRegisters; ++i) {
-      registers[i] = std::max(registers[i], other.registers[i]);
-    }
-  }
-
-	inline uint64_t count_zeros() const {
-		uint64_t zeros = 0;
-		for (size_t i = 0; i < nRegisters; i++) {
-			if (registers[i] == 0) ++zeros;
-		}
-		return zeros;
-	}
-
-	inline double linear_count(uint64_t const & zeros) const {
-		return static_cast<double>(nRegisters) *
-				std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
-	}
-
-	void clear() {
-		registers.fill(static_cast<REG_T>(0));
-	}
-
-};
+////========= specializations for std::hash. std::hash passes through primitive types, e.g. uint8_t.
+////   this creates problems in that the high bits are all 0.  so for std::hash,
+////   we use the lower bits for register and upper bits for the bit counts.
+////   also, for small datatypes, the number of leading zeros may be artificially large.
+////      we can fix this by tracking the minimum leading zero as well.
+//// make the unused_msb be 0 for data type larger than 64, else 64  - actual data size.
+//template <typename T, uint8_t precision>
+//class hyperloglog64<T, std::hash<T>, precision, (sizeof(T) >= 8) ? 0 : (64 - (sizeof(T) * 8ULL))> {
+//
+//	  static_assert((precision < (sizeof(T) * 8ULL)) && (precision >= 4ULL) && (precision <= 16ULL),
+//			  "precision must be set to lower than sizeof(T) * 8 and in range [4, 16]");
+//
+//protected:
+//	  static constexpr uint8_t data_bits = ((sizeof(T) * 8ULL) > 64ULL) ? 64ULL : (sizeof(T) * 8ULL);
+//	  static constexpr uint8_t value_bits = data_bits - precision - ignored_msb;
+//	  static constexpr uint8_t lead_zero_bits = 64ULL - value_bits;  // in case sizeof(T) < 8.  exclude reg bits and ignored leading zeros..
+//
+//	  // register mask is the upper most precision bits.
+//  static constexpr uint64_t nRegisters = 0x1ULL << precision;
+//  static constexpr uint64_t shifted_reg_mask = nRegisters - 1ULL;   // need to shift right value_bits first.
+//  static constexpr uint64_t val_mask = ~(0x0ULL) >> lead_zero_bits;
+//
+//  double amm;
+//
+//	using REG_T = uint8_t;
+//	std::array<REG_T, nRegisters> registers;  // stores count of leading zeros
+//
+//  std::hash<T> h;
+//
+//public:
+//  static constexpr double est_error_rate = static_cast<double>(1.04) / static_cast<double>(0x1ULL << (precision >> 1ULL));   // avoid std::sqrt in constexpr.
+//
+//
+//  hyperloglog64() {
+//    registers.fill(static_cast<REG_T>(0));
+//
+//        switch (precision) {
+//            case 4:
+//                amm = static_cast<double>(0.673);
+//                break;
+//            case 5:
+//                amm = static_cast<double>(0.697);
+//                break;
+//            case 6:
+//                amm = static_cast<double>(0.709);
+//                break;
+//            default:
+//                amm = static_cast<double>(0.7213) / (static_cast<double>(1.0) + static_cast<double>(1.079) / static_cast<double>(nRegisters));
+//                break;
+//        }
+//        amm *= static_cast<double>(0x1ULL << (precision << 1ULL));  // 2 ^(precision *2)
+//  }
+//
+//  hyperloglog64(hyperloglog64 const & other) : amm(other.amm), registers(other.registers) {}
+//
+//  hyperloglog64(hyperloglog64 && other) : amm(other.amm),
+//      registers(std::move(other.registers)) {}
+//
+//
+//  hyperloglog64& operator=(hyperloglog64 const & other) {
+//    amm = other.amm;
+//    registers = other.registers;
+//  }
+//
+//  hyperloglog64& operator=(hyperloglog64 && other) {
+//    amm = other.amm;
+//    registers.swap(std::move(other.registers));
+//  }
+//
+//  void swap(hyperloglog64 & other) {
+//    std::swap(amm, other.amm);
+//    std::swap(registers, other.registers);
+//  }
+//
+//  inline void update(T const & val) {
+//        update_via_hashval(h(val));
+//  }
+//  inline void update_via_hashval(uint64_t const & hash) {
+//        uint64_t i = (hash >> value_bits) & shifted_reg_mask;   // first precision bits are for register id
+//        uint8_t rank = leftmost_set_bit(hash & val_mask) - lead_zero_bits;  // then find leading 1 in remaining
+//        if (rank > registers[i]) {
+//            registers[i] = rank;
+//        }
+//  }
+//
+//  double estimate() const {
+//        double estimate = static_cast<double>(0.0);
+//        double sum = static_cast<double>(0.0);
+//
+//        // compute the denominator of the harmonic mean
+//        for (size_t i = 0; i < nRegisters; i++) {
+//            sum += static_cast<double>(1.0) / static_cast<double>(1ULL << registers[i] );
+//        }
+//        estimate = amm / sum; // E in the original paper
+//
+//        if (estimate <= static_cast<double>(5ULL * (nRegisters >> 1ULL))) { // 5m/2
+//        	size_t zeros = count_zeros();
+//        	if (zeros > 0ULL) {
+////        		std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
+//				return linear_count(zeros);
+//        	} else
+//        		return estimate;
+////        } else if (estimate > (1.0 / 30.0) * pow_2_32) {
+//            // don't need below because of 64bit.
+////            estimate = neg_pow_2_32 * log(1.0 - (estimate / pow_2_32));
+//        } else
+//          return estimate;
+//  }
+//
+//
+//
+//  void merge(hyperloglog64 const & other) {
+//    // precisions identical, so don't need to check number of registers either.
+//
+//    // iterate over both, merge, and update the zero count.
+//    for (size_t i = 0; i < nRegisters; ++i) {
+//      registers[i] = std::max(registers[i], other.registers[i]);
+//    }
+//  }
+//
+//	inline uint64_t count_zeros() const {
+//		uint64_t zeros = 0;
+//		for (size_t i = 0; i < nRegisters; i++) {
+//			if (registers[i] == 0) ++zeros;
+//		}
+//		return zeros;
+//	}
+//
+//	inline double linear_count(uint64_t const & zeros) const {
+//		return static_cast<double>(nRegisters) *
+//				std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
+//	}
+//
+//	void clear() {
+//		registers.fill(static_cast<REG_T>(0));
+//	}
+//
+//};
 
 
 
