@@ -1022,7 +1022,7 @@ namespace dsc  // distributed std container
         BL_BENCH_INIT(insert);
 
         if (::dsc::empty(input, this->comm)) {
-          BL_BENCH_REPORT_MPI_NAMED(insert, "count_hashmap:insert", this->comm);
+          BL_BENCH_REPORT_MPI_NAMED(insert, "count_hashmap:insert_key", this->comm);
           return 0;
         }
 

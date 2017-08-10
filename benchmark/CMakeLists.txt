@@ -40,6 +40,28 @@ target_link_libraries(benchmark_hashtables ${EXTRA_LIBS})
    ${EXTRA_LIBS})
 
 
+  add_executable(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
+  SET_TARGET_PROPERTIES(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
+     PROPERTIES COMPILE_FLAGS 
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=ROBINHOOD -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DpCompare")
+  target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
+   ${EXTRA_LIBS})
+
+  add_executable(testKmerIndex-FASTQ-a4-k31-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
+  SET_TARGET_PROPERTIES(testKmerIndex-FASTQ-a4-k31-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhMURMUR-shMURMUR
+     PROPERTIES COMPILE_FLAGS 
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=DENSEHASH -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DpCompare")
+  target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhMURMUR-shMURMUR
+   ${EXTRA_LIBS})
+
+
+  add_executable(testKmerIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
+  SET_TARGET_PROPERTIES(testKmerIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
+     PROPERTIES COMPILE_FLAGS 
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=ROBINHOOD_BATCHED -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DpCompare")
+  target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
+   ${EXTRA_LIBS})
+
 
 
 message(STATUS "VTUNE_ANALYSIS set to ${VTUNE_ANALYSIS}")
@@ -48,6 +70,9 @@ if (ENABLE_VTUNE_PROFILING)
 	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)
 	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)
 	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)
+	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR ittnotify dl)
+	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhMURMUR-shMURMUR ittnotify dl)
+	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR ittnotify dl)
 endif(ENABLE_VTUNE_PROFILING)
 
 # EXECUTABLES

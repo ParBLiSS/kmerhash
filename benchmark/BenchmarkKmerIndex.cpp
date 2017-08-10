@@ -547,7 +547,8 @@ int main(int argc, char** argv) {
 #ifdef VTUNE_ANALYSIS
     // set the default for query to filename, and reparse
     std::string measure_mode_str = measureModeArg.getValue();
-    std::cout << "Measuring " << measure_mode_str << std::endl;
+    if (comm.rank() == 0) std::cout << "Measuring " << measure_mode_str << std::endl;
+
     if (measure_mode_str == "insert") {
       measure_mode = MEASURE_INSERT;
     } else if (measure_mode_str == "find") {
