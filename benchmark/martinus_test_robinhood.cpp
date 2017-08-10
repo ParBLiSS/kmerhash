@@ -1672,7 +1672,8 @@ int main(int argc, char** argv) {
     size_t iterations = 1000;
     size_t cnt_per_iter = 100 * 1000;
     {
-		auto stats64 = bench_sequential_insert<uint64_t, uint32_t, ::fsc::hash::farm<uint64_t> >(cnt_per_iter, iterations, 0.8, 0.35);
+      // using murmur, as farmhash impl is sensitive to prefetch on/off.
+		auto stats64 = bench_sequential_insert<uint64_t, uint32_t, ::fsc::hash::murmur<uint64_t> >(cnt_per_iter, iterations, 0.8, 0.35);
 		print(std::cout, stats64);
 		std::ofstream fout("datascaling_benchmark_64_32_farmhash-0.8-0.35.txt");
 		print(fout, stats64);

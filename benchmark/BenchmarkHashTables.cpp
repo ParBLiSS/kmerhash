@@ -77,7 +77,29 @@
 // results:  google dense hash is fastest.
 // question is how to make google dense hash support multimap style operations?  vector is expensive...
 
+#define STD 21
+#define MURMUR 22
+#define FARM 23
+#define IDEN 24
+
+
 #define LOOK_AHEAD 16
+
+
+// storage hash type
+#if (pStoreHash == STD)
+  template <typename KM>
+  using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
+#elif (pStoreHash == IDEN)
+  template <typename KM>
+  using StoreHash = bliss::kmer::hash::identity<KM, false>;
+#elif (pStoreHash == MURMUR)
+  template <typename KM>
+  using StoreHash = bliss::kmer::hash::murmur<KM, false>;
+#else //if (pStoreHash == FARM)
+  template <typename KM>
+  using StoreHash = bliss::kmer::hash::farm<KM, false>;
+#endif
 
 
 template <class T>
@@ -150,7 +172,7 @@ void benchmark_unordered_map(std::string name, size_t const count, size_t const 
 
   BL_BENCH_START(map);
   // no transform involved
-  ::std::unordered_map<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false> > map;//(count * 2 / repeat_rate);
+  ::std::unordered_map<Kmer, Value, StoreHash<Kmer> > map;//(count * 2 / repeat_rate);
   map.max_load_factor(max_load);
 
   BL_BENCH_END(map, "reserve", count);
@@ -223,7 +245,7 @@ void benchmark_densehash_map(std::string name, size_t const count,  size_t const
   ::fsc::densehash_map<Kmer, Value, 
 	::bliss::kmer::hash::sparsehash::special_keys<Kmer, false>,
 	::bliss::transform::identity,
-	::bliss::kmer::hash::farm<Kmer, false> > map;//(count * 2 / repeat_rate);
+	StoreHash<Kmer> > map;//(count * 2 / repeat_rate);
 
   BL_BENCH_END(map, "reserve", count);
 
@@ -297,7 +319,7 @@ void benchmark_densehash_full_map(std::string name, size_t const count,  size_t 
   ::fsc::densehash_map<Kmer, Value, 
 	::bliss::kmer::hash::sparsehash::special_keys<Kmer, canonical>,
 	::bliss::transform::identity,
-	::bliss::kmer::hash::farm<Kmer, false> > map;//(count * 2 / repeat_rate);
+	StoreHash<Kmer> > map;//(count * 2 / repeat_rate);
 
   BL_BENCH_END(map, "reserve", count);
 
@@ -370,7 +392,7 @@ void benchmark_flat_hash_map(std::string name, size_t const count,  size_t const
   BL_BENCH_START(map);
   // no transform involved.
   ::ska::flat_hash_map<Kmer, Value,
-	::bliss::kmer::hash::farm<Kmer, false> > map(count * 2 / repeat_rate);
+	StoreHash<Kmer> > map(count * 2 / repeat_rate);
   BL_BENCH_END(map, "reserve", count);
 
   {
@@ -441,7 +463,7 @@ void benchmark_google_densehash_map(std::string name, size_t const count,  size_
   BL_BENCH_START(map);
   // no transform involved.
   ::google::dense_hash_map<Kmer, Value,
-	::bliss::kmer::hash::farm<Kmer, false> > map; //(count * 2 / repeat_rate);
+	StoreHash<Kmer> > map; //(count * 2 / repeat_rate);
   BL_BENCH_END(map, "reserve", count);
 
   map.max_load_factor(max_load);
@@ -533,7 +555,7 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
 
   BL_BENCH_START(map);
   // no transform involved.
-  using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
+  using MAP_TYPE = MAP<Kmer, Value, StoreHash<Kmer>, ::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
 
   std::cout << " tuple size " << sizeof(typename MAP_TYPE::value_type) << std::endl;
 
@@ -568,7 +590,7 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
 #endif
 
 	// compute hyperloglog estimate for reference.
-	hyperloglog64<Kmer, ::bliss::kmer::hash::farm<Kmer, false>, 12> hll;
+	hyperloglog64<Kmer, StoreHash<Kmer>, 12> hll;
 	for (size_t i = 0; i < input.size(); ++i) {
 		hll.update(input[i].first);
 	}
@@ -693,7 +715,7 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
 
   BL_BENCH_START(map);
   // no transform involved.
-  using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
+  using MAP_TYPE = MAP<Kmer, Value, StoreHash<Kmer>, ::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
 
   std::cout << " tuple size " << sizeof(typename MAP_TYPE::value_type) << std::endl;
 
@@ -731,7 +753,7 @@ void benchmark_hashmap_insert_mode(std::string name, size_t const count,  size_t
 #endif
 
 	// compute hyperloglog estimate for reference.
-	hyperloglog64<Kmer, ::bliss::kmer::hash::farm<Kmer, false>, 12> hll;
+	hyperloglog64<Kmer, StoreHash<Kmer>, 12> hll;
 	for (size_t i = 0; i < input.size(); ++i) {
 		hll.update(input[i].first);
 	}
@@ -857,7 +879,7 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 
   BL_BENCH_START(map);
   // no transform involved.
-  using MAP_TYPE = MAP<Kmer, Value, ::bliss::kmer::hash::farm<Kmer, false>, ::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
+  using MAP_TYPE = MAP<Kmer, Value, StoreHash<Kmer>, ::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
 
   std::cout << " tuple size " << sizeof(typename MAP_TYPE::value_type) << std::endl;
 
@@ -899,11 +921,11 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
 #endif
 
 	// compute hyperloglog estimate for reference.
-    hyperloglog64<Kmer, ::bliss::kmer::hash::farm<Kmer, false>, 12> hll;
+    hyperloglog64<Kmer, StoreHash<Kmer>, 12> hll;
     ::std::pair<Kmer, Value> val __attribute__ ((aligned (16)));
     for (size_t i = 0; i < input.size(); ++i) {
-    	*(reinterpret_cast<__m128i*>(&val)) = _mm_stream_load_si128(reinterpret_cast<__m128i*>(input_ptr + i));
-		hll.update(val.first);
+//    	*(reinterpret_cast<__m128i*>(&val)) = _mm_stream_load_si128(reinterpret_cast<__m128i*>(input_ptr + i));
+		hll.update(input[i].first);
 	}
 
 	double est = hll.estimate();
@@ -914,8 +936,8 @@ void benchmark_hashmap(std::string name, size_t const count,  size_t const repea
     BL_BENCH_END(map, "estimate_w_mmstreamload", static_cast<size_t>(est));
 
     free(input_ptr);
-	std::cout << "insert testing: estimated using _mm_stream_load_si128 (slower), distinct = " << est << " in " << input.size() << std::endl;
-
+//	std::cout << "insert testing: estimated using _mm_stream_load_si128 (slower), distinct = " << est << " in " << input.size() << std::endl;
+	std::cout << "insert testing: estimated using [] operator, distinct = " << est << " in " << input.size() << std::endl;
 
 
     std::string insert_type;

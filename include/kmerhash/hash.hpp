@@ -132,7 +132,7 @@ namespace fsc {
       /**
        * @brief  farm hash
        *
-       * @tparam Prefix:  to get prefix,
+       * MAY NOT WORK CONSISTENTLY between prefetching on and off.
        */
       template <typename T>
       class farm {
