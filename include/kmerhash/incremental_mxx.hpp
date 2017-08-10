@@ -1158,18 +1158,18 @@ namespace khmxx
 #endif
     BL_BENCH_COLLECTIVE_END(distribute, "realloc_out", output.size(), _comm);
 
-    std::cout << "send counts " << std::endl;
-    std::cout << _comm.rank() << ",";
-    for (int ii = 0; ii < _comm.size(); ++ii) {
-      std::cout << send_counts[ii] << ",";
-    }
-    std::cout << std::endl;
-    std::cout << "recv counts " << std::endl;
-    std::cout << _comm.rank() << ",";
-    for (int ii = 0; ii < _comm.size(); ++ii) {
-      std::cout << recv_counts[ii] << ",";
-    }
-    std::cout << std::endl;
+//    std::cout << "send counts " << std::endl;
+//    std::cout << _comm.rank() << ",";
+//    for (int ii = 0; ii < _comm.size(); ++ii) {
+//      std::cout << send_counts[ii] << ",";
+//    }
+//    std::cout << std::endl;
+//    std::cout << "recv counts " << std::endl;
+//    std::cout << _comm.rank() << ",";
+//    for (int ii = 0; ii < _comm.size(); ++ii) {
+//      std::cout << recv_counts[ii] << ",";
+//    }
+//    std::cout << std::endl;
 
 
 
