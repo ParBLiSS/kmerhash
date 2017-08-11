@@ -1085,42 +1085,47 @@ namespace dsc  // distributed std container
           BL_BENCH_END(insert, "dist_data", input.size());
         }
 
-        typename Base::Base::Base::Base::InputTransform trans;
-
-        BL_BENCH_START(insert);
-#ifdef VTUNE_ANALYSIS
-  if (measure_mode == MEASURE_RESERVE)
-      __itt_resume();
-#endif
-        ::std::vector<::std::pair<Key, T> > temp;
-        temp.reserve(input.size());
-        ::fsc::back_emplace_iterator<::std::vector<::std::pair<Key, T> > > emplace_iter(temp);
-#ifdef VTUNE_ANALYSIS
-  if (measure_mode == MEASURE_RESERVE)
-      __itt_pause();
-#endif
-
-#ifdef VTUNE_ANALYSIS
-  if (measure_mode == MEASURE_TRANSFORM)
-      __itt_resume();
-#endif
-        ::std::transform(input.begin(), input.end(), emplace_iter, [&trans](Key const & x) {
-          return ::std::make_pair(trans(x), T(1));
-        });
-#ifdef VTUNE_ANALYSIS
-  if (measure_mode == MEASURE_TRANSFORM)
-      __itt_pause();
-#endif
-        BL_BENCH_END(insert, "convert", input.size());
+//        BL_BENCH_START(insert);
+//#ifdef VTUNE_ANALYSIS
+//  if (measure_mode == MEASURE_RESERVE)
+//      __itt_resume();
+//#endif
+//        ::std::vector<::std::pair<Key, T> > temp;
+//        temp.reserve(input.size());
+//        ::fsc::back_emplace_iterator<::std::vector<::std::pair<Key, T> > > emplace_iter(temp);
+//#ifdef VTUNE_ANALYSIS
+//  if (measure_mode == MEASURE_RESERVE)
+//      __itt_pause();
+//#endif
+//
+//#ifdef VTUNE_ANALYSIS
+//  if (measure_mode == MEASURE_TRANSFORM)
+//      __itt_resume();
+//#endif
+//        ::std::transform(input.begin(), input.end(), emplace_iter, [](Key const & x) {
+//          return ::std::make_pair(x, T(1));
+//        });
+//#ifdef VTUNE_ANALYSIS
+//  if (measure_mode == MEASURE_TRANSFORM)
+//      __itt_pause();
+//#endif
+//        BL_BENCH_END(insert, "convert", input.size());
 
 
-        //
-        //        // after communication, sort again to keep unique  - may not be needed
-        //        local_reduction(input, sorted_input);
 
         // local compute part.  called by the communicator.
         BL_BENCH_START(insert);
-        size_t count = 0;
+
+        auto converter = [](Key const & x) {
+          return ::std::make_pair(x, T(1));
+        };
+
+        using trans_iter_type = ::bliss::iterator::transform_iterator<typename std::vector< Key >::iterator, decltype(converter)>;
+        trans_iter_type local_start(input.begin(), converter);
+        trans_iter_type local_end(input.end(), converter);
+
+
+        size_t before = this->c.size();
 // TODO: filter on insert.
 //        if (!::std::is_same<Predicate, ::bliss::filter::TruePredicate>::value) {
 //        	std::cerr << "WARNING, predicated insert not implemented yet. using normal" << std::endl;
@@ -1130,7 +1135,8 @@ namespace dsc  // distributed std container
     if (measure_mode == MEASURE_INSERT)
         __itt_resume();
 #endif
-          count = this->c.insert(temp);
+          //this->c.insert(temp);
+    		this->c.insert(local_start, local_end);
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_INSERT)
         __itt_pause();
@@ -1138,12 +1144,12 @@ namespace dsc  // distributed std container
         BL_BENCH_END(insert, "local_insert", this->local_size());
 
 
-        ::std::vector<::std::pair<Key, T> >().swap(temp);  // clear the temp.
+//        ::std::vector<::std::pair<Key, T> >().swap(temp);  // clear the temp.
 
 
         BL_BENCH_REPORT_MPI_NAMED(insert, "count_hashmap:insert_key", this->comm);
 
-        return count;
+        return this->c.size() - before;
 
       }
   };

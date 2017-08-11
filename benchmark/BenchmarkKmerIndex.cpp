@@ -341,7 +341,12 @@ using CountType = uint32_t;
   using IndexType = bliss::index::kmer::PositionQualityIndex<MapType>;
 
 #elif (pINDEX == COUNT)  // map
+
+#ifdef INSERT_KMER_COUNT_PAIR
 	using IndexType = bliss::index::kmer::CountIndex<MapType>;
+#else
+	using IndexType = bliss::index::kmer::CountIndex2<MapType>;
+#endif
 #endif
 
 
@@ -427,6 +432,8 @@ void sample(std::vector<KmerType> &query, size_t n, unsigned int seed, mxx::comm
 
   std::vector<KmerType> out = ::mxx::all2allv(query, send_counts, comm);
   query.swap(out);
+
+  if (comm.rank() == 0) std::cout << "shuffled query input." << std::endl;
 }
 
 
@@ -613,7 +620,7 @@ int main(int argc, char** argv) {
 
   BL_BENCH_INIT(test);
   {
-	  ::std::vector<typename IndexType::TupleType> temp;
+	  ::std::vector<typename IndexType::KmerParserType::value_type> temp;
 
 	  BL_BENCH_START(test);
 //	  if (reader_algo == 2)

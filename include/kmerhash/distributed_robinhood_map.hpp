@@ -1796,16 +1796,9 @@ namespace dsc  // distributed std container
         }
 
 
-        typename Base::Base::Base::Base::InputTransform trans;
-
         BL_BENCH_START(insert);
-        ::std::vector<::std::pair<Key, T> > temp;
-        temp.reserve(input.size());
-        ::fsc::back_emplace_iterator<::std::vector<::std::pair<Key, T> > > emplace_iter(temp);
-        ::std::transform(input.begin(), input.end(), emplace_iter, [&trans](Key const & x) {
-        	return ::std::make_pair(trans(x), T(1));
-        });
-        BL_BENCH_END(insert, "convert", input.size());
+        this->transform_input(input);
+        BL_BENCH_END(insert, "transform_intput", input.size());
 
         // then send the raw k-mers.
         // communication part
@@ -1814,7 +1807,7 @@ namespace dsc  // distributed std container
           // first remove duplicates.  sort, then get unique, finally remove the rest.  may not be needed
           std::vector<size_t> recv_counts;
           std::vector<size_t> i2o;
-          std::vector<::std::pair<Key, T> > buffer;
+          std::vector<Key> buffer;
           ::imxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
           input.swap(buffer);
 
@@ -1823,22 +1816,28 @@ namespace dsc  // distributed std container
           BL_BENCH_END(insert, "dist_data", input.size());
         }
 
-
         //
         //        // after communication, sort again to keep unique  - may not be needed
         //        local_reduction(input, sorted_input);
 
         // local compute part.  called by the communicator.
         BL_BENCH_START(insert);
+        auto converter = [](Key const & x) {
+          return ::std::make_pair(x, T(1));
+        };
+
+        using trans_iter_type = ::bliss::iterator::transform_iterator<typename std::vector< Key >::iterator, decltype(converter)>;
+        trans_iter_type local_start(input.begin(), converter);
+        trans_iter_type local_end(input.end(), converter);
+
+
         size_t count = 0;
         if (!::std::is_same<Predicate, ::bliss::filter::TruePredicate>::value)
-          count = this->Base::local_insert(temp.begin(), temp.end(), pred);
+          count = this->Base::local_insert(local_start, local_end, pred);
         else
-          count = this->Base::local_insert(temp.begin(), temp.end());
+          count = this->Base::local_insert(local_start, local_end);
+
         BL_BENCH_END(insert, "local_insert", this->local_size());
-
-
-        ::std::vector<::std::pair<Key, T> >().swap(temp);  // clear the temp.
 
 
         BL_BENCH_REPORT_MPI_NAMED(insert, "count_hashmap:insert_key", this->comm);

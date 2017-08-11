@@ -2012,7 +2012,7 @@ public:
 		size_t hval;
 		Iter it = begin;
 		for (size_t i = 0; i < input_size; ++i, ++it) {
-			hval = hash(it->first);
+			hval = hash( (*it).first );
 			hll_local.update_via_hashval(hval);
 			// using mm_stream here does not make a differnece.
 			//_mm_stream_si64(reinterpret_cast<long long int*>(hash_vals + i), *(reinterpret_cast<long long int*>(&hval)));
