@@ -382,7 +382,12 @@ namespace dsc  // distributed std container
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
+
+#ifdef ENABLE_LZ4_COMM
+  	  	  	  ::khmxx::lz4::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#else
 			  ::khmxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#endif
 			  input.swap(buffer);
           BL_BENCH_END(insert, "dist_data", input.size());
         }
@@ -491,7 +496,12 @@ namespace dsc  // distributed std container
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-                ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+
+#ifdef ENABLE_LZ4_COMM
+  	  	  	  ::khmxx::lz4::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#else
+              ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#endif
                 keys.swap(buffer);
 	  //            ::dsc::distribute_unique(keys, this->key_to_rank, sorted_input, this->comm,
 	  //            				typename Base::StoreTransformedFunc(),
@@ -636,8 +646,13 @@ namespace dsc  // distributed std container
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-            ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
-            keys.swap(buffer);
+
+#ifdef ENABLE_LZ4_COMM
+  ::khmxx::lz4::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#else
+  ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#endif
+  keys.swap(buffer);
       //            ::dsc::distribute_unique(keys, this->key_to_rank, sorted_input, this->comm,
       //                    typename Base::StoreTransformedFunc(),
       //                    typename Base::StoreTransformedEqual()).swap(recv_counts);
@@ -810,7 +825,12 @@ namespace dsc  // distributed std container
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
+
+#ifdef ENABLE_LZ4_COMM
+  ::khmxx::lz4::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#else
           ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#endif
           //::khmxx::destructive_distribute(input, this->key_to_rank, recv_counts, buffer, this->comm);
           keys.swap(buffer);
               }
@@ -1054,7 +1074,12 @@ namespace dsc  // distributed std container
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
+
+#ifdef ENABLE_LZ4_COMM
+  ::khmxx::lz4::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#else
           ::khmxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+#endif
           input.swap(buffer);
 
           BL_BENCH_END(insert, "dist_data", input.size());

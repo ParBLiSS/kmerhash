@@ -548,12 +548,18 @@ endif(ENABLE_VTUNE_PROFILING)
 endif()
 
 
-# Reprobe configuration.
+# Prefetch configuration.
 OPTION(ENABLE_PREFETCH "enable prefetching in hashmap" ON)
 if (ENABLE_PREFETCH)
     add_definitions(-DENABLE_PREFETCH)
 endif(ENABLE_PREFETCH)
 
+## LZ4 configuration.
+#OPTION(ENABLE_LZ4 "enable LZ4 compression during communication" ON)
+#if (ENABLE_LZ4)
+#    add_definitions(-DENABLE_LZ4_COMM)
+#endif(ENABLE_LZ4)
+#
 
 # Reprobe configuration.
 CMAKE_DEPENDENT_OPTION(REPORT_REPROBES "Report reprobe counts.  Only when ENABLE_PROFILING is set to off" OFF "NOT ENABLE_PROFILING" OFF)
@@ -917,6 +923,7 @@ include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/mxx/include")
 include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/mxx/ext")
 include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/tclap-1.2.1/include")
 include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/sparsehash-c11")
+include_directories("${EXT_PROJECTS_DIR}/lz4/lib")
 
 
 #for when the linker (ld) has problem finding librt, e.g. error: undefined referecne clock_gettime@@GLIBC_2.2.5.  this needs to be close to the end of the ld list.

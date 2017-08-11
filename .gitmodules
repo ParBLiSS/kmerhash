@@ -7,3 +7,6 @@
 [submodule "ext/martinus"]
 	path = ext/martinus
 	url = https://github.com/martinus/robin-hood-hashing.git
+[submodule "ext/lz4"]
+	path = ext/lz4
+	url = https://github.com/lz4/lz4.git
