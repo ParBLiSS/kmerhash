@@ -50,7 +50,7 @@
 #include <functional> 		// for std::function and std::hash
 #include <algorithm> 		// for sort, stable_sort, unique, is_sorted
 #include <iterator>  // advance, distance
-
+#include <sstream>  // stringstream for filea
 #include <cstdint>  // for uint8, etc.
 
 #include <type_traits>
@@ -72,6 +72,8 @@
 #include "containers/dsc_container_utils.hpp"
 
 #include "incremental_mxx.hpp"
+
+#include "io_utils.hpp"
 
 namespace dsc  // distributed std container
 {
@@ -391,6 +393,16 @@ namespace dsc  // distributed std container
 			  input.swap(buffer);
           BL_BENCH_END(insert, "dist_data", input.size());
         }
+
+#ifdef DUMP_DISTRIBUTED_INPUT
+        {
+        	// target is reading by benchmark_hashtables, so want whole tuple, and is here only.
+
+			std::stringstream ss;
+			ss << "serialized." << this->comm.rank();
+			serialize_vector(input, ss.str());
+        }
+#endif
 
 
         BL_BENCH_START(insert);
@@ -1110,6 +1122,7 @@ namespace dsc  // distributed std container
 //      __itt_pause();
 //#endif
 //        BL_BENCH_END(insert, "convert", input.size());
+
 
 
 
