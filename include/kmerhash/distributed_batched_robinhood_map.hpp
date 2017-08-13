@@ -354,7 +354,7 @@ namespace dsc  // distributed std container
           return 0;
         }
 
-        BL_BENCH_START(insert);
+        BL_BENCH_COLLECTIVE_START(insert, "transform_input", this->comm);
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_TRANSFORM)
         __itt_resume();
@@ -368,7 +368,7 @@ namespace dsc  // distributed std container
 
         // communication part
         if (this->comm.size() > 1) {
-          BL_BENCH_START(insert);
+            BL_BENCH_COLLECTIVE_START(insert, "dist_data", this->comm);
           // get mapping to proc
           // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
 //          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
@@ -405,7 +405,7 @@ namespace dsc  // distributed std container
 #endif
 
 
-        BL_BENCH_START(insert);
+        BL_BENCH_COLLECTIVE_START(insert, "insert", this->comm);
         // local compute part.  called by the communicator.
         size_t before = this->c.size();
         // TODO: predicated version.
@@ -452,7 +452,7 @@ namespace dsc  // distributed std container
 //            return results;
 //          }
 
-          BL_BENCH_START(count);
+          BL_BENCH_COLLECTIVE_START(count, "transform_input", this->comm);
           ::fsc::back_emplace_iterator<::std::vector<::std::pair<Key, size_type> > > emplace_iter(results);
           // even if count is 0, still need to participate in mpi calls.  if (keys.size() == 0) return results;
 #ifdef VTUNE_ANALYSIS
@@ -467,7 +467,7 @@ namespace dsc  // distributed std container
           BL_BENCH_END(count, "transform_input", keys.size());
 
 
-            BL_BENCH_START(count);
+          BL_BENCH_COLLECTIVE_START(count, "unique", this->comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_UNIQUE)
       __itt_resume();
@@ -524,7 +524,7 @@ namespace dsc  // distributed std container
 
             // local count. memory utilization a potential problem.
             // do for each src proc one at a time.
-            BL_BENCH_START(count);
+          BL_BENCH_COLLECTIVE_START(count, "reserve", this->comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
@@ -536,7 +536,7 @@ namespace dsc  // distributed std container
 #endif
             BL_BENCH_END(count, "reserve", results.capacity());
 
-            BL_BENCH_START(count);
+            BL_BENCH_COLLECTIVE_START(count, "local_count", this->comm);
             {
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_COUNT)
@@ -605,7 +605,7 @@ namespace dsc  // distributed std container
             return results;
           }
 
-          BL_BENCH_START(find);
+          BL_BENCH_COLLECTIVE_START(find, "transform_input", this->comm);
           ::fsc::back_emplace_iterator<::std::vector<::std::pair<Key, T> > > emplace_iter(results);
           // even if count is 0, still need to participate in mpi calls.  if (keys.size() == 0) return results;
 #ifdef VTUNE_ANALYSIS
@@ -619,7 +619,7 @@ namespace dsc  // distributed std container
 #endif
           BL_BENCH_END(find, "input_transform", keys.size());
 
-        BL_BENCH_START(find);
+          BL_BENCH_COLLECTIVE_START(find, "unique", this->comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_UNIQUE)
       __itt_resume();
@@ -675,6 +675,7 @@ namespace dsc  // distributed std container
             // local find. memory utilization a potential problem.
             // do for each src proc one at a time.
 
+                BL_BENCH_COLLECTIVE_START(find, "reserve", this->comm);
             BL_BENCH_START(find);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -687,7 +688,7 @@ namespace dsc  // distributed std container
 #endif
             BL_BENCH_END(find, "reserve", results.capacity());
 
-            BL_BENCH_START(find);
+            BL_BENCH_COLLECTIVE_START(find, "local_find", this->comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
@@ -802,7 +803,7 @@ namespace dsc  // distributed std container
             return 0;
           }
 
-          BL_BENCH_START(erase);
+          BL_BENCH_COLLECTIVE_START(erase, "transform_input", this->comm);
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_TRANSFORM)
         __itt_resume();
@@ -816,7 +817,7 @@ namespace dsc  // distributed std container
 
           if (this->comm.size() > 1) {
 
-              BL_BENCH_START(erase);
+              BL_BENCH_COLLECTIVE_START(erase, "dist_query", this->comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
@@ -852,7 +853,7 @@ namespace dsc  // distributed std container
             sorted_input = false;
           }
 
-          BL_BENCH_START(erase);
+          BL_BENCH_COLLECTIVE_START(erase, "unique", this->comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_UNIQUE)
       __itt_resume();
@@ -869,7 +870,7 @@ namespace dsc  // distributed std container
           BL_BENCH_END(erase, "unique", keys.size());
 
 
-          BL_BENCH_START(erase);
+          BL_BENCH_COLLECTIVE_START(erase, "erase", this->comm);
           // then call local remove.
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_ERASE)
@@ -1058,7 +1059,7 @@ namespace dsc  // distributed std container
           return 0;
         }
 
-        BL_BENCH_START(insert);
+        BL_BENCH_COLLECTIVE_START(insert, "transform_input", this->comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_TRANSFORM)
       __itt_resume();
@@ -1073,7 +1074,7 @@ namespace dsc  // distributed std container
         // then send the raw k-mers.
         // communication part
         if (this->comm.size() > 1) {
-          BL_BENCH_START(insert);
+            BL_BENCH_COLLECTIVE_START(insert, "dist_data", this->comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
@@ -1127,7 +1128,7 @@ namespace dsc  // distributed std container
 
 
         // local compute part.  called by the communicator.
-        BL_BENCH_START(insert);
+        BL_BENCH_COLLECTIVE_START(insert, "local_insert", this->comm);
 
         auto converter = [](Key const & x) {
           return ::std::make_pair(x, T(1));

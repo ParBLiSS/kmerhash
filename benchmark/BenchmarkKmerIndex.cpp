@@ -622,7 +622,7 @@ int main(int argc, char** argv) {
   {
 	  ::std::vector<typename IndexType::KmerParserType::value_type> temp;
 
-	  BL_BENCH_START(test);
+	  BL_BENCH_COLLECTIVE_START(test, "read", comm);
 //	  if (reader_algo == 2)
 //	  {
 //		if (comm.rank() == 0) printf("reading %s via fileloader\n", filename.c_str());
@@ -644,15 +644,15 @@ int main(int argc, char** argv) {
 	  } else {
 		throw std::invalid_argument("missing file reader type");
 	  }
-	  BL_BENCH_COLLECTIVE_END(test, "read", temp.size(), comm);
+	  BL_BENCH_END(test, "read", temp.size());
 
 	  size_t total = mxx::allreduce(temp.size(), comm);
 	  if (comm.rank() == 0) printf("total size is %lu\n", total);
 
 
-	  BL_BENCH_START(test);
+	  BL_BENCH_COLLECTIVE_START(test, "insert", comm);
 	  idx.insert(temp);
-	  BL_BENCH_COLLECTIVE_END(test, "insert", idx.local_size(), comm);
+	  BL_BENCH_END(test, "insert", idx.local_size());
 
     total = idx.size();
     if (comm.rank() == 0) printf("total size after insert/rehash is %lu\n", total);
@@ -661,34 +661,34 @@ int main(int argc, char** argv) {
   {
 
   if (comm.rank() == 0) printf("reading query %s via posix\n", queryname.c_str());
-  BL_BENCH_START(test);
+  BL_BENCH_COLLECTIVE_START(test, "read_query", comm);
   auto query = readForQuery_posix<IndexType>(queryname, comm);
-  BL_BENCH_COLLECTIVE_END(test, "read_query", query.size(), comm);
+  BL_BENCH_END(test, "read_query", query.size());
 
-  BL_BENCH_START(test);
+  BL_BENCH_COLLECTIVE_START(test, "sample", comm);
   sample(query, query.size() / sample_ratio, comm.rank(), comm);
-  BL_BENCH_COLLECTIVE_END(test, "sample", query.size(), comm);
+  BL_BENCH_END(test, "sample", query.size());
 
 
 
 	  {
 		  auto lquery = query;
-		  BL_BENCH_START(test);
+		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
 		  auto counts = idx.count(lquery);
-		  BL_BENCH_COLLECTIVE_END(test, "count", counts.size(), comm);
+		  BL_BENCH_END(test, "count", counts.size());
 	  }
 
 	  {
 		  auto lquery = query;
-		  BL_BENCH_START(test);
+		  BL_BENCH_COLLECTIVE_START(test, "find", comm);
 		  auto found = idx.find(lquery);
-		  BL_BENCH_COLLECTIVE_END(test, "find", found.size(), comm);
+		  BL_BENCH_END(test, "find", found.size());
 	  }
 
 
-	  BL_BENCH_START(test);
+	  BL_BENCH_COLLECTIVE_START(test, "erase", comm);
 	  idx.erase(query);
-	  BL_BENCH_COLLECTIVE_END(test, "erase", idx.local_size(), comm);
+	  BL_BENCH_END(test, "erase", idx.local_size());
 
   }
 
