@@ -481,7 +481,7 @@ int main(int argc, char** argv) {
   uint8_t insert_prefetch = 8;
   uint8_t query_prefetch = 16;
 
-
+  bool balance_input = false;
 
   int reader_algo = -1;
   // Wrap everything in a try block.  Do this every time,
@@ -501,6 +501,8 @@ int main(int argc, char** argv) {
     // such as "-n Bishop".
     TCLAP::ValueArg<std::string> fileArg("F", "file", "FASTQ file path", false, filename, "string", cmd);
     TCLAP::ValueArg<std::string> queryArg("Q", "query", "FASTQ file path for query. default to same file as index file", false, "", "string", cmd);
+
+	TCLAP::SwitchArg balanceArg("b", "balance-input", "balance the input", cmd, balance_input);
 
     TCLAP::ValueArg<int> algoArg("A",
                                  "algo", "Reader Algorithm id. Fileloader w/o preload = 2, mmap = 5, posix=7, mpiio = 10. default is 7.",
@@ -541,6 +543,8 @@ int main(int argc, char** argv) {
     queryname = queryArg.getValue();   // get this first
     if (queryname.empty()) // at default  set to same as input.
     	queryname = fileArg.getValue();
+
+    balance_input = balanceArg.getValue();
 
     filename = fileArg.getValue();
     reader_algo = algoArg.getValue();
@@ -648,6 +652,13 @@ int main(int argc, char** argv) {
 
 	  size_t total = mxx::allreduce(temp.size(), comm);
 	  if (comm.rank() == 0) printf("total size is %lu\n", total);
+
+
+	  if (balance_input) {
+		  BL_BENCH_COLLECTIVE_START(test, "balance", comm);
+		  ::mxx::distribute_inplace(temp, comm);
+		  BL_BENCH_END(test, "balance", temp.size());
+	  }
 
 
 	  BL_BENCH_COLLECTIVE_START(test, "insert", comm);
