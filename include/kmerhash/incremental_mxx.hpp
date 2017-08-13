@@ -1072,10 +1072,10 @@ namespace khmxx
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "alloc_map", input.size(), _comm);
+    BL_BENCH_END(distribute, "alloc_map", input.size());
 
     // bucketing
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "bucket", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_BUCKET)
       __itt_resume();
@@ -1085,7 +1085,7 @@ namespace khmxx
   if (measure_mode == MEASURE_BUCKET)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "bucket", input.size(), _comm);
+    BL_BENCH_END(distribute, "bucket", input.size());
 
     BL_BENCH_START(distribute);
 #ifdef VTUNE_ANALYSIS
@@ -1098,7 +1098,7 @@ namespace khmxx
   if (measure_mode == MEASURE_PERMUTE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "to_pos", input.size(), _comm);
+    BL_BENCH_END(distribute, "to_pos", input.size());
 
     BL_BENCH_START(distribute);
 #ifdef VTUNE_ANALYSIS
@@ -1112,7 +1112,7 @@ namespace khmxx
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "alloc_permute", output.size(), _comm);
+    BL_BENCH_END(distribute, "alloc_permute", output.size());
 
     BL_BENCH_START(distribute);
 #ifdef VTUNE_ANALYSIS
@@ -1125,10 +1125,10 @@ namespace khmxx
   if (measure_mode == MEASURE_PERMUTE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "permute", input.size(), _comm);
+    BL_BENCH_END(distribute, "permute", input.size());
 
     // distribute (communication part)
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "a2a_count", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
@@ -1147,7 +1147,7 @@ namespace khmxx
   if (measure_mode == MEASURE_A2A)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "a2a_count", recv_counts.size(), _comm);
+    BL_BENCH_END(distribute, "a2a_count", recv_counts.size());
 
     BL_BENCH_START(distribute);
 #ifdef VTUNE_ANALYSIS
@@ -1162,7 +1162,7 @@ namespace khmxx
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "realloc_out", output.size(), _comm);
+    BL_BENCH_END(distribute, "realloc_out", output.size());
 
 //    std::cout << "send counts " << std::endl;
 //    std::cout << _comm.rank() << ",";
@@ -1179,7 +1179,7 @@ namespace khmxx
 
 
 
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "a2a", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_A2A)
       __itt_resume();
@@ -1192,7 +1192,7 @@ namespace khmxx
     BL_BENCH_END(distribute, "a2a", output.size());
 
     if (preserve_input) {
-      BL_BENCH_START(distribute);
+        BL_BENCH_COLLECTIVE_START(distribute, "unpermute_inplace", _comm);
       // unpermute.  may be able to work around this so leave it as "_inplace"
       khmxx::local::unpermute_inplace(input, i2o, 0, input.size());
       BL_BENCH_END(distribute, "unpermute_inplace", input.size());
@@ -1243,10 +1243,10 @@ namespace khmxx
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "alloc_permute", output.size(), _comm);
+    BL_BENCH_END(distribute, "alloc_permute", output.size());
 
     // bucketing
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "bucket", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_BUCKET)
       __itt_resume();
@@ -1265,11 +1265,11 @@ namespace khmxx
   if (measure_mode == MEASURE_BUCKET)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "bucket", input.size(), _comm);
+    BL_BENCH_END(distribute, "bucket", input.size());
 
 
     // distribute (communication part)
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "a2a_count", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
@@ -1289,7 +1289,7 @@ namespace khmxx
   if (measure_mode == MEASURE_A2A)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "a2a_count", recv_counts.size(), _comm);
+    BL_BENCH_END(distribute, "a2a_count", recv_counts.size());
 
     BL_BENCH_START(distribute);
 #ifdef VTUNE_ANALYSIS
@@ -1304,9 +1304,9 @@ namespace khmxx
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "realloc_out", output.size(), _comm);
+    BL_BENCH_END(distribute, "realloc_out", output.size());
 
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "a2a", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_A2A)
       __itt_resume();
@@ -1394,12 +1394,12 @@ namespace khmxx
       BL_BENCH_START(distribute);
       std::vector<SIZE> send_counts(_comm.size(), 0);
       i2o.resize(input.size());
-      BL_BENCH_COLLECTIVE_END(distribute, "alloc_map", input.size(), _comm);
+      BL_BENCH_END(distribute, "alloc_map", input.size());
 
       // bucketing
       BL_BENCH_START(distribute);
       khmxx::local::assign_to_buckets(input, to_rank, _comm.size(), send_counts, i2o, 0, input.size());
-      BL_BENCH_COLLECTIVE_END(distribute, "bucket", input.size(), _comm);
+      BL_BENCH_END(distribute, "bucket", input.size());
 
       // compute minimum block size.
       BL_BENCH_START(distribute);
@@ -1411,7 +1411,7 @@ namespace khmxx
       BL_BENCH_START(distribute);
       ::khmxx::local::bucket_to_block_permutation(min_bucket_size, 1UL, send_counts, i2o, 0, input.size());
       SIZE first_part = _comm.size() * min_bucket_size;
-      BL_BENCH_COLLECTIVE_END(distribute, "to_pos", input.size(), _comm);
+      BL_BENCH_END(distribute, "to_pos", input.size());
 
       // compute receive counts and total
       BL_BENCH_START(distribute);
@@ -1419,27 +1419,27 @@ namespace khmxx
       mxx::all2all(send_counts.data(), 1, recv_counts.data(), _comm);
       SIZE total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
       total += first_part;
-      BL_BENCH_COLLECTIVE_END(distribute, "a2av_count", total, _comm);
+      BL_BENCH_END(distribute, "a2av_count", total);
 
       BL_BENCH_START(distribute);
       if (output.capacity() < input.size()) output.clear();
       output.resize(input.size());
       output.swap(input);
-      BL_BENCH_COLLECTIVE_END(distribute, "alloc_out", output.size(), _comm);
+      BL_BENCH_END(distribute, "alloc_out", output.size());
 
       // permute
       BL_BENCH_START(distribute);
       khmxx::local::permute(output.begin(), output.end(), i2o.begin(), input.begin(), 0);
-      BL_BENCH_COLLECTIVE_END(distribute, "permute", input.size(), _comm);
+      BL_BENCH_END(distribute, "permute", input.size());
 
       BL_BENCH_START(distribute);
       if (output.capacity() < total) output.clear();
       output.resize(total);
-      BL_BENCH_COLLECTIVE_END(distribute, "alloc_out", output.size(), _comm);
+      BL_BENCH_END(distribute, "alloc_out", output.size());
 
       BL_BENCH_START(distribute);
       block_all2all(input, min_bucket_size, output, 0, 0, _comm);
-      BL_BENCH_COLLECTIVE_END(distribute, "a2a", first_part, _comm);
+      BL_BENCH_END(distribute, "a2a", first_part);
 
 
       BL_BENCH_START(distribute);
@@ -1553,10 +1553,10 @@ namespace khmxx
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "alloc_map", input.size(), _comm);
+    BL_BENCH_END(distribute, "alloc_map", input.size());
 
     // bucketing
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "bucket", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_BUCKET)
       __itt_resume();
@@ -1566,7 +1566,7 @@ namespace khmxx
   if (measure_mode == MEASURE_BUCKET)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "bucket", input.size(), _comm);
+    BL_BENCH_END(distribute, "bucket", input.size());
 
     BL_BENCH_START(distribute);
 #ifdef VTUNE_ANALYSIS
@@ -1579,7 +1579,7 @@ namespace khmxx
   if (measure_mode == MEASURE_PERMUTE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "to_pos", input.size(), _comm);
+    BL_BENCH_END(distribute, "to_pos", input.size());
 
     BL_BENCH_START(distribute);
 #ifdef VTUNE_ANALYSIS
@@ -1593,7 +1593,7 @@ namespace khmxx
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "alloc_permute", output.size(), _comm);
+    BL_BENCH_END(distribute, "alloc_permute", output.size());
 
     BL_BENCH_START(distribute);
 #ifdef VTUNE_ANALYSIS
@@ -1606,10 +1606,10 @@ namespace khmxx
   if (measure_mode == MEASURE_PERMUTE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "permute", input.size(), _comm);
+    BL_BENCH_END(distribute, "permute", input.size());
 
     //============= compress each input block now...
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "alloc_lz4", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
@@ -1642,10 +1642,10 @@ namespace khmxx
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "alloc_lz4", max_comp_total, _comm);
+    BL_BENCH_END(distribute, "alloc_lz4", max_comp_total);
 
     // now compress block by block
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "lz4_comp", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_COMPRESS)
       __itt_resume();
@@ -1672,11 +1672,11 @@ namespace khmxx
   if (measure_mode == MEASURE_COMPRESS)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "lz4_comp", offset, _comm);
+    BL_BENCH_END(distribute, "lz4_comp", offset);
 
 
     // distribute (communication part)
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "a2a_count", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
@@ -1702,7 +1702,7 @@ namespace khmxx
   if (measure_mode == MEASURE_A2A)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "a2a_count", recv_counts.size(), _comm);
+    BL_BENCH_END(distribute, "a2a_count", recv_counts.size());
 
 
 //    std::cout << "send counts " << std::endl;
@@ -1740,9 +1740,9 @@ namespace khmxx
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "a2a_alloc", max_comp_total, _comm);
+    BL_BENCH_END(distribute, "a2a_alloc", max_comp_total);
 
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "a2a", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_A2A)
       __itt_resume();
@@ -1779,10 +1779,10 @@ namespace khmxx
   if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "realloc_out", output.size(), _comm);
+    BL_BENCH_END(distribute, "realloc_out", output.size());
 
     // decompress received
-    BL_BENCH_START(distribute);
+    BL_BENCH_COLLECTIVE_START(distribute, "lz4_decomp", _comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_COMPRESS)
       __itt_resume();
@@ -1811,11 +1811,11 @@ namespace khmxx
   if (measure_mode == MEASURE_COMPRESS)
       __itt_pause();
 #endif
-    BL_BENCH_COLLECTIVE_END(distribute, "lz4_decomp", offset, _comm);
+    BL_BENCH_END(distribute, "lz4_decomp", offset);
 
 
     if (preserve_input) {
-      BL_BENCH_START(distribute);
+        BL_BENCH_COLLECTIVE_START(distribute, "unpermute_inplace", _comm);
       // unpermute.  may be able to work around this so leave it as "_inplace"
       khmxx::local::unpermute_inplace(input, i2o, 0, input.size());
       BL_BENCH_END(distribute, "unpermute_inplace", input.size());
