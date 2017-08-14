@@ -122,15 +122,33 @@ namespace khmxx
       // output to input mapping
       std::vector<ASSIGN_TYPE> i2o;
       i2o.reserve(len);
+//      int ret;
+//      ASSIGN_TYPE* i2o = nullptr;
+//      ret = posix_memalign(reinterpret_cast<void **>(&i2o), 64, len * sizeof(ASSIGN_TYPE));
+//      if (ret) {
+//        free(i2o);
+//        throw std::length_error("failed to allocate aligned memory");
+//      }
+////        ASSIGN_TYPE* i2o = nullptr;
+////        ptrdiff_t i2o_size = 0;
+////        std::tie(i2o, i2o_size) = ::std::get_temporary_buffer<ASSIGN_TYPE>(len);
+////        if (i2o_size < static_cast<ptrdiff_t>(len)) {
+////          return_temporary_buffer(i2o);
+////          throw std::length_error("failed to allocate aligned memory");
+////        }
+
 
       // [1st pass]: compute bucket counts and input to bucket assignment.
       ASSIGN_TYPE p;
+//      ASSIGN_TYPE* i2o_it = i2o;
+//      for (size_t i = f; i < l; ++i, ++i2o_it) {
       for (size_t i = f; i < l; ++i) {
           p = key_func(input[i]);
 
           assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
 
           i2o.emplace_back(p);
+//          *i2o_it = p;
           ++bucket_sizes[p];
       }
 
@@ -143,14 +161,40 @@ namespace khmxx
       }
       assert(bucket_sizes.front() == 0);  // first one should be 0 at this point.
 
+
       // [2nd pass]: saving elements into correct position, and save the final position.
-      std::vector<T> tmp_result(len);
-      for (size_t i = f; i < l; ++i) {
+      if (len = input.size()) {
+        // use swap
+        std::vector<T> tmp_result(len);
+        for (size_t i = f; i < l; ++i) {
+            tmp_result[bucket_sizes[i2o[i-f]]++] = input[i];
+//      i2o_it = i2o;
+//        for (size_t i = f; i < l; ++i, ++i2o_it) {
+//            tmp_result[bucket_sizes[*i2o_it]++] = input[i];
+        }
+        input.swap(tmp_result);
+
+      } else {
+        T* tmp_result = nullptr;
+        ret = posix_memalign(reinterpret_cast<void **>(&tmp_result), 64, len * sizeof(T));
+        if (ret) {
+          free(tmp_result);
+          throw std::length_error("failed to allocate aligned memory");
+        }
+
+        for (size_t i = f; i < l; ++i) {
           tmp_result[bucket_sizes[i2o[i-f]]++] = input[i];
+//      i2o_it = i2o;
+//        for (size_t i = f; i < l; ++i, ++i2o_it) {
+//            tmp_result[bucket_sizes[*i2o_it]++] = input[i];
+        }
+        memcpy(input.data() + f, tmp_result, len * sizeof(T));   // else memcpy.
+
+        free(tmp_result);
       }
-      //std::cout << "bucket64 SIZES i2o " << sizeof(i2o) << " tmp results " << sizeof(tmp_result) << std::endl;
-      if (len == input.size()) input.swap(tmp_result);   // if can swap, swap
-      else memcpy(input.data() + f, tmp_result.data(), len * sizeof(T));   // else memcpy.
+
+//      free(i2o);
+////      return_temporary_buffer(i2o);
 
       // this process should have turned bucket_sizes to an inclusive prefix sum
       assert(bucket_sizes.back() == len);
@@ -167,7 +211,7 @@ namespace khmxx
                            Func const & key_func,
                            ASSIGN_TYPE const num_buckets,
                            std::vector<SIZE> & bucket_sizes,
-						   std::vector<T> & results,
+                           std::vector<T> & results,
                            size_t first = 0,
                            size_t last = std::numeric_limits<size_t>::max()) {
 
@@ -206,15 +250,32 @@ namespace khmxx
       // output to input mapping
       std::vector<ASSIGN_TYPE> i2o;
       i2o.reserve(len);
+      //int ret;
+//      ASSIGN_TYPE* i2o = nullptr;
+//      ret = posix_memalign(reinterpret_cast<void **>(&i2o), 64, len * sizeof(ASSIGN_TYPE));
+//      if (ret) {
+//        free(i2o);
+//        throw std::length_error("failed to allocate aligned memory");
+//      }
+////      ASSIGN_TYPE* i2o = nullptr;
+////      ptrdiff_t i2o_size = 0;
+////      std::tie(i2o, i2o_size) = ::std::get_temporary_buffer<ASSIGN_TYPE>(len);
+////      if (i2o_size < static_cast<ptrdiff_t>(len)) {
+////        return_temporary_buffer(i2o);
+////        throw std::length_error("failed to allocate aligned memory");
+////      }
 
       // [1st pass]: compute bucket counts and input to bucket assignment.
       ASSIGN_TYPE p;
       for (size_t i = f; i < l; ++i) {
+//      ASSIGN_TYPE* i2o_it = i2o;
+//      for (size_t i = f; i < l; ++i, ++i2o_it) {
           p = key_func(input[i]);
 
           assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
 
           i2o.emplace_back(p);
+//          *i2o_it = p;
           ++bucket_sizes[p];
       }
 
@@ -232,6 +293,13 @@ namespace khmxx
       for (size_t i = f; i < l; ++i) {
           results[bucket_sizes[i2o[i-f]]++] = input[i];
       }
+//      i2o_it = i2o;
+//      for (size_t i = f; i < l; ++i, ++i2o_it) {
+//          results[bucket_sizes[*i2o_it]++] = input[i];
+//      }
+
+//      free(i2o);
+////      return_temporary_buffer(i2o);
 
       // this process should have turned bucket_sizes to an inclusive prefix sum
       assert(bucket_sizes.back() == l);
