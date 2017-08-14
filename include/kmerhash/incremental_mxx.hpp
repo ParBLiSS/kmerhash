@@ -1824,7 +1824,274 @@ namespace khmxx
 
   }
 
+
+  template <typename V, typename ToRank, typename SIZE>
+  void distribute(::std::vector<V>& input, ToRank const & to_rank,
+                  ::std::vector<SIZE> & recv_counts,
+                  ::std::vector<V>& output,
+                  ::mxx::comm const &_comm) {
+    BL_BENCH_INIT(distribute);
+
+    BL_BENCH_COLLECTIVE_START(distribute, "empty", _comm);
+    bool empty = input.size() == 0;
+    empty = mxx::all_of(empty);
+    BL_BENCH_END(distribute, "empty", input.size());
+
+    if (empty) {
+      BL_BENCH_REPORT_MPI_NAMED(distribute, "khmxx:distribute", _comm);
+      return;
+    }
+    // speed over mem use.  mxx all2allv already has to double memory usage. same as stable distribute.
+
+    BL_BENCH_START(distribute);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
+    std::vector<SIZE> send_counts(_comm.size(), 0);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "alloc_map", input.size());
+
+    BL_BENCH_START(distribute);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
+    if (output.capacity() < input.size()) output.clear();
+    output.resize(input.size());
+    output.swap(input);  // swap the 2.
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "alloc_permute", output.size());
+
+    // bucketing
+    BL_BENCH_COLLECTIVE_START(distribute, "bucket", _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_BUCKET)
+      __itt_resume();
+#endif
+    size_t comm_size = _comm.size();
+    if (comm_size <= std::numeric_limits<uint8_t>::max()) {
+      khmxx::local::bucketing_impl(output, to_rank, static_cast< uint8_t>(comm_size), send_counts, input, 0, output.size());
+    } else if (comm_size <= std::numeric_limits<uint16_t>::max()) {
+      khmxx::local::bucketing_impl(output, to_rank, static_cast<uint16_t>(comm_size), send_counts, input, 0, output.size());
+    } else if (comm_size <= std::numeric_limits<uint32_t>::max()) {
+      khmxx::local::bucketing_impl(output, to_rank, static_cast<uint32_t>(comm_size), send_counts, input, 0, output.size());
+    } else {
+      khmxx::local::bucketing_impl(output, to_rank, static_cast<uint64_t>(comm_size), send_counts, input, 0, output.size());
+    }
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_BUCKET)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "bucket", input.size());
+
+
+    //============= compress each input block now...
+    BL_BENCH_COLLECTIVE_START(distribute, "alloc_lz4", _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
+    // allocate the compressed byte count
+    std::vector<int> compressed_send_bytes;
+    compressed_send_bytes.reserve(_comm.size());
+    std::vector<int> aligned_send_counts;
+    aligned_send_counts.reserve(_comm.size());
+
+    // compute for each target rank the estimated max size.
+    size_t max_comp_total = 0;
+    for (size_t i = 0; i < send_counts.size(); ++i) {
+      if ((send_counts[i] * sizeof(V)) >= (1ULL << 31))
+        throw std::logic_error("individual block size is more than 2^31 bytes (int)");
+
+      compressed_send_bytes.emplace_back(LZ4_compressBound(send_counts[i] * sizeof(V)));
+      aligned_send_counts.emplace_back((compressed_send_bytes.back() + 7) & 0xFFFFFFF8);  // remove trailing 3 bits - same as removing remainders.
+      max_comp_total += aligned_send_counts.back();
+    }
+
+    // then allocate the output space
+  char* compressed = nullptr;
+  int ret = posix_memalign(reinterpret_cast<void **>(&compressed), 64, max_comp_total);
+  if (ret) {
+    free(compressed);
+    throw std::length_error("failed to allocate aligned memory");
   }
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "alloc_lz4", max_comp_total);
+
+    // now compress block by block
+    BL_BENCH_COLLECTIVE_START(distribute, "lz4_comp", _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_COMPRESS)
+      __itt_resume();
+#endif
+    size_t offset = 0;   // element offset
+    size_t compressed_offset = 0;  // byte offset
+    for (size_t i = 0; i < send_counts.size(); ++i) {
+      compressed_send_bytes[i] =
+          LZ4_compress_default(reinterpret_cast<const char *>(input.data() + offset),
+              compressed + compressed_offset, send_counts[i] * sizeof(V), compressed_send_bytes[i]);
+
+      if (compressed_send_bytes[i] < 0) {
+        throw std::logic_error("failed to compress");
+      } else if (compressed_send_bytes[i] == 0) {
+        throw std::logic_error("out of space for compression");
+      }
+
+      aligned_send_counts[i] = (compressed_send_bytes[i] + 7) & 0xFFFFFFF8;
+
+      compressed_offset += aligned_send_counts[i];
+      offset += send_counts[i];  // advance to next block
+    }
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_COMPRESS)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "lz4_comp", offset);
+
+
+
+    // distribute (communication part)
+    BL_BENCH_COLLECTIVE_START(distribute, "a2a_count", _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
+    recv_counts.resize(_comm.size());
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_resume();
+#endif
+    mxx::all2all(send_counts.data(), 1, recv_counts.data(), _comm);
+
+    std::vector<int> compressed_recv_bytes = mxx::all2all(compressed_send_bytes.data(), 1, _comm);
+    std::vector<int> aligned_recv_counts = mxx::all2all(aligned_send_counts.data(), 1, _comm);
+
+    std::vector<int> aligned_send_displs = mxx::impl::get_displacements(aligned_send_counts);
+    std::vector<int> aligned_recv_displs = mxx::impl::get_displacements(aligned_recv_counts);
+
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "a2a_count", recv_counts.size());
+
+
+    // alloc compressed output.
+    BL_BENCH_START(distribute);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
+    max_comp_total = 0;
+    for (size_t i = 0; i < aligned_recv_counts.size(); ++i) {
+      max_comp_total += aligned_recv_counts[i];
+    }
+    // allocate recv_compressed
+  char* recv_compressed = nullptr;
+  ret = posix_memalign(reinterpret_cast<void **>(&recv_compressed), 64, max_comp_total);
+  if (ret) {
+    free(recv_compressed);
+    throw std::length_error("failed to allocate aligned memory");
+  }
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "a2a_alloc", max_comp_total);
+
+
+    BL_BENCH_COLLECTIVE_START(distribute, "a2a", _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_resume();
+#endif
+  MPI_Alltoallv(compressed, aligned_send_counts.data(),
+      aligned_send_displs.data(),
+      MPI_BYTE,
+          recv_compressed, aligned_recv_counts.data(),
+    aligned_recv_displs.data(),
+    MPI_BYTE, _comm);
+  free(compressed);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "a2a", output.size());
+
+
+
+    BL_BENCH_START(distribute);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
+    size_t total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
+    // now resize output
+    if (output.capacity() < total) output.clear();
+    output.resize(total);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "realloc_out", output.size());
+
+
+
+    // decompress received
+    BL_BENCH_COLLECTIVE_START(distribute, "lz4_decomp", _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_COMPRESS)
+      __itt_resume();
+#endif
+    offset = 0;   // element offset
+    compressed_offset = 0;  // byte offset
+    int decomp_size;
+    for (size_t i = 0; i < compressed_recv_bytes.size(); ++i) {
+      decomp_size = LZ4_decompress_safe(recv_compressed + compressed_offset,
+          reinterpret_cast<char *>(output.data() + offset), compressed_recv_bytes[i],
+        recv_counts[i] * sizeof(V));
+
+      if (decomp_size < 0) {
+        throw std::logic_error("failed to decompress");
+      } else if (decomp_size == 0) {
+        throw std::logic_error("out of space for decompression");
+      } else if (decomp_size != static_cast<int>(recv_counts[i] * sizeof(V)))
+        throw std::logic_error("decompression generated different size than expected.");
+
+      compressed_offset += aligned_recv_counts[i];
+      offset += recv_counts[i];  // advance to next block
+    }
+
+    free(recv_compressed);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_COMPRESS)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "lz4_decomp", offset);
+
+
+    BL_BENCH_REPORT_MPI_NAMED(distribute, "khmxx:distribute_bucket", _comm);
+
+  }
+
+  }  // namespace lz4
+
+
   /**
    * @brief distribute, compute, send back.  one to one.  result matching input in order at then end.
    * @detail   this is the memory inefficient version

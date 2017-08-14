@@ -378,7 +378,6 @@ namespace dsc  // distributed std container
       __itt_resume();
 #endif
           std::vector<size_t> recv_counts;
-			  std::vector<size_t> i2o;
 			  std::vector<::std::pair<Key, T> > buffer;
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -386,9 +385,9 @@ namespace dsc  // distributed std container
 #endif
 
 #ifdef ENABLE_LZ4_COMM
-  	  	  	  ::khmxx::lz4::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+  	  	  	  ::khmxx::lz4::distribute(input, this->key_to_rank, recv_counts, buffer, this->comm);
 #else
-			  ::khmxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+			  ::khmxx::distribute(input, this->key_to_rank, recv_counts, buffer, this->comm);
 #endif
 			  input.swap(buffer);
           BL_BENCH_END(insert, "dist_data", input.size());
@@ -502,7 +501,6 @@ namespace dsc  // distributed std container
   if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
 #endif
-                std::vector<size_t> i2o;
                 std::vector<Key > buffer;
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -510,9 +508,9 @@ namespace dsc  // distributed std container
 #endif
 
 #ifdef ENABLE_LZ4_COMM
-  	  	  	  ::khmxx::lz4::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+  	  	  	  ::khmxx::lz4::distribute(keys, this->key_to_rank, recv_counts, buffer, this->comm);
 #else
-              ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+              ::khmxx::distribute(keys, this->key_to_rank, recv_counts, buffer, this->comm);
 #endif
                 keys.swap(buffer);
 	  //            ::dsc::distribute_unique(keys, this->key_to_rank, sorted_input, this->comm,
@@ -652,7 +650,6 @@ namespace dsc  // distributed std container
   if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
 #endif
-            std::vector<size_t> i2o;
             std::vector<Key > buffer;
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -660,9 +657,9 @@ namespace dsc  // distributed std container
 #endif
 
 #ifdef ENABLE_LZ4_COMM
-  ::khmxx::lz4::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+  ::khmxx::lz4::distribute(keys, this->key_to_rank, recv_counts, buffer, this->comm);
 #else
-  ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+  ::khmxx::distribute(keys, this->key_to_rank, recv_counts, buffer, this->comm);
 #endif
   keys.swap(buffer);
       //            ::dsc::distribute_unique(keys, this->key_to_rank, sorted_input, this->comm,
@@ -832,7 +829,6 @@ namespace dsc  // distributed std container
   if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
 #endif
-          std::vector<size_t> i2o;
           std::vector<Key > buffer;
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -840,9 +836,9 @@ namespace dsc  // distributed std container
 #endif
 
 #ifdef ENABLE_LZ4_COMM
-  ::khmxx::lz4::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+  ::khmxx::lz4::distribute(keys, this->key_to_rank, recv_counts, buffer, this->comm);
 #else
-          ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+          ::khmxx::distribute(keys, this->key_to_rank, recv_counts, buffer, this->comm);
 #endif
           //::khmxx::destructive_distribute(input, this->key_to_rank, recv_counts, buffer, this->comm);
           keys.swap(buffer);
@@ -1081,7 +1077,6 @@ namespace dsc  // distributed std container
 #endif
           // first remove duplicates.  sort, then get unique, finally remove the rest.  may not be needed
           std::vector<size_t> recv_counts;
-          std::vector<size_t> i2o;
           std::vector<Key > buffer;
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1089,9 +1084,9 @@ namespace dsc  // distributed std container
 #endif
 
 #ifdef ENABLE_LZ4_COMM
-  ::khmxx::lz4::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+  ::khmxx::lz4::distribute(input, this->key_to_rank, recv_counts, buffer, this->comm);
 #else
-          ::khmxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+          ::khmxx::distribute(input, this->key_to_rank, recv_counts, buffer, this->comm);
 #endif
           input.swap(buffer);
 
@@ -1321,9 +1316,8 @@ namespace dsc  // distributed std container
 //          // distribute (communication part)
 //          std::vector<size_t> recv_counts;
 //          {
-//      std::vector<size_t> i2o;
 //      std::vector<Key > buffer;
-//      ::khmxx::distribute(keys, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+//      ::khmxx::distribute(keys, this->key_to_rank, recv_counts, buffer, this->comm);
 //      keys.swap(buffer);
 ////            ::dsc::distribute_unique(keys, this->key_to_rank, sorted_input, this->comm,
 ////                    typename Base::StoreTransformedFunc(),
@@ -1624,9 +1618,8 @@ namespace dsc  // distributed std container
 //          // first remove duplicates.  sort, then get unique, finally remove the rest.  may not be needed
 //
 //          std::vector<size_t> recv_counts;
-//          std::vector<size_t> i2o;
 //          std::vector<::std::pair<Key, T> > buffer;
-//          ::khmxx::distribute(input, this->key_to_rank, recv_counts, i2o, buffer, this->comm);
+//          ::khmxx::distribute(input, this->key_to_rank, recv_counts, buffer, this->comm);
 //          input.swap(buffer);
 //
 //          //auto recv_counts = ::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm);
