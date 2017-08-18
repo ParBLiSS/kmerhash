@@ -30,6 +30,28 @@
 #include <fstream>
 #include <vector>
 #include <stdexcept>  //logic_error
+#include <iterator>
+
+template <typename IT>
+void serialize(IT _begin, IT _end, std::string const & filename) {
+	// open the file
+	 std::ofstream fout(filename, std::ios::out | std::ios::binary);
+
+	 // first write the element size
+	 size_t el_size = sizeof(typename ::std::iterator_traits<IT>::value_type);
+	 fout.write(reinterpret_cast<char *>(&el_size), sizeof(size_t));
+
+	 // then write the number of elements
+	 size_t count = std::distance(_begin, _end);
+	 fout.write(reinterpret_cast<char *>(&count), sizeof(size_t));
+
+	 // finally write the elements.
+	 for (IT it = _begin; it != _end; ++it) {
+		 fout.write(reinterpret_cast<const char *>(&(*it)), el_size);
+	 }
+	 // close the file now.
+	 fout.close();
+}
 
 template <typename T>
 void serialize_vector(std::vector<T> const & input, std::string const & filename) {

@@ -176,7 +176,7 @@ namespace khmxx
 
       } else {
         T* tmp_result = nullptr;
-        ret = posix_memalign(reinterpret_cast<void **>(&tmp_result), 64, len * sizeof(T));
+        int ret = posix_memalign(reinterpret_cast<void **>(&tmp_result), 64, len * sizeof(T));
         if (ret) {
           free(tmp_result);
           throw std::length_error("failed to allocate aligned memory");
@@ -205,6 +205,7 @@ namespace khmxx
       }
     }
 
+    // writes into separate array of results.
     template <typename T, typename Func, typename ASSIGN_TYPE, typename SIZE>
     void
     bucketing_impl(std::vector<T>const & input,
@@ -216,7 +217,8 @@ namespace khmxx
                            size_t last = std::numeric_limits<size_t>::max()) {
 
       static_assert(::std::is_integral<ASSIGN_TYPE>::value, "ASSIGN_TYPE should be integral, preferably unsigned");
-  	assert(((input.size() == 0) || (input.data() != results.data())) &&
+
+      assert(((input.size() == 0) || (input.data() != results.data())) &&
   			"input and output should not be the same.");
 
       bucket_sizes.clear();
@@ -313,6 +315,101 @@ namespace khmxx
     }
 
 
+    // writes into separate array of results..  similar to bucketing_impl
+    template <typename IT, typename Func, typename ASSIGN_TYPE, typename OT,
+    typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
+                                             ::std::random_access_iterator_tag >::value, int>::type = 1  >
+    void
+    assign_and_permute(IT _begin, IT _end,
+                           Func const & key_func,
+                           ASSIGN_TYPE const num_buckets,
+                           std::vector<size_t> & bucket_sizes,
+                           OT results) {
+
+      static_assert(::std::is_integral<ASSIGN_TYPE>::value, "ASSIGN_TYPE should be integral, preferably unsigned");
+
+      bucket_sizes.clear();
+
+      std::vector<size_t> bucket_offsets;
+
+      if (_begin == _end) return;  // no data in question.
+
+      // no bucket.
+      if (num_buckets == 0) throw std::invalid_argument("ERROR: number of buckets is 0");
+
+      // initialize number of elements per bucket
+      bucket_sizes.resize(num_buckets, 0);
+      bucket_offsets.resize(num_buckets, 0);
+
+      size_t input_size = std::distance(_begin, _end);
+
+      // single bucket.
+      if (num_buckets == 1) {
+        // set output buckets sizes
+        bucket_sizes[0] = input_size;
+
+        // set output values
+        std::copy(_begin, _end, results);
+
+        return;
+      } else {
+
+        // 2 pass algo.
+
+        // first get the mapping array.
+        ASSIGN_TYPE * i2o = nullptr;
+        int ret = posix_memalign(reinterpret_cast<void **>(&i2o), 64, input_size * sizeof(ASSIGN_TYPE));
+        if (ret) {
+          free(i2o);
+          throw std::length_error("failed to allocate aligned memory");
+        }
+
+        // [1st pass]: compute bucket counts and input2bucket assignment.
+        // store input2bucket assignment in i2o temporarily.
+        ASSIGN_TYPE p;
+        ASSIGN_TYPE* i2o_it = i2o;
+        for (auto it = _begin; it != _end; ++it, ++i2o_it) {
+            p = key_func(*it);
+
+            assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
+
+            *i2o_it = p;
+            ++bucket_sizes[p];
+        }
+
+        // since we decrement the offsets, we are filling from back.  to maintain stable, input is iterated from back.
+
+        // compute exclusive offsets
+        size_t sum = 0;
+        bucket_offsets[0] = 0;
+        for (size_t i = 1; i < num_buckets; ++i) {
+        	sum += bucket_sizes[i-1];
+        	bucket_offsets[i] = sum;
+        }
+
+////         [2nd pass]: saving elements into correct position, and save the final position.
+////		below is for use with inclusive offsets.
+//        i2o_it = i2o;
+//        std::advance(i2o_it, input_size);
+//        for (IT it = _end; it != _begin; ) {
+//          *(results + (--bucket_offsets[*(--i2o_it)])) = *(--it);   // offset decremented by 1 before use.
+//              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+//        }
+
+        // [2nd pass]: saving elements into correct position, and save the final position.
+        i2o_it = i2o;
+//        std::advance(i2o_it, input_size);
+        for (IT it = _begin; it != _end; ++it, ++i2o_it) {
+          *(results + (bucket_offsets[*i2o_it]++)) = *it;   // offset decremented by 1 before use.
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+        }
+
+        free(i2o);
+
+      }
+
+    }
+
 
     /**
      * @brief   compute the element index mapping between input and bucketed output.
@@ -344,13 +441,13 @@ namespace khmxx
      * @param first         first position to bucket in input
      * @param last          last position to bucket in input
      */
-    template <typename T, typename Func, typename SIZE = size_t>
+    template <typename T, typename Func, typename SIZE>
     void
-    assign_to_buckets(std::vector<T> const & input,
+    assign_to_buckets(::std::vector<T> const & input,
                       Func const & key_func,
                       size_t const & num_buckets,
-                      std::vector<SIZE> & bucket_sizes,
-                      std::vector<SIZE> & i2o,
+                      std::vector<size_t> & bucket_sizes,
+                      ::std::vector<SIZE> & i2o,
                       size_t first = 0,
                       size_t last = std::numeric_limits<size_t>::max()) {
         bucket_sizes.clear();
@@ -374,7 +471,7 @@ namespace khmxx
         if (num_buckets == 1) {
           bucket_sizes[0] = l - f;
 
-          memset(&(i2o[f]), 0, bucket_sizes[0] * sizeof(SIZE));
+          memset(&(i2o[f]), 0, (l-f) * sizeof(SIZE));
 
           return;
         }
@@ -394,10 +491,143 @@ namespace khmxx
 
     }
 
+//    template <typename IT, typename Func, typename ST>
+//    void
+//    assign_to_buckets(IT _begin, IT _end,
+//                      Func const & key_func,
+//                      size_t const & num_buckets,
+//                      std::vector<size_t> & bucket_sizes,
+//                      ST i2o_begin) {
+//
+//      bucket_sizes.clear();
+//
+//        if (_begin == _end) return;  // no data in question.
+//
+//        // no bucket.
+//        if (num_buckets == 0) throw std::invalid_argument("ERROR: number of buckets is 0");
+//
+//        // initialize number of elements per bucket
+//        bucket_sizes.resize(num_buckets, 0);
+//
+//
+//
+//        size_t input_size = std::distance(_begin, _end);
+//
+//
+//        // single bucket.
+//        if (num_buckets == 1) {
+//          bucket_sizes[0] = input_size;
+//
+//
+//          ST i2o_end = i2o_begin;
+//			std::advance(i2o_end, input_size);
+//          for (auto it = i2o; it != i2o_end; ++it) {
+//            *it = 0;
+//          }
+//
+//          return;
+//        } else {
+//
+//          // [1st pass]: compute bucket counts and input2bucket assignment.
+//          // store input2bucket assignment in i2o temporarily.
+//          size_t p;
+//          ST i2o_it = i2o_begin;
+//          for (auto it = _begin; it != _end; ++it, ++i2o_it) {
+//              p = key_func(*it);
+//
+//              assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
+//
+//              *i2p_it = p;
+//              ++bucket_sizes[p];
+//          }
+//        }
+//    }
+//
+//    /**
+//     * @brief  given a mapping from unbucketed to bucket id, permute the input so that the output has bucket order.
+//     * @details
+//     *    combined bucketId_to_pos and permute.
+//     *    only enabled if OT is random iterator.
+//     *    compute inclusive prefix sum for offsets.
+//     *    when permuting, decrement and then insert at decremented position.
+//     *
+//     *    since random access, it's okay to fill from larger pos to smaller.
+//     *
+//     *    at the end, have the offsets for buckets to return.
+//     */
+//    template <typename IT, typename MT, typename OT,
+//      typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
+//                                               ::std::random_access_iterator_tag >::value, int>::type = 1  >
+//    std::vector<size_t> permute_to_buckets(IT unbucketed, IT unbucketed_end,
+//                             std::vector<size_t> const & bucket_sizes,
+//        MT i2o, OT bucketed) {
+//
+//      std::vector<size_t> offsets(bucket_sizes.size(), 0);
+//
+//      if (unbucketed == unbucketed_end) {
+//        return offsets;
+//      }
+//
+//      if (bucket_sizes.size() == 0) {
+//        throw std::logic_error("bucket_sizes should not be 0");
+//      }
+//
+//      // compute inclusive offsets
+//      offsets[0] = bucket_sizes[0];
+//      size_t max = bucket_sizes.size();
+//      for (size_t i = 1; i < max; ++i) {
+//        offsets[i] = offsets[i-1] + bucket_sizes[i];
+//      }
+//
+//      // [2nd pass]: saving elements into correct position, and save the final position.
+//      MT it2 = i2o;
+//      for (IT it = unbucketed; it != unbucketed_end; ++it, ++it2) {
+//        *(bucketed + (--offsets[*it2])) = *it;   // offset decremented by 1 before use.   bucekted filled from back to front for each bucket.
+//      }
+//
+//      return offsets;
+//
+//    }
+//    /// stable version of permute to bucket.  approach is to iterate input in reverse.
+//    template <typename IT, typename MT, typename OT,
+//      typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
+//                                               ::std::random_access_iterator_tag >::value, int>::type = 1  >
+//    std::vector<size_t> stable_permute_to_buckets(IT unbucketed, IT unbucketed_end,
+//                             std::vector<size_t> const & bucket_sizes,
+//        MT i2o, OT bucketed) {
+//
+//      std::vector<size_t> offsets(bucket_sizes.size(), 0);
+//
+//      if (unbucketed == unbucketed_end) {
+//        return offsets;
+//      }
+//
+//      if (bucket_sizes.size() == 0) {
+//        throw std::logic_error("bucket_sizes should not be 0");
+//      }
+//
+//      // compute inclusive offsets
+//      offsets[0] = bucket_sizes[0];
+//      size_t max = bucket_sizes.size();
+//      for (size_t i = 1; i < max; ++i) {
+//        offsets[i] = offsets[i-1] + bucket_sizes[i];
+//      }
+//
+//      // [2nd pass]: saving elements into correct position, and save the final position.
+//      MT it2 = i2o;
+//		std::advance(it2, std::distance(unbucketed, unbucketed_end));
+//      for (IT it = unbucketed_end; it != unbucketed; ) {
+//        *(bucketed + (--offsets[*(--it2)])) = *(--it);   // offset decremented by 1 before use.   bucekted filled from back to front for each bucket.
+//      }
+//
+//      return offsets;
+//    }
+
+
     // operate only within the input range [first, last), and assign to same output range.
     template <typename SIZE = size_t>
     void
-    bucket_to_permutation(std::vector<SIZE> & bucket_sizes,
+    bucketId_to_pos(std::vector<SIZE> & bucket_sizes,
                           std::vector<SIZE> & i2o,
                           size_t first = 0,
                           size_t last = std::numeric_limits<size_t>::max()) {
@@ -462,7 +692,7 @@ namespace khmxx
      */
     template <typename SIZE = size_t>
     void
-    bucket_to_block_permutation(SIZE const & block_bucket_size, SIZE const & nblocks,
+    blocked_bucketId_to_pos(SIZE const & block_bucket_size, SIZE const & nblocks,
                                 std::vector<SIZE> & bucket_sizes,
                                 std::vector<SIZE> & i2o,
                                 size_t first = 0,
@@ -480,7 +710,7 @@ namespace khmxx
         // no block.  so do it without blocks
       if ((block_bucket_size == 0) || (nblocks == 0)) {
         // no blocks. use standard permutation
-        bucket_to_permutation(bucket_sizes, i2o, first, last);
+        bucketId_to_pos(bucket_sizes, i2o, first, last);
 
         return;
       }
@@ -488,7 +718,7 @@ namespace khmxx
       if (bucket_sizes.size() == 1)
       {
         // all go into the block.  no left overs.
-        bucket_to_permutation(bucket_sizes, i2o, first, last);
+        bucketId_to_pos(bucket_sizes, i2o, first, last);
         bucket_sizes[0] = i2o.size() - block_bucket_size * nblocks;
         return;
       }
@@ -1161,7 +1391,7 @@ namespace khmxx
       __itt_resume();
 #endif
     // distribute (communication part)
-    khmxx::local::bucket_to_permutation(send_counts, i2o, 0, input.size());
+    khmxx::local::bucketId_to_pos(send_counts, i2o, 0, input.size());
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_PERMUTE)
       __itt_pause();
@@ -1390,6 +1620,45 @@ namespace khmxx
 
   }
 
+
+  /// distribute data that has been permuted and the counts are in send_counts.  recv_counts should contain the target counts
+  template <typename T>
+  void distribute_permuted(T* _begin, T* _end,
+                   ::std::vector<size_t> const & send_counts,
+				  T* output,
+				   ::std::vector<size_t> & recv_counts,
+                  ::mxx::comm const &_comm) {
+    BL_BENCH_INIT(distribute);
+
+    BL_BENCH_COLLECTIVE_START(distribute, "empty", _comm);
+    size_t input_size = std::distance(_begin, _end);
+    bool empty = (input_size == 0);
+    empty = mxx::all_of(empty);
+    BL_BENCH_END(distribute, "empty", input_size);
+
+    if (empty) {
+      BL_BENCH_REPORT_MPI_NAMED(distribute, "khmxx:distribute", _comm);
+      return;
+    }
+    // speed over mem use.  mxx all2allv already has to double memory usage. same as stable distribute.
+
+    BL_BENCH_COLLECTIVE_START(distribute, "a2a", _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_resume();
+#endif
+    mxx::all2allv(_begin, send_counts, output, recv_counts, _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "a2a", input_size);
+
+    BL_BENCH_REPORT_MPI_NAMED(distribute, "khmxx:distribute_permuted", _comm);
+
+  }
+
+
   template <typename V, typename SIZE>
   void undistribute(::std::vector<V> const & input,
                   ::std::vector<SIZE> const & recv_counts,
@@ -1477,7 +1746,7 @@ namespace khmxx
 
       // compute the permutations from block size and processor mapping.  send_counts modified to the remainders.
       BL_BENCH_START(distribute);
-      ::khmxx::local::bucket_to_block_permutation(min_bucket_size, 1UL, send_counts, i2o, 0, input.size());
+      ::khmxx::local::blocked_bucketId_to_pos(min_bucket_size, 1UL, send_counts, i2o, 0, input.size());
       SIZE first_part = _comm.size() * min_bucket_size;
       BL_BENCH_END(distribute, "to_pos", input.size());
 
@@ -1642,7 +1911,7 @@ namespace khmxx
       __itt_resume();
 #endif
     // distribute (communication part)
-    khmxx::local::bucket_to_permutation(send_counts, i2o, 0, input.size());
+    khmxx::local::bucketId_to_pos(send_counts, i2o, 0, input.size());
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_PERMUTE)
       __itt_pause();
@@ -2157,6 +2426,194 @@ namespace khmxx
 
   }
 
+
+
+  template <typename T>
+  void distribute_permuted(T* _begin, T* _end,
+                  ::std::vector<size_t> & send_counts,
+	                  T* output,
+	              ::std::vector<size_t> & recv_counts,
+                  ::mxx::comm const &_comm) {
+    BL_BENCH_INIT(distribute);
+
+    BL_BENCH_COLLECTIVE_START(distribute, "empty", _comm);
+    size_t input_size = std::distance(_begin, _end);
+    bool empty = input_size == 0;
+    empty = mxx::all_of(empty);
+    BL_BENCH_END(distribute, "empty", input_size);
+
+    if (empty) {
+      BL_BENCH_REPORT_MPI_NAMED(distribute, "khmxx:distribute", _comm);
+      return;
+    }
+    // speed over mem use.  mxx all2allv already has to double memory usage. same as stable distribute.
+
+    //============= compress each input block now...
+    BL_BENCH_COLLECTIVE_START(distribute, "alloc_lz4", _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
+    // allocate the compressed byte count
+    std::vector<int> compressed_send_bytes;
+    compressed_send_bytes.reserve(_comm.size());
+    std::vector<int> aligned_send_counts;
+    aligned_send_counts.reserve(_comm.size());
+
+    // compute for each target rank the estimated max size.
+    size_t max_comp_total = 0;
+    for (size_t i = 0; i < send_counts.size(); ++i) {
+      if ((send_counts[i] * sizeof(T)) >= (1ULL << 31))
+        throw std::logic_error("individual block size is more than 2^31 bytes (int)");
+
+      compressed_send_bytes.emplace_back(LZ4_compressBound(send_counts[i] * sizeof(T)));
+      aligned_send_counts.emplace_back((compressed_send_bytes.back() + 7) & 0xFFFFFFF8);  // remove trailing 3 bits - same as removing remainders.
+      max_comp_total += aligned_send_counts.back();
+    }
+
+    // then allocate the output space
+  char* compressed = nullptr;
+  int ret = posix_memalign(reinterpret_cast<void **>(&compressed), 64, max_comp_total);
+  if (ret) {
+    free(compressed);
+    throw std::length_error("failed to allocate aligned memory");
+  }
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "alloc_lz4", max_comp_total);
+
+    // now compress block by block
+    BL_BENCH_COLLECTIVE_START(distribute, "lz4_comp", _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_COMPRESS)
+      __itt_resume();
+#endif
+    size_t offset = 0;   // element offset
+    size_t compressed_offset = 0;  // byte offset
+    for (size_t i = 0; i < send_counts.size(); ++i) {
+      compressed_send_bytes[i] =
+          LZ4_compress_default(reinterpret_cast<const char *>(_begin + offset),
+              compressed + compressed_offset, send_counts[i] * sizeof(T), compressed_send_bytes[i]);
+
+      if (compressed_send_bytes[i] < 0) {
+        throw std::logic_error("failed to compress");
+      } else if (compressed_send_bytes[i] == 0) {
+        throw std::logic_error("out of space for compression");
+      }
+
+      aligned_send_counts[i] = (compressed_send_bytes[i] + 7) & 0xFFFFFFF8;
+
+      compressed_offset += aligned_send_counts[i];
+      offset += send_counts[i];  // advance to next block
+    }
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_COMPRESS)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "lz4_comp", offset);
+
+
+
+    BL_BENCH_START(distribute);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_resume();
+#endif
+    std::vector<int> compressed_recv_bytes = mxx::all2all(compressed_send_bytes.data(), 1, _comm);
+    std::vector<int> aligned_recv_counts = mxx::all2all(aligned_send_counts.data(), 1, _comm);
+
+    std::vector<int> aligned_send_displs = mxx::impl::get_displacements(aligned_send_counts);
+    std::vector<int> aligned_recv_displs = mxx::impl::get_displacements(aligned_recv_counts);
+
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "a2a_count", recv_counts.size());
+
+
+    // alloc compressed output.
+    BL_BENCH_START(distribute);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_resume();
+#endif
+    max_comp_total = 0;
+    for (size_t i = 0; i < aligned_recv_counts.size(); ++i) {
+      max_comp_total += aligned_recv_counts[i];
+    }
+    // allocate recv_compressed
+  char* recv_compressed = nullptr;
+  ret = posix_memalign(reinterpret_cast<void **>(&recv_compressed), 64, max_comp_total);
+  if (ret) {
+    free(recv_compressed);
+    throw std::length_error("failed to allocate aligned memory");
+  }
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_RESERVE)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "a2a_alloc", max_comp_total);
+
+
+    BL_BENCH_COLLECTIVE_START(distribute, "a2a", _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_resume();
+#endif
+  MPI_Alltoallv(compressed, aligned_send_counts.data(),
+      aligned_send_displs.data(),
+      MPI_BYTE,
+          recv_compressed, aligned_recv_counts.data(),
+    aligned_recv_displs.data(),
+    MPI_BYTE, _comm);
+  free(compressed);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_A2A)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "a2a", compressed_offset);
+
+
+    // decompress received
+    BL_BENCH_COLLECTIVE_START(distribute, "lz4_decomp", _comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_COMPRESS)
+      __itt_resume();
+#endif
+    offset = 0;   // element offset
+    compressed_offset = 0;  // byte offset
+    int decomp_size;
+    for (size_t i = 0; i < compressed_recv_bytes.size(); ++i) {
+      decomp_size = LZ4_decompress_safe(recv_compressed + compressed_offset,
+          reinterpret_cast<char *>(output + offset), compressed_recv_bytes[i],
+        recv_counts[i] * sizeof(T));
+
+      if (decomp_size < 0) {
+        throw std::logic_error("failed to decompress");
+      } else if (decomp_size == 0) {
+        throw std::logic_error("out of space for decompression");
+      } else if (decomp_size != static_cast<int>(recv_counts[i] * sizeof(T)))
+        throw std::logic_error("decompression generated different size than expected.");
+
+      compressed_offset += aligned_recv_counts[i];
+      offset += recv_counts[i];  // advance to next block
+    }
+
+    free(recv_compressed);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_COMPRESS)
+      __itt_pause();
+#endif
+    BL_BENCH_END(distribute, "lz4_decomp", offset);
+
+
+    BL_BENCH_REPORT_MPI_NAMED(distribute, "khmxx:lz4_distribute_permuted", _comm);
+
+  }
+
   }  // namespace lz4
 
 
@@ -2284,7 +2741,7 @@ namespace khmxx
 
       // compute the permutations from block size and processor mapping.  send_counts modified to the remainders.
       BL_BENCH_START(scat_comp_gath_2);
-      ::khmxx::local::bucket_to_block_permutation(min_bucket_size, 1UL, send_counts, i2o, 0, input.size());
+      ::khmxx::local::blocked_bucketId_to_pos(min_bucket_size, 1UL, send_counts, i2o, 0, input.size());
       BL_BENCH_END(scat_comp_gath_2, "to_pos", input.size());
 
       // compute receive counts and total
@@ -2505,7 +2962,7 @@ namespace khmxx
 
       // compute the permutations from block size and processor mapping.  send_counts modified to the remainders.
       BL_BENCH_START(scat_comp_gath_lm);
-      ::khmxx::local::bucket_to_block_permutation(block_bucket_size, 2UL, send_counts, i2o, 0, input.size());
+      ::khmxx::local::blocked_bucketId_to_pos(block_bucket_size, 2UL, send_counts, i2o, 0, input.size());
       BL_BENCH_END(scat_comp_gath_lm, "to_pos", input.size());
 
       // allocate input buffer (for permuted data.)
@@ -2809,7 +3266,7 @@ namespace khmxx
 //
 //      // compute the permutations from block size and processor mapping.  send_counts modified to the remainders.
 //      BL_BENCH_START(scat_comp_gath_v_lm);
-//      ::khmxx::local::bucket_to_block_permutation(block_bucket_size, 2UL, send_counts, i2o, 0, input.size());
+//      ::khmxx::local::blocked_bucketId_to_pos(block_bucket_size, 2UL, send_counts, i2o, 0, input.size());
 //      BL_BENCH_END(scat_comp_gath_v_lm, "to_pos", input.size());
 //
 //      // allocate input buffer (for permuted data.)
