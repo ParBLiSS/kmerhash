@@ -1,3 +1,4 @@
+#include <functional>
 #include <XoRoShiRo128Plus.h>
 
 #include <hopscotch.h>

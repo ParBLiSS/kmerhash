@@ -63,6 +63,7 @@
 
 // should be easier for prefetching
 #if ENABLE_PREFETCH
+#include "xmmintrin.h" // prefetch related.
 #define KH_PREFETCH(ptr, level)  _mm_prefetch(ptr, level)
 #else
 #define KH_PREFETCH(ptr, level)

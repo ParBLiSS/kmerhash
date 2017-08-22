@@ -41,6 +41,8 @@
 
 #include "kmerhash/hyperloglog64.hpp"
 
+#include <xmmintrin.h>
+
 //#define REPROBE_STAT
 
 // should be easier for prefetching

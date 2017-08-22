@@ -21,7 +21,7 @@
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
-
+#include <random>
 
 #include "common/kmer.hpp"
 #include "common/kmer_transform.hpp"

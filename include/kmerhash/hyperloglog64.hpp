@@ -48,10 +48,10 @@
 #ifndef KMERHASH_HYPERLOGLOG64_HPP_
 #define KMERHASH_HYPERLOGLOG64_HPP_
 
-#include <array>
+#include <vector>
 #include <stdint.h>
 #include <iostream> // std::cout
-
+#include <cmath>
 // FROM https://github.com/hideo55/cpp-HyperLogLog.
 // modified to conform to the leftmost 1 bit convention, and faster implementation. and to make macro safer.
 // zero -> return 65.  else return b+1

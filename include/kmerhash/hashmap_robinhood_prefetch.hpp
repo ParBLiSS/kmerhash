@@ -42,6 +42,8 @@
 
 
 #include <mmintrin.h>
+#include <xmmintrin.h>
+
 
 namespace fsc {
 
