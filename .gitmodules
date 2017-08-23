@@ -7,7 +7,9 @@
 	url = https://github.com/skarupke/flat_hash_map.git
 [submodule "ext/martinus"]
 	path = ext/martinus
-	url = https://github.com/martinus/robin-hood-hashing.git
+	url = https://github.com/tcpan/robin-hood-hashing.git
+	branch = master	
 [submodule "ext/lz4"]
 	path = ext/lz4
-	url = https://github.com/lz4/lz4.git
+	url = https://github.com/tcpan/lz4.git
+	branch = dev
