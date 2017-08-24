@@ -19,7 +19,7 @@
  * @ingroup
  * @author  tpan
  * @brief   extends mxx to send/recv incrementally, so as to minimize memory use and allocation
- * @details
+ * @details MODIFIED FROM KMERIND io/incremental_mxx.hpp
  *
  */
 
@@ -43,6 +43,13 @@
 #endif
 
 #include <stdlib.h>  // for posix_memalign.
+
+#if ENABLE_PREFETCH
+#include "xmmintrin.h" // prefetch related.
+#define KHMXX_PREFETCH(ptr, level)  _mm_prefetch(reinterpret_cast<const char*>(ptr), level)
+#else
+#define KHMXX_PREFETCH(ptr, level)
+#endif
 
 namespace khmxx
 {
@@ -324,7 +331,8 @@ namespace khmxx
                            Func const & key_func,
                            ASSIGN_TYPE const num_buckets,
                            std::vector<size_t> & bucket_sizes,
-                           OT results) {
+                           OT results,
+						   uint8_t prefetch_dist = 8) {
 
       static_assert(::std::is_integral<ASSIGN_TYPE>::value, "ASSIGN_TYPE should be integral, preferably unsigned");
 
@@ -374,6 +382,8 @@ namespace khmxx
             assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
 
             *i2o_it = p;
+
+            // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
             ++bucket_sizes[p];
         }
 
@@ -397,19 +407,40 @@ namespace khmxx
 //        }
 
         // [2nd pass]: saving elements into correct position, and save the final position.
+        // not prefetching the bucket offsets - should be small enough to fit in cache.
+
+        // next prefetch results
+        size_t i = 0;
+        size_t e = ::std::min(input_size, static_cast<size_t>(prefetch_dist));
+        for (; i < e; ++i) {
+        	KHMXX_PREFETCH((&(*(results + bucket_offsets[*(i2o + i)]))), _MM_HINT_T0);
+        }
+
+
+        // now start doing the work from start to end - 2 * prefetch_dist
         i2o_it = i2o;
-//        std::advance(i2o_it, input_size);
-        for (IT it = _begin; it != _end; ++it, ++i2o_it) {
-          *(results + (bucket_offsets[*i2o_it]++)) = *it;   // offset decremented by 1 before use.
+        IT it = _begin;
+        IT eit = _begin;
+        std::advance(eit, input_size - ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
+        for (; it != eit; ++it, ++i2o_it) {
+        	KHMXX_PREFETCH((&(*(results + bucket_offsets[*(i2o_it + static_cast<size_t>(prefetch_dist))]))), _MM_HINT_T0);
+
+        	*(results + (bucket_offsets[*i2o_it]++)) = *it;   // offset decremented by 1 before use.
               // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
         }
+
+        // and finally, finish the last part.
+        for (; it != _end; ++it, ++i2o_it) {
+        	*(results + (bucket_offsets[*i2o_it]++)) = *it;   // offset decremented by 1 before use.
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+        }
+
 
         free(i2o);
 
       }
 
     }
-
 
     /**
      * @brief   compute the element index mapping between input and bucketed output.
@@ -678,6 +709,8 @@ namespace khmxx
 //    }
 
 
+#if 0
+
     /**
      * @brief perform permutation on i2o to produce x number of blocks, each with p number of buckets with specified per-bucket size s.  remainder are placed at end
      *        and output bucket sizes are the remainders for each bucket.
@@ -885,6 +918,8 @@ namespace khmxx
         }
     }
 
+#endif
+
     /**
      * @brief  given a bucketed array and the mapping from unbucketed to bucketed, undo the bucketing.
      * @details  note that output and i2o are traversed in order (write and read respectively),
@@ -923,7 +958,7 @@ namespace khmxx
     }
 
 
-
+#if 0
     /**
      * @brief inplace permute.  at most 2n steps, as we need to check each entry for completion.
      * @details	also need i2o to be a signed integer, so we can use the sign bit to check
@@ -1088,6 +1123,7 @@ namespace khmxx
             *unbucketed = *(bucketed + (*i2o - bucketed_pos_offset));
         }
     }
+#endif
 
     /**
      * @brief  given a bucketed array and the mapping from unbucketed to bucketed, undo the bucketing.
@@ -1099,7 +1135,8 @@ namespace khmxx
     template <typename IT, typename OT, typename MT>
     void unpermute(IT bucketed, IT bucketed_end,
     		MT i2o, OT unbucketed,
-    		size_t const & bucketed_pos_offset) {
+    		size_t const & bucketed_pos_offset,
+			uint8_t prefetch_dist = 8) {
 
     	static_assert(std::is_same<typename std::iterator_traits<IT>::value_type,
     			typename std::iterator_traits<OT>::value_type>::value,
@@ -1116,12 +1153,35 @@ namespace khmxx
 				"ERROR, i2o [first, last) does not map to itself");
 
         // saving elements into correct position
-        OT unbucketed_end = unbucketed + len;
-        for (; unbucketed != unbucketed_end; ++unbucketed, ++i2o) {
-            *unbucketed = *(bucketed + (*i2o - bucketed_pos_offset));
-        }
-    }
+//        OT unbucketed_end = unbucketed + len;
+//        for (; unbucketed != unbucketed_end; ++unbucketed, ++i2o) {
+//            *unbucketed = *(bucketed + (*i2o - bucketed_pos_offset));
+//        }
 
+        size_t i = 0;
+        size_t e = ::std::min(len, static_cast<size_t>(prefetch_dist));
+        for (; i < e; ++i) {
+        	KHMXX_PREFETCH((&(*(bucketed + (*(i2o + i) - bucketed_pos_offset)))), _MM_HINT_T0);
+        }
+
+
+        // now start doing the work from start to end - 2 * prefetch_dist
+        OT it = unbucketed;
+		OT unbucketed_end = unbucketed + (len - ::std::min(len, static_cast<size_t>(prefetch_dist)));
+		for (; it != unbucketed_end; ++it, ++i2o) {
+        	KHMXX_PREFETCH((&(*(bucketed + (*(i2o + static_cast<size_t>(prefetch_dist)) - bucketed_pos_offset)))),
+        			_MM_HINT_T0);
+
+            *it = *(bucketed + (*i2o - bucketed_pos_offset));
+		}
+
+        // and finally, finish the last part.
+		unbucketed_end = unbucketed + len;
+		for (; it != unbucketed_end; ++it, ++i2o) {
+            *it = *(bucketed + (*i2o - bucketed_pos_offset));
+        }
+
+    }
 
     /**
      *
@@ -1196,7 +1256,6 @@ namespace khmxx
     }
 
 
-
   } // local namespace
 
 
@@ -1264,6 +1323,7 @@ namespace khmxx
 
 //== bucket actually.
 
+#if 0
 //== all2allv using in place all2all as first step, then all2allv + buffer as last part.  pure communication.
 // to use all2all, the data has to be contiguous.  2 ways to do this:  1. in place.  2. separate buffer
   /**
@@ -1333,7 +1393,7 @@ namespace khmxx
     // send using special mpi keyword MPI_IN_PLACE. should work for MPI_Alltoall.
     MPI_Alltoall(MPI_IN_PLACE, send_count, dt.type(), const_cast<T*>(&(input[offset])), send_count, dt.type(), comm);
   }
-
+#endif
 
   /**
    * @brief distribute function.  input is transformed, but remains the original input with original order.  buffer is used for output.
@@ -1658,6 +1718,7 @@ namespace khmxx
 
   }
 
+#if 0
 
   template <typename V, typename SIZE>
   void undistribute(::std::vector<V> const & input,
@@ -1850,7 +1911,7 @@ namespace khmxx
     BL_BENCH_REPORT_MPI_NAMED(undistribute, "khmxx:undistribute_2", _comm);
 
   }
-
+#endif
   namespace lz4 {
 
 
@@ -2616,7 +2677,7 @@ namespace khmxx
 
   }  // namespace lz4
 
-
+#if 0
   /**
    * @brief distribute, compute, send back.  one to one.  result matching input in order at then end.
    * @detail   this is the memory inefficient version
@@ -4002,7 +4063,7 @@ namespace khmxx
 
       return local_splitters;
   }
-
+#endif
 
 
 } // namespace khmxx
