@@ -2264,8 +2264,11 @@ public:
 			hval = hash(it->first);
 			hll_local.update_via_hashval(hval);
 			// using mm_stream here does not make a differnece.
+#if ENABLE_PREFETCH
 			_mm_stream_si64(reinterpret_cast<long long int*>(hash_vals + i), *(reinterpret_cast<long long int*>(&hval)));
-			//hash_vals[i] = hval;
+#else
+			hash_vals[i] = hval;
+#endif
 		}
 #pragma GCC diagnostic pop
 
