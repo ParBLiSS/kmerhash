@@ -934,7 +934,7 @@ include_directories("${EXT_PROJECTS_DIR}/lz4/lib")
 
 add_subdirectory(test)
 add_subdirectory(benchmark)
-
+add_subdirectory("${EXT_PROJECTS_DIR}/kmerind/ext/mxx")
 
 # Install Settings
 

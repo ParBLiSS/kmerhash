@@ -25,6 +25,7 @@ source /home/tpan/scripts/gcc-openmpi.sh
 
 which mpirun
 
+BIN_DIR=/home/tpan/build/kmerhash-gcc-ompi/bin
 HOME_DIR=/home/tpan/work
 DATA_DIR=${HOME_DIR}/data
 LOCALTMP=${HOME_DIR}/tmp
@@ -39,12 +40,64 @@ TIME_CMD="/usr/bin/time -v"
 MPIRUN_CMD="/opt/rit/app/openmpi/2.1.0/bin/mpirun"
 
 
+##================= set up slow node exclusion
+NUM_NODES=$SLURM_JOB_NUM_NODES
+PPN=$SLURM_CPUS_ON_NODE
+date=`date +%Y%m%d-%H%M%S`
+
+NP=$(( ${NUM_NODES} * ${PPN} ))
+
+bmlogdir=${logdir}/${date}-n${NUM_NODES}
+mkdir -p ${bmlogdir}
+
+if [[ $NUM_NODES -le 8 ]]
+then
+
+  GOOD_HOSTFILE=${bmlogdir}/new_nodefile_$NUM_NODES.txt
+  scontrol show hostnames "${SLURM_JOB_NODELIST}" > $GOOD_HOSTFILE
+  NEW_NUM_NODES=${NUM_NODES}
+else
+
+        if [[ $NUM_NODES -gt 16 ]]
+        then
+          NUM_VOTE_OFF=16
+        else
+          NUM_VOTE_OFF=8
+        fi
+        BM=${BIN_DIR}/mxx-bm-vote-off
+
+        ## from PSAC (patrick)
+        NAME="BM-all2all-char-$NUM_NODES"
+
+        echo "[$date]: $NAME, nnodes=$NUM_NODES, ppn=$PPN, jobid=$SLURM_JOBID, nodes:" >> ${bmlogdir}/job-n${NUM_NODES}.log
+        echo "      $SLURM_JOB_NODELIST" >> ${bmlogdir}/job-n${NUM_NODES}.log
+        echo ""
+
+        # Old num nodes and PPN
+        NEW_NUM_NODES=`expr $NUM_NODES - $NUM_VOTE_OFF`
+        GOOD_HOSTFILE=${bmlogdir}/new_nodefile_$NEW_NUM_NODES.txt
+
+        # run all-pairs bandwidth benchmark and exclude $NUM_VOTE_OFF worst nodes from the next job
+        $MPIRUN_CMD -np $NP $BM $NUM_VOTE_OFF $GOOD_HOSTFILE >> $bmlogdir/job-n${NUM_NODES}.log 
+
+fi
+
+
+# generate the host files for each ppn level
+TFILE="${bmlogdir}/n${NEW_NUM_NODES}-p${PPN}.hosts"
+
+# convert to host:ppn form.  randomize order by sort -R
+for s in `cat $GOOD_HOSTFILE | sort | uniq`; do printf "$s slots=${PPN}\n"; done > $TFILE
+
+procs=$(( ${NEW_NUM_NODES} * ${PPN} ))
+
+
 ##================= now execute.
 
 
-BIN_DIR=/home/tpan/build/kmerhash-gcc-ompi/bin
 
-dataset=bumblebee
+dataset=chr14
+#dataset=bumblebee
 datafile=${DATA_DIR}/${dataset}/${dataset}.fastq
 
 
@@ -60,12 +113,12 @@ HASH=MURMUR
 
 cd $OUT_DIR
 
-t=${SLURM_NTASKS}
+t=$procs
 
 
 #for iter in 1 2 3
 #do
-
+iter=1
 
 cpu_node_cores=8
 
@@ -81,7 +134,7 @@ do
  
 	exec_name=$(basename ${EXEC})
 
-	OUT_PREFIX=${logdir}/kh-${MAP}-${HASH}-${dataset}-L${l}-P${t}.${iter}
+	OUT_PREFIX=${logdir}/kh-ompi-${MAP}-${HASH}-${dataset}-L${l}-P${t}.${iter}
 
 	logfile=${OUT_PREFIX}.log
 
@@ -90,7 +143,7 @@ do
   then
     
     	# command to execute
-   	cmd="$MPIRUN_CMD -np $t --map-by ppr:${cpu_node_cores}:socket --rank-by core --bind-to core $EXEC --max_load $l --min_load 0.2 -q 2 -F ${datafile}"
+   	cmd="$MPIRUN_CMD -np $t --hostfile $TFILE --map-by ppr:${cpu_node_cores}:socket --rank-by core --bind-to core $EXEC --max_load $l --min_load 0.2 -q 2 -F ${datafile}"
     	echo "COMMAND" >> $logfile
     	echo $cmd >> $logfile
   	  echo "COMMAND: ${cmd}" 
