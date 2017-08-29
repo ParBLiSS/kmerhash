@@ -815,10 +815,13 @@ if (measure_mode == MEASURE_RESERVE)
       __itt_pause();
 #endif
 
+
+
+
 #ifdef ENABLE_LZ4_COMM
   	  	  	  ::khmxx::lz4::distribute(keys, this->key_to_rank, recv_counts, buffer, this->comm);
 #else
-              ::khmxx::distribute(keys, this->key_to_rank, recv_counts, buffer, this->comm);
+              ::khmxx::distribute_2part(keys, this->key_to_rank, recv_counts, buffer, this->comm);
 #endif
                 keys.swap(buffer);
 	  //            ::dsc::distribute_unique(keys, this->key_to_rank, sorted_input, this->comm,
