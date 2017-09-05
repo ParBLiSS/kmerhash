@@ -323,6 +323,180 @@ namespace khmxx
 
 
     // writes into separate array of results..  similar to bucketing_impl
+    template <typename IT, typename ASSIGN_TYPE, typename OT,
+    typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
+                                             ::std::random_access_iterator_tag >::value, int>::type = 1  >
+    void
+    assign_and_permute(IT _begin, IT _end, size_t* hash_begin,
+                           ASSIGN_TYPE const num_buckets,
+                           std::vector<size_t> & bucket_sizes,
+                           OT results,
+						   uint8_t prefetch_dist = 8) {
+
+      static_assert(::std::is_integral<ASSIGN_TYPE>::value, "ASSIGN_TYPE should be integral, preferably unsigned");
+
+      bucket_sizes.clear();
+
+      std::vector<size_t> bucket_offsets;
+
+      if (_begin == _end) return;  // no data in question.
+
+      // no bucket.
+      if (num_buckets == 0) throw std::invalid_argument("ERROR: number of buckets is 0");
+
+      // initialize number of elements per bucket
+      bucket_sizes.resize(num_buckets, 0);
+      bucket_offsets.resize(num_buckets, 0);
+
+      size_t input_size = std::distance(_begin, _end);
+
+      // single bucket.
+      if (num_buckets == 1) {
+        // set output buckets sizes
+        bucket_sizes[0] = input_size;
+
+        // set output values
+        std::copy(_begin, _end, results);
+
+        return;
+      } else {
+
+        // 2 pass algo.
+
+        // first get the mapping array.
+        ASSIGN_TYPE * i2o = nullptr;
+        int ret = posix_memalign(reinterpret_cast<void **>(&i2o), 64, input_size * sizeof(ASSIGN_TYPE));
+        if (ret) {
+          free(i2o);
+          throw std::length_error("failed to allocate aligned memory");
+        }
+
+        // [1st pass]: compute bucket counts and input2bucket assignment.
+        // store input2bucket assignment in i2o temporarily.
+        ASSIGN_TYPE p;
+        ASSIGN_TYPE* i2o_it = i2o;
+        for (auto it = _begin; it != _end; ++it, ++i2o_it, ++hash_begin) {
+            p = (*hash_begin) % num_buckets;
+
+            assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
+
+            *i2o_it = p;
+
+            // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
+            ++bucket_sizes[p];
+        }
+
+        // since we decrement the offsets, we are filling from back.  to maintain stable, input is iterated from back.
+
+        // compute exclusive offsets
+        size_t sum = 0;
+        bucket_offsets[0] = 0;
+        for (size_t i = 1; i < num_buckets; ++i) {
+        	sum += bucket_sizes[i-1];
+        	bucket_offsets[i] = sum;
+        }
+
+
+////         [2nd pass]: saving elements into correct position, and save the final position.
+////		below is for use with inclusive offsets.
+//        i2o_it = i2o;
+//        std::advance(i2o_it, input_size);
+//        for (IT it = _end; it != _begin; ) {
+//          *(results + (--bucket_offsets[*(--i2o_it)])) = *(--it);   // offset decremented by 1 before use.
+//              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+//        }
+
+        // [2nd pass]: saving elements into correct position, and save the final position.
+        // not prefetching the bucket offsets - should be small enough to fit in cache.
+
+        // ===========================
+        // direct prefetch does not do well because i2o has bucket assignments and not offsets.
+        // therefore bucket offset is not pointing to the right location yet.
+        // instead, use stream write?
+
+
+        // next prefetch results
+        std::vector<size_t> offsets(prefetch_dist, static_cast<size_t>(0));
+
+        i2o_it = i2o;
+        ASSIGN_TYPE* i2o_eit = i2o_it;
+        std::advance(i2o_eit, ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
+        size_t i = 0;
+        for (; i2o_it != i2o_eit; ++i2o_it, ++i) {
+        	offsets[i] = bucket_offsets[*i2o_it]++;
+        	KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
+        }
+
+
+        // now start doing the work from prefetch_dist to end.
+
+        IT it = _begin;
+        i = 0;
+        i2o_eit = i2o + input_size;
+        for (; i2o_it != i2o_eit; ++it, ++i2o_it) {
+        	*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+
+        	offsets[i] = bucket_offsets[*i2o_it]++;
+        	KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
+        	i = (i+1) % prefetch_dist;
+        }
+
+        // and finally, finish the last part.
+        for (; it != _end; ++it) {
+        	*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+        	i = (i+1) % prefetch_dist;
+        }
+
+//          // STREAMING APPROACH.  PREFETCH ABOVE WOULD NOT WORK RIGHT FOR high collision.
+//        //  IS NOT FASTER THAN PREFETCH...
+//
+//          // now start doing the work from start to end - 2 * prefetch_dist
+//          i2o_it = i2o;
+//          size_t pos;
+//          // and finally, finish the last part.
+//          for (IT it = _begin; it != _end; ++it, ++i2o_it) {
+//            pos = bucket_offsets[*i2o_it]++;
+//
+//#if defined(ENABLE_PREFETCH)
+//            switch (sizeof(typename ::std::iterator_traits<IT>::value_type)) {
+//              case 4:
+//                _mm_stream_si32(reinterpret_cast<int*>(&(*(results + pos))), *(reinterpret_cast<int*>(&(*it))));
+//                break;
+//              case 8:
+//                _mm_stream_si64(reinterpret_cast<long long int*>(&(*(results + pos))), *(reinterpret_cast<long long int*>(&(*it))));
+//                break;
+//              case 16:
+//                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))), *(reinterpret_cast<__m128i*>(&(*it))));
+//                break;
+//              case 32:
+//                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))), *(reinterpret_cast<__m128i*>(&(*it))));
+//                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))) + 1, *(reinterpret_cast<__m128i*>(&(*it)) + 1));
+//                break;
+//              default:
+//                // can't stream.  do old fashion way.
+//                *(results + pos) = *it;   // offset decremented by 1 before use.
+//                break;
+//            }
+//
+//#else
+//            *(results + pos) = *it;   // offset decremented by 1 before use.
+//#endif
+//            // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+//          }
+
+
+
+        free(i2o);
+
+      }
+
+    }
+
+
+
+    // writes into separate array of results..  similar to bucketing_impl
     template <typename IT, typename Func, typename ASSIGN_TYPE, typename OT,
     typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
                                              ::std::random_access_iterator_tag >::value, int>::type = 1  >
@@ -416,67 +590,76 @@ namespace khmxx
         // instead, use stream write?
 
 
-//        // next prefetch results
-//        size_t i = 0;
-//        size_t e = ::std::min(input_size, static_cast<size_t>(prefetch_dist));
-//        for (; i < e; ++i) {
-//        	KHMXX_PREFETCH((&(*(results + bucket_offsets[*(i2o + i)]))), _MM_HINT_T0);
-//        }
-//
-//
-//        // now start doing the work from start to end - 2 * prefetch_dist
-//        i2o_it = i2o;
-//        IT it = _begin;
-//        IT eit = _begin;
-//        std::advance(eit, input_size - ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
-//        for (; it != eit; ++it, ++i2o_it) {
-//        	KHMXX_PREFETCH((&(*(results + bucket_offsets[*(i2o_it + static_cast<size_t>(prefetch_dist))]))), _MM_HINT_T0);
-//
-//        	*(results + (bucket_offsets[*i2o_it]++)) = *it;   // offset decremented by 1 before use.
-//              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
-//        }
-//
-//        // and finally, finish the last part.
-//        for (; it != _end; ++it, ++i2o_it) {
-//        	*(results + (bucket_offsets[*i2o_it]++)) = *it;   // offset decremented by 1 before use.
-//              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
-//        }
+        // next prefetch results
+        std::vector<size_t> offsets(prefetch_dist, static_cast<size_t>(0));
 
-          // STREAMING APPROACH.  PREFETCH ABOVE DOES NOT WORK RIGHT FOR high collision.
+        i2o_it = i2o;
+        ASSIGN_TYPE* i2o_eit = i2o_it;
+        std::advance(i2o_eit, ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
+        size_t i = 0;
+        for (; i2o_it != i2o_eit; ++i2o_it, ++i) {
+        	offsets[i] = bucket_offsets[*i2o_it]++;
+        	KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
+        }
 
-          // now start doing the work from start to end - 2 * prefetch_dist
-          i2o_it = i2o;
-          size_t pos;
-          // and finally, finish the last part.
-          for (IT it = _begin; it != _end; ++it, ++i2o_it) {
-            pos = bucket_offsets[*i2o_it]++;
 
-#if defined(ENABLE_PREFETCH)
-            switch (sizeof(typename ::std::iterator_traits<IT>::value_type)) {
-              case 4:
-                _mm_stream_si32(reinterpret_cast<int*>(&(*(results + pos))), *(reinterpret_cast<int*>(&(*it))));
-                break;
-              case 8:
-                _mm_stream_si64(reinterpret_cast<long long int*>(&(*(results + pos))), *(reinterpret_cast<long long int*>(&(*it))));
-                break;
-              case 16:
-                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))), *(reinterpret_cast<__m128i*>(&(*it))));
-                break;
-              case 32:
-                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))), *(reinterpret_cast<__m128i*>(&(*it))));
-                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))) + 1, *(reinterpret_cast<__m128i*>(&(*it)) + 1));
-                break;
-              default:
-                // can't stream.  do old fashion way.
-                *(results + pos) = *it;   // offset decremented by 1 before use.
-                break;
-            }
+        // now start doing the work from prefetch_dist to end.
 
-#else
-            *(results + pos) = *it;   // offset decremented by 1 before use.
-#endif
-            // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
-          }
+        IT it = _begin;
+        i = 0;
+        i2o_eit = i2o + input_size;
+        for (; i2o_it != i2o_eit; ++it, ++i2o_it) {
+        	*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+
+        	offsets[i] = bucket_offsets[*i2o_it]++;
+        	KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
+        	i = (i+1) % prefetch_dist;
+        }
+
+        // and finally, finish the last part.
+        for (; it != _end; ++it) {
+        	*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+        	i = (i+1) % prefetch_dist;
+        }
+
+//          // STREAMING APPROACH.  PREFETCH ABOVE WOULD NOT WORK RIGHT FOR high collision.
+//        //  IS NOT FASTER THAN PREFETCH...
+//
+//          // now start doing the work from start to end - 2 * prefetch_dist
+//          i2o_it = i2o;
+//          size_t pos;
+//          // and finally, finish the last part.
+//          for (IT it = _begin; it != _end; ++it, ++i2o_it) {
+//            pos = bucket_offsets[*i2o_it]++;
+//
+//#if defined(ENABLE_PREFETCH)
+//            switch (sizeof(typename ::std::iterator_traits<IT>::value_type)) {
+//              case 4:
+//                _mm_stream_si32(reinterpret_cast<int*>(&(*(results + pos))), *(reinterpret_cast<int*>(&(*it))));
+//                break;
+//              case 8:
+//                _mm_stream_si64(reinterpret_cast<long long int*>(&(*(results + pos))), *(reinterpret_cast<long long int*>(&(*it))));
+//                break;
+//              case 16:
+//                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))), *(reinterpret_cast<__m128i*>(&(*it))));
+//                break;
+//              case 32:
+//                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))), *(reinterpret_cast<__m128i*>(&(*it))));
+//                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))) + 1, *(reinterpret_cast<__m128i*>(&(*it)) + 1));
+//                break;
+//              default:
+//                // can't stream.  do old fashion way.
+//                *(results + pos) = *it;   // offset decremented by 1 before use.
+//                break;
+//            }
+//
+//#else
+//            *(results + pos) = *it;   // offset decremented by 1 before use.
+//#endif
+//            // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+//          }
 
 
 
@@ -757,7 +940,7 @@ namespace khmxx
       for (size_t i = bucket_sizes.size() - 1; i > 0; --i) {
         bucket_sizes[i-1] = bucket_sizes[i] - bucket_sizes[i-1];
       }
-      assert((bucket_sizes.front() == f) && "prefix sum resulted in incorrect starting position");  // first one should be 0 at this point.
+      assert((bucket_sizes.front() == 0) && "prefix sum resulted in incorrect starting position");  // first one should be 0 at this point.
 
       // [2nd pass]: saving elements into correct position, and save the final position.
       for (; i2o != i2o_end; ++i2o) {
@@ -887,7 +1070,7 @@ namespace khmxx
         size_t last_block = block_size * nblocks;
         i2o_it = i2o;
         size_t pos;
-        for (IT it = _end; it != _begin; ++i2o_it, ++it) {
+        for (IT it = _begin; it != _end; ++i2o_it, ++it) {
           p = *i2o_it;
           pos = bucket_offsets[p]++;
 
@@ -2147,7 +2330,7 @@ namespace khmxx
       BL_BENCH_END(distribute, "alloc_map", input.size());
 
       // bucketing
-      BL_BENCH_START(distribute);
+      BL_BENCH_COLLECTIVE_START(distribute, "bucket", _comm);
       khmxx::local::assign_to_buckets(input, to_rank, _comm.size(), send_counts, i2o, 0, input.size());
       BL_BENCH_END(distribute, "bucket", input.size());
 
@@ -2164,7 +2347,7 @@ namespace khmxx
       BL_BENCH_END(distribute, "to_pos", input.size());
 
       // compute receive counts and total
-      BL_BENCH_START(distribute);
+      BL_BENCH_COLLECTIVE_START(distribute, "a2av_count", _comm);
       recv_counts.resize(_comm.size());
       mxx::all2all(send_counts.data(), 1, recv_counts.data(), _comm);
       SIZE total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
@@ -2178,7 +2361,7 @@ namespace khmxx
       BL_BENCH_END(distribute, "alloc_out", output.size());
 
       // permute
-      BL_BENCH_START(distribute);
+      BL_BENCH_COLLECTIVE_START(distribute, "permute", _comm);
       khmxx::local::permute(output.begin(), output.end(), i2o.begin(), input.begin(), 0);
       BL_BENCH_END(distribute, "permute", input.size());
 
@@ -2187,7 +2370,7 @@ namespace khmxx
       output.resize(total);
       BL_BENCH_END(distribute, "alloc_out", output.size());
 
-      BL_BENCH_START(distribute);
+      BL_BENCH_COLLECTIVE_START(distribute, "a2a", _comm);
       block_all2all(input, min_bucket_size, output, 0, 0, _comm);
       BL_BENCH_END(distribute, "a2a", first_part);
 
@@ -2199,7 +2382,7 @@ namespace khmxx
 
       // permute
       if (preserve_input) {
-        BL_BENCH_START(distribute);
+        BL_BENCH_COLLECTIVE_START(distribute, "unpermute_inplace", _comm);
         ::khmxx::local::unpermute_inplace(input, i2o, 0, input.size());
         BL_BENCH_END(distribute, "unpermute_inplace", input.size());
       }
@@ -2213,7 +2396,7 @@ namespace khmxx
    *
    */
   template <typename V, typename ToRank, typename SIZE>
-  void distribute_2part(::std::vector<V>& input, ToRank const & to_rank,
+  size_t distribute_2part(::std::vector<V>& input, ToRank const & to_rank,
                         ::std::vector<SIZE> & recv_counts,
                         ::std::vector<V>& output,
                         ::mxx::comm const &_comm, bool const & preserve_input = false) {
@@ -2228,7 +2411,7 @@ namespace khmxx
 
     if (empty) {
       BL_BENCH_REPORT_MPI_NAMED(distribute, "khmxx:distribute_2", _comm);
-      return;
+      return 0;
     }
 
       // do assignment.
@@ -2244,7 +2427,7 @@ namespace khmxx
       BL_BENCH_END(distribute, "alloc_map", input.size());
 
       // bucketing
-      BL_BENCH_START(distribute);
+      BL_BENCH_COLLECTIVE_START(distribute, "bucket", _comm);
       khmxx::local::assign_to_buckets(input.begin(), input.end(), to_rank, _comm.size(), send_counts, i2o);
       BL_BENCH_END(distribute, "bucket", input.size());
 
@@ -2261,7 +2444,7 @@ namespace khmxx
       BL_BENCH_END(distribute, "to_pos", input.size());
 
       // compute receive counts and total
-      BL_BENCH_START(distribute);
+      BL_BENCH_COLLECTIVE_START(distribute, "a2av_count", _comm);
       recv_counts.resize(_comm.size());
       mxx::all2all(send_counts.data(), 1, recv_counts.data(), _comm);
       SIZE second_part = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
@@ -2276,12 +2459,12 @@ namespace khmxx
       BL_BENCH_END(distribute, "alloc_output", output.size());
 
       // permute
-      BL_BENCH_START(distribute);
+      BL_BENCH_COLLECTIVE_START(distribute, "permute", _comm);
       khmxx::local::permute(input.begin(), input.end(), i2o, output.begin(), 0);
       free(i2o);
       BL_BENCH_END(distribute, "permute", input.size());
 
-      BL_BENCH_START(distribute);
+      BL_BENCH_COLLECTIVE_START(distribute, "a2a", _comm);
       block_all2all_inplace(output, min_bucket_size, 0, _comm);
       BL_BENCH_END(distribute, "a2a", first_part);
 
@@ -2294,7 +2477,7 @@ namespace khmxx
       }
       BL_BENCH_END(distribute, "alloc_a2av", second_part);
 
-      BL_BENCH_START(distribute);
+      BL_BENCH_COLLECTIVE_START(distribute, "a2av", _comm);
       mxx::all2allv(output.data() + first_part, send_counts,
                     temp, recv_counts, _comm);
       BL_BENCH_END(distribute, "a2av", second_part);
@@ -2308,6 +2491,8 @@ namespace khmxx
 
 
       BL_BENCH_REPORT_MPI_NAMED(distribute, "khmxx:distribute_2", _comm);
+
+      return min_bucket_size;
   }
 
 
@@ -2368,6 +2553,817 @@ namespace khmxx
 
   }
 #endif
+
+  template <typename V, typename SIZE>
+  void undistribute_2part(::std::vector<V> & input,
+                  ::std::vector<SIZE> const & recv_counts,
+                  ::mxx::comm const &_comm, bool const & restore_order = true) {
+    BL_BENCH_INIT(undistribute);
+
+    size_t input_size = input.size();
+
+    BL_BENCH_COLLECTIVE_START(undistribute, "empty", _comm);
+    bool empty = input_size == 0;
+    empty = mxx::all_of(empty);
+    BL_BENCH_END(undistribute, "empty", input_size);
+
+    if (empty) {
+      BL_BENCH_REPORT_MPI_NAMED(undistribute, "khmxx:undistribute_2", _comm);
+      return;
+    }
+
+
+    BL_BENCH_START(undistribute);
+    size_t second_part = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
+    size_t first_part = input_size - second_part;
+    assert((first_part % _comm.size() == 0) && "the first block should be evenly distributed to buckets.");
+
+    std::vector<size_t> send_counts(recv_counts.size());
+    mxx::all2all(recv_counts.data(), 1, send_counts.data(), _comm);
+    second_part = std::accumulate(send_counts.begin(), send_counts.end(), static_cast<size_t>(0));
+    BL_BENCH_COLLECTIVE_END(undistribute, "recv_counts", second_part, _comm);
+
+    BL_BENCH_START(undistribute);
+    input.resize(std::max(first_part + second_part, input_size));
+    BL_BENCH_COLLECTIVE_END(undistribute, "realloc_out", input.size(), _comm);
+
+    BL_BENCH_COLLECTIVE_START(undistribute, "a2a", _comm);
+    block_all2all_inplace(input, first_part / _comm.size(), 0, _comm);
+    BL_BENCH_END(undistribute, "a2a", first_part);
+
+    BL_BENCH_START(undistribute);
+    V* temp = nullptr;
+    int ret = posix_memalign(reinterpret_cast<void **>(&temp), 64, second_part * sizeof(V));
+    if (ret) {
+      free(temp);
+      throw std::length_error("failed to allocate aligned memory");
+    }
+    BL_BENCH_END(undistribute, "alloc_a2av", second_part);
+
+    BL_BENCH_COLLECTIVE_START(undistribute, "a2av", _comm);
+    mxx::all2allv(input.data() + first_part, recv_counts, temp, send_counts, _comm);
+    BL_BENCH_END(undistribute, "a2av", input_size - first_part);
+
+    BL_BENCH_START(undistribute);
+    std::copy(temp, temp + second_part, input.data() + first_part);
+    input.resize(first_part + second_part);
+    free(temp);
+    BL_BENCH_END(undistribute, "a2av_copy", second_part);
+
+
+    BL_BENCH_REPORT_MPI_NAMED(undistribute, "khmxx:undistribute_2", _comm);
+
+  }
+
+  namespace incremental {
+
+    //============= incremental calls.
+    // assumption: modify process is transform, assign, permute, communicate, perform op.
+    //             query process is transform, assign, permute, communicate, perform op, communicate (unpermute?)
+    // [X] ialltoallv_and_modify.  use pairwise exchange.  for variable number of entries.  input bucketed.  overlap comm and compute
+  	// [ ] ialltoall_and_modify.  use pairwise exchange.  for equal number of entries.  input bucketed.  overlap comm and compute
+    // [ ] batched_ialltoallv_modify.  use ialltoallv if available.  input unbuckted, so both bucketing AND computation can be overlapped with comm.
+    // [X] ialltoallv_and_query_one_on_one.  use pairwise exchange.  for variable number of entries.  1 response per request. input bucketed.  overlap query comm, compute, and response comm
+    // [ ] ialltoallv_and_query.  use pairwise exchange.  for variable number of entries.  have responses. input bucketed.  overlap query comm, compute, and response comm
+    // [ ] ialltoall_and_query_one_on_one.  use pairwise exchange.  for equal number of entries.  1 response per request. input bucketed.  overlap query comm, compute, and response comm
+    // [ ] ialltoall_and_query.  use pairwise exchange.  for equal number of entries.  have responses. input bucketed.  overlap query comm, compute, and response comm
+    // [ ] batched_ialltoallv_query_one_on_one.  use ialltoallv if available.  input unbuckted, so both bucketing AND computation can be overlapped with comm.
+    // [ ] batched_ialltoallv_query.  use ialltoallv if available.  input unbuckted, so both bucketing AND computation can be overlapped with comm.
+    // NOTE: currently, we support one-to-one query and response mapping, one-to-zero/one mapping, and not yet one-to-(0..n) mapping.
+    // NOTE: batch mode implies that input is part of larger input, and that it is not permuted (e.g. reading in input in batches).  In this case, we need to expose the request objects,
+    //   so that consecutive batches can be overlapped.
+    // NOTE: insert will become a dominant component once communication is overlapped.  so important to make it fast, and HLL is important.  need to figure out a way
+    // to compute local HLL without waiting for complete distribution.
+
+    /// incremental alltoallv and compute.  Assume the input is already permuted.
+    /// uses the pairwise exchange algorithm.  for power of 2, use xor to find peer.
+    /// for non-power of 2, send and receive with rank + i.
+    /// use issend to avoid buffering.  post all send at once since input is not changing
+    ///  cannot use irsend since recv are posted one at a time to minimize memory use.
+    /// operator should have the form op(V* start, V* end), where V is type of input (same as IT value type.)
+    template <typename IT, typename SIZE, typename OP,
+        typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<IT>::iterator_category,
+                                                 ::std::random_access_iterator_tag >::value, int>::type = 1 >
+      void ialltoallv_and_modify(IT permuted, IT permuted_end,
+    		  	  	  	  	  	  ::std::vector<SIZE> const & send_counts,
+								  OP compute,
+								  ::mxx::comm const &_comm) {
+
+      BL_BENCH_INIT(idist);
+
+      size_t input_size = ::std::distance(permuted, permuted_end);
+
+      assert((send_counts.size() == _comm.size()) && "send_count size not same as _comm size.");
+
+      // make sure tehre is something to do.
+      BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
+      bool empty = input_size == 0;
+      empty = mxx::all_of(empty);
+      BL_BENCH_END(idist, "empty", input_size);
+
+      if (empty) {
+        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+        return;
+      }
+
+      // if there is comm size is 1.
+      if (_comm.size() == 1) {
+        BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
+        compute(permuted, permuted_end);
+        BL_BENCH_END(idist, "compute_1", input_size);
+
+        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+        return;
+      }
+
+
+      // get the recv counts.
+      BL_BENCH_COLLECTIVE_START(idist, "a2a_counts", _comm);
+      ::std::vector<SIZE> recv_counts(send_counts.size(), 0);
+      mxx::all2all(send_counts.data(), 1, recv_counts.data(), _comm);
+
+      ::std::vector<size_t> send_displs;
+      send_displs.reserve(send_counts.size() + 1);
+
+      // compute displacement for send and recv, also compute the max buffer size needed
+      SIZE buffer_max = 0;
+      send_displs.emplace_back(0UL);
+      for (int i = 0; i < _comm.size(); ++i) {
+        buffer_max = std::max(buffer_max, recv_counts[i]);
+
+        send_displs.emplace_back(send_displs.back() + send_counts[i]);
+      }
+      BL_BENCH_END(idist, "a2a_counts", buffer_max);
+
+
+      // setup the temporary storage.  double buffered.
+      BL_BENCH_COLLECTIVE_START(idist, "a2av_alloc", _comm);
+      using V = typename ::std::iterator_traits<IT>::value_type;
+
+      // allocate recv_compressed
+      V* buffers = nullptr;
+      int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, buffer_max * 2ULL * sizeof(V));
+      if (ret) {
+        free(buffers);
+        throw std::length_error("failed to allocate aligned memory");
+      }
+      V* recving = buffers;
+      V* computing = buffers + buffer_max;
+
+      BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
+
+
+
+      // loop and process each processor's assignment.  use isend and irecv.
+      BL_BENCH_COLLECTIVE_START(idist, "a2av_isend", _comm);
+
+      const int ialltoallv_tag = 1773;
+
+      // local (step 0) - skip the send recv, just directly process.
+      size_t comm_size = _comm.size();
+      size_t comm_rank = _comm.rank();
+      size_t curr_peer;
+
+      mxx::datatype dt = mxx::get_datatype<V>();
+      std::vector<MPI_Request> reqs(_comm.size() - 1);
+
+      // copy self data into computing.
+      std::memcpy(computing, &(*(permuted + send_displs[comm_rank])), sizeof(V) * send_counts[comm_rank]);
+      bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
+      size_t step;
+
+      for (step = 1; step < comm_size; ++step) {
+        //====  first setup send and recv.
+
+        // target rank
+        if ( is_pow2 )  {  // power of 2
+          curr_peer = comm_rank ^ step;
+        } else {
+          curr_peer = (comm_rank + 1) % comm_size;
+        }
+
+        // issend all, avoids buffering.
+        MPI_Isend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], dt.type(),
+        			curr_peer, ialltoallv_tag, _comm, &reqs[step - 1] );
+      }
+      BL_BENCH_END(idist, "a2av_isend", comm_size);
+
+
+
+      // loop and process each processor's assignment.  use isend and irecv.
+      // don't use collective start because Issend before...
+//      BL_BENCH_LOOP_START(idist, 0);
+//      BL_BENCH_LOOP_START(idist, 1);
+//      BL_BENCH_LOOP_START(idist, 2);
+      BL_BENCH_START(idist);
+
+      size_t prev_peer = comm_rank;
+      MPI_Request req;
+      size_t total = 0;
+      int completed;
+      // do remaining...
+      for (step = 1; step < comm_size; ++step) {
+        //====  first setup send and recv.
+          BL_BENCH_INIT(idist_loop);
+
+        // target rank
+        if ( is_pow2 )  {  // power of 2
+          curr_peer = comm_rank ^ step;
+        } else {
+          curr_peer = (comm_rank + step) % comm_size;
+        }
+
+//        BL_BENCH_LOOP_RESUME(idist, 0);
+        BL_BENCH_START(idist_loop);
+        // send and recv next.  post recv first.
+        MPI_Irecv(recving, recv_counts[curr_peer], dt.type(),
+                  curr_peer, ialltoallv_tag, _comm, &req );
+
+        // try using test to kick start the send?
+        MPI_Test(&reqs[step - 1], &completed, MPI_STATUS_IGNORE);
+        std::cout << "send from " << comm_rank << " to " << curr_peer << " is " << (completed ? "" : " not ") << " complete "<< std::endl;
+        // try using iprobe and test to check irecv.
+        MPI_Iprobe(curr_peer, ialltoallv_tag, _comm, &completed, MPI_STATUS_IGNORE);
+        std::cout << "recv from " << curr_peer << " to " << comm_rank << " is " << (completed ? "" : " not ") << " complete "<< std::endl;
+
+//        BL_BENCH_LOOP_PAUSE(idist, 0);
+        BL_BENCH_END(idist_loop, "irecv", curr_peer);
+
+//        BL_BENCH_LOOP_RESUME(idist, 1);
+        BL_BENCH_START(idist_loop);
+        // process previously received.
+        compute(computing, computing + recv_counts[prev_peer]);
+
+        // prep for next iteration
+        total += recv_counts[prev_peer];
+
+        // then swap pointer
+        ::std::swap(recving, computing);
+
+        // set up next iteration.
+//        BL_BENCH_LOOP_PAUSE(idist, 1);
+        BL_BENCH_END(idist_loop, "compute", recv_counts[prev_peer]);
+
+
+//        BL_BENCH_LOOP_RESUME(idist, 2);
+        BL_BENCH_START(idist_loop);
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&req, MPI_STATUS_IGNORE);
+//        BL_BENCH_LOOP_PAUSE(idist, 2);
+        BL_BENCH_END(idist_loop, "wait", prev_peer);
+
+        prev_peer = curr_peer;
+
+        BL_BENCH_REPORT_NAMED(idist_loop, "khmxx:exch_permute_mod local");
+
+      }
+      // last process
+//      BL_BENCH_LOOP_RESUME(idist, 1);
+      compute(computing, computing + recv_counts[prev_peer]);
+      total += recv_counts[prev_peer];
+//      BL_BENCH_LOOP_PAUSE(idist, 1);
+
+      // wait for all send to finish.
+//      BL_BENCH_LOOP_END(idist, 0, "loop_irecv", total);
+//      BL_BENCH_LOOP_END(idist, 1, "loop_compute", total);
+//      BL_BENCH_LOOP_END(idist, 2, "loop_wait", total	);
+      BL_BENCH_END(idist, "irecv_compute", total);
+
+
+      BL_BENCH_START(idist);
+      MPI_Waitall(comm_size - 1, reqs.data(), MPI_STATUSES_IGNORE);
+
+      free(buffers);
+      BL_BENCH_END(idist, "waitall_cleanup", comm_size - 1);
+
+
+      BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+
+    }
+
+
+
+
+
+    /// incremental ialltoallv, compute, and respond.  Assume the input is already permuted.
+    /// this version requires one-to-one input/output mapping.
+    /// uses pairwise exchange.  use issend for sending, and irsend for receive to avoid buffering.
+    template <typename IT, typename SIZE, typename OP, typename OT,
+      typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<IT>::iterator_category,
+                                             ::std::random_access_iterator_tag >::value &&
+                                ::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
+                                             ::std::random_access_iterator_tag >::value, int>::type = 1>
+      void ialltoallv_and_query_one_on_one(IT permuted, IT permuted_end,
+                      ::std::vector<SIZE> const & send_counts,
+                       OP compute,
+                       OT result,
+                      ::mxx::comm const &_comm) {
+
+        BL_BENCH_INIT(idist);
+
+        size_t input_size = permuted.size();
+
+        assert((send_counts.size() == _comm.size()) && "send_count size not same as _comm size.");
+
+        // make sure tehre is something to do.
+        BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
+        bool empty = input_size == 0;
+        empty = mxx::all_of(empty);
+        BL_BENCH_END(idist, "empty", input_size);
+
+        if (empty) {
+          BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+          return;
+        }
+
+        // if there is comm size is 1.
+        if (_comm.size() == 1) {
+          BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
+          compute(permuted, permuted_end, result);
+          BL_BENCH_END(idist, "compute_1", input_size);
+
+          BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+          return;
+        }
+
+        // get the recv counts.
+        BL_BENCH_COLLECTIVE_START(idist, "a2a_counts", _comm);
+        ::std::vector<SIZE> recv_counts(send_counts.size(), 0);
+        mxx::all2all(send_counts.data(), 1, recv_counts.data(), _comm);
+
+        ::std::vector<size_t> send_displs;
+        send_displs.reserve(send_counts.size() + 1);
+
+        // compute displacement for send and recv, also compute the max buffer size needed
+        SIZE buffer_max = 0;
+        send_displs.emplace_back(0UL);
+        for (int i = 0; i < _comm.size(); ++i) {
+          buffer_max = std::max(buffer_max, recv_counts[i]);
+
+          send_displs.emplace_back(send_displs.back() + send_counts[i]);
+        }
+        BL_BENCH_END(idist, "a2a_counts", buffer_max);
+
+
+        // TODO need to estimate total, else we'd see a lot of growth in the array.
+        // this could be a big problem.
+
+        // setup the temporary storage.  double buffered.
+        BL_BENCH_COLLECTIVE_START(idist, "a2av_alloc", _comm);
+        using V = typename ::std::iterator_traits<IT>::value_type;
+
+        // allocate recv_compressed
+        V* buffers = nullptr;
+        int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, buffer_max * 2ULL * sizeof(V));
+        if (ret) {
+          free(buffers);
+          throw std::length_error("failed to allocate aligned memory");
+        }
+        V* recving = buffers;
+        V* computing = buffers + buffer_max;
+
+        using U = typename ::std::iterator_traits<OT>::value_type;
+
+        // allocate recv_compressed
+        U* out_buffers = nullptr;
+        ret = posix_memalign(reinterpret_cast<void **>(&out_buffers), 64, buffer_max * 2ULL * sizeof(U));
+        if (ret) {
+          free(out_buffers);
+          throw std::length_error("failed to allocate aligned memory");
+        }
+        U* storing = out_buffers;
+        U* sending = out_buffers + buffer_max;
+
+        BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
+
+
+
+        // loop and process each processor's assignment.  use isend and irecv.
+        BL_BENCH_COLLECTIVE_START(idist, "a2av_reqs", _comm);
+
+        const int query_tag = 1773;
+        const int resp_tag = 1779;
+
+        // local (step 0) - skip the send recv, just directly process.
+        size_t comm_size = _comm.size();
+        size_t comm_rank = _comm.rank();
+        size_t curr_peer;
+
+        mxx::datatype q_dt = mxx::get_datatype<V>();
+        std::vector<MPI_Request> q_reqs(_comm.size() - 1);
+
+        mxx::datatype r_dt = mxx::get_datatype<U>();
+        std::vector<MPI_Request> r_reqs(_comm.size() - 1);
+
+
+        // copy self data into computing.
+        std::memcpy(computing, &(*(permuted + send_displs[comm_rank])), sizeof(V) * send_counts[comm_rank]);
+        bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
+        size_t step;
+
+        for (step = 1; step < comm_size; ++step) {
+          //====  first setup send and recv.
+
+          // target rank
+          if ( is_pow2 )  {  // power of 2
+            curr_peer = comm_rank ^ step;
+          } else {
+            curr_peer = (comm_rank + 1) % comm_size;
+          }
+
+          // issend all, avoids buffering.
+          MPI_Issend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], q_dt.type(),
+          			curr_peer, query_tag, _comm, &q_reqs[step - 1] );
+
+          // irecv all
+          MPI_Irecv(&(*(result + send_displs[curr_peer])), send_counts[curr_peer], r_dt.type(),
+          			curr_peer, resp_tag, _comm, &r_reqs[step - 1] );
+
+        }
+        BL_BENCH_END(idist, "a2av_reqs", comm_size);
+
+
+
+        // loop and process each processor's assignment.  use isend and irecv.
+        BL_BENCH_START(idist);  // don't use collective start because Issend before...
+
+        size_t prev_peer = comm_rank;
+        MPI_Request q_req, r_req;
+        size_t total = 0;
+
+        // do step = 1
+        // target rank
+        if ( is_pow2 )  {  // power of 2
+          curr_peer = comm_rank ^ 1;
+        } else {
+          curr_peer = (comm_rank + 1) % comm_size;
+        }
+
+        // recv next.
+        MPI_Irecv(recving, recv_counts[curr_peer], q_dt.type(),
+                  curr_peer, query_tag, _comm, &q_req );
+
+        // process previously received.
+        compute(computing, computing + recv_counts[prev_peer], storing);
+
+        // then swap pointer
+        ::std::swap(recving, computing);
+        ::std::swap(storing, sending);
+
+        // set up next iteration.
+        size_t prev_peer2 = prev_peer;
+        prev_peer = curr_peer;
+
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&q_req, MPI_STATUS_IGNORE);
+
+
+
+        // do remaining...
+        for (step = 2; step < comm_size; ++step) {
+          //====  first setup send and recv.
+
+          // target rank
+          if ( is_pow2 )  {  // power of 2
+            curr_peer = comm_rank ^ step;
+          } else {
+            curr_peer = (comm_rank + step) % comm_size;
+          }
+
+          // send and recv next.  post recv first.
+          MPI_Irecv(recving, recv_counts[curr_peer], q_dt.type(),
+                    curr_peer, query_tag, _comm, &q_req );
+		  // send results.  use rsend to avoid buffering
+		  MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
+					 prev_peer2, resp_tag, _comm, &r_req );
+          total += recv_counts[prev_peer2];
+
+          // process previously received.
+          compute(computing, computing + recv_counts[prev_peer], storing);
+
+          // then swap pointer
+          ::std::swap(recving, computing);
+          ::std::swap(storing, sending);
+
+          // set up next iteration.
+          prev_peer2 = prev_peer;
+          prev_peer = curr_peer;
+
+          // now wait for irecv from this iteration to complete, in order to continue.
+          MPI_Wait(&q_req, MPI_STATUS_IGNORE);
+          MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+        }
+
+        // ===== second to last
+	    // send results.  use rsend to avoid buffering
+		MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
+					 prev_peer2, resp_tag, _comm, &r_req );
+        total += recv_counts[prev_peer2];
+
+        // process previously received.
+        compute(computing, computing + recv_counts[prev_peer], storing);
+
+        // then swap pointer
+        ::std::swap(storing, sending);
+
+        // set up next iteration.
+        prev_peer2 = prev_peer;
+
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+
+
+        // ===== last
+	    // send results.  use rsend to avoid buffering
+		MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
+					 prev_peer2, resp_tag, _comm, &r_req );
+        total += recv_counts[prev_peer2];
+
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+
+
+        // wait for all send to finish.
+        BL_BENCH_END(idist, "recv_compute", total);
+
+
+        BL_BENCH_COLLECTIVE_START(idist, "cleanup", _comm);
+        MPI_Waitall(comm_size - 1, q_reqs.data(), MPI_STATUSES_IGNORE);
+        MPI_Waitall(comm_size - 1, r_reqs.data(), MPI_STATUSES_IGNORE);
+
+        free(buffers);
+        free(out_buffers);
+        BL_BENCH_END(idist, "cleanup", comm_size - 1);
+
+
+        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+
+
+    }
+
+    /// incremental distribute and compute.  Assume the input is already permuted.
+    /// return size for the results.  this version allows missing results, so will compact.
+
+
+    /// incremental ialltoallv, compute, and respond.  Assume the input is already permuted.
+    /// this version requires one-to-one input/output mapping.
+    /// uses pairwise exchange.  use issend for sending, and irsend for receive to avoid buffering.
+    template <typename IT, typename SIZE, typename OP, typename OT,
+      typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<IT>::iterator_category,
+                                             ::std::random_access_iterator_tag >::value &&
+                                ::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
+                                             ::std::random_access_iterator_tag >::value, int>::type = 1>
+      void ialltoallv_and_query(IT permuted, IT permuted_end,
+                      ::std::vector<SIZE> const & send_counts,
+                       OP compute,
+                       OT result,
+                       ::std::vector<SIZE> const & valid_counts,
+                      ::mxx::comm const &_comm) {
+
+        BL_BENCH_INIT(idist);
+
+        size_t input_size = permuted.size();
+
+        assert((send_counts.size() == _comm.size()) && "send_count size not same as _comm size.");
+
+        // make sure tehre is something to do.
+        BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
+        bool empty = input_size == 0;
+        empty = mxx::all_of(empty);
+        BL_BENCH_END(idist, "empty", input_size);
+
+        if (empty) {
+          BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+          return;
+        }
+
+        // if there is comm size is 1.
+        if (_comm.size() == 1) {
+          BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
+          compute(permuted, permuted_end, result);
+          BL_BENCH_END(idist, "compute_1", input_size);
+
+          BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+          return;
+        }
+
+        // get the recv counts.
+        BL_BENCH_COLLECTIVE_START(idist, "a2a_counts", _comm);
+        ::std::vector<SIZE> recv_counts(send_counts.size(), 0);
+        mxx::all2all(send_counts.data(), 1, recv_counts.data(), _comm);
+
+        ::std::vector<size_t> send_displs;
+        send_displs.reserve(send_counts.size() + 1);
+
+        // compute displacement for send and recv, also compute the max buffer size needed
+        SIZE buffer_max = 0;
+        send_displs.emplace_back(0UL);
+        for (int i = 0; i < _comm.size(); ++i) {
+          buffer_max = std::max(buffer_max, recv_counts[i]);
+
+          send_displs.emplace_back(send_displs.back() + send_counts[i]);
+        }
+        BL_BENCH_END(idist, "a2a_counts", buffer_max);
+
+
+        // TODO need to estimate total, else we'd see a lot of growth in the array.
+        // this could be a big problem.
+
+        // setup the temporary storage.  double buffered.
+        BL_BENCH_COLLECTIVE_START(idist, "a2av_alloc", _comm);
+        using V = typename ::std::iterator_traits<IT>::value_type;
+
+        // allocate recv_compressed
+        V* buffers = nullptr;
+        int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, buffer_max * 2ULL * sizeof(V));
+        if (ret) {
+          free(buffers);
+          throw std::length_error("failed to allocate aligned memory");
+        }
+        V* recving = buffers;
+        V* computing = buffers + buffer_max;
+
+        using U = typename ::std::iterator_traits<OT>::value_type;
+
+        // allocate recv_compressed
+        U* out_buffers = nullptr;
+        ret = posix_memalign(reinterpret_cast<void **>(&out_buffers), 64, buffer_max * 2ULL * sizeof(U));
+        if (ret) {
+          free(out_buffers);
+          throw std::length_error("failed to allocate aligned memory");
+        }
+        U* storing = out_buffers;
+        U* sending = out_buffers + buffer_max;
+
+        BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
+
+
+
+        // loop and process each processor's assignment.  use isend and irecv.
+        BL_BENCH_COLLECTIVE_START(idist, "a2av_reqs", _comm);
+
+        const int query_tag = 1773;
+        const int resp_tag = 1779;
+
+        // local (step 0) - skip the send recv, just directly process.
+        size_t comm_size = _comm.size();
+        size_t comm_rank = _comm.rank();
+        size_t curr_peer;
+
+        mxx::datatype q_dt = mxx::get_datatype<V>();
+        std::vector<MPI_Request> q_reqs(_comm.size() - 1);
+
+        mxx::datatype r_dt = mxx::get_datatype<U>();
+        std::vector<MPI_Request> r_reqs(_comm.size() - 1);
+
+
+        // copy self data into computing.
+        std::memcpy(computing, &(*(permuted + send_displs[comm_rank])), sizeof(V) * send_counts[comm_rank]);
+        bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
+        size_t step;
+
+        for (step = 1; step < comm_size; ++step) {
+          //====  first setup send and recv.
+
+          // target rank
+          if ( is_pow2 )  {  // power of 2
+            curr_peer = comm_rank ^ step;
+          } else {
+            curr_peer = (comm_rank + 1) % comm_size;
+          }
+
+          // issend all, avoids buffering.
+          MPI_Issend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], q_dt.type(),
+          			curr_peer, query_tag, _comm, &q_reqs[step - 1] );
+
+          // irecv all
+          MPI_Irecv(&(*(result + send_displs[curr_peer])), send_counts[curr_peer], r_dt.type(),
+          			curr_peer, resp_tag, _comm, &r_reqs[step - 1] );
+
+        }
+        BL_BENCH_END(idist, "a2av_reqs", comm_size);
+
+
+
+        // loop and process each processor's assignment.  use isend and irecv.
+        BL_BENCH_START(idist);  // don't use collective start because Issend before...
+
+        size_t prev_peer = comm_rank;
+        MPI_Request q_req, r_req;
+        size_t total = 0;
+
+        // do step = 1
+        // target rank
+        if ( is_pow2 )  {  // power of 2
+          curr_peer = comm_rank ^ 1;
+        } else {
+          curr_peer = (comm_rank + 1) % comm_size;
+        }
+
+        // recv next.
+        MPI_Irecv(recving, recv_counts[curr_peer], q_dt.type(),
+                  curr_peer, query_tag, _comm, &q_req );
+
+        // process previously received.
+        compute(computing, computing + recv_counts[prev_peer], storing);
+
+        // then swap pointer
+        ::std::swap(recving, computing);
+        ::std::swap(storing, sending);
+
+        // set up next iteration.
+        size_t prev_peer2 = prev_peer;
+        prev_peer = curr_peer;
+
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&q_req, MPI_STATUS_IGNORE);
+
+
+
+        // do remaining...
+        for (step = 2; step < comm_size; ++step) {
+          //====  first setup send and recv.
+
+          // target rank
+          if ( is_pow2 )  {  // power of 2
+            curr_peer = comm_rank ^ step;
+          } else {
+            curr_peer = (comm_rank + step) % comm_size;
+          }
+
+          // send and recv next.  post recv first.
+          MPI_Irecv(recving, recv_counts[curr_peer], q_dt.type(),
+                    curr_peer, query_tag, _comm, &q_req );
+		  // send results.  use rsend to avoid buffering
+		  MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
+					 prev_peer2, resp_tag, _comm, &r_req );
+          total += recv_counts[prev_peer2];
+
+          // process previously received.
+          compute(computing, computing + recv_counts[prev_peer], storing);
+
+          // then swap pointer
+          ::std::swap(recving, computing);
+          ::std::swap(storing, sending);
+
+          // set up next iteration.
+          prev_peer2 = prev_peer;
+          prev_peer = curr_peer;
+
+          // now wait for irecv from this iteration to complete, in order to continue.
+          MPI_Wait(&q_req, MPI_STATUS_IGNORE);
+          MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+        }
+
+        // ===== second to last
+	    // send results.  use rsend to avoid buffering
+		MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
+					 prev_peer2, resp_tag, _comm, &r_req );
+        total += recv_counts[prev_peer2];
+
+        // process previously received.
+        compute(computing, computing + recv_counts[prev_peer], storing);
+
+        // then swap pointer
+        ::std::swap(storing, sending);
+
+        // set up next iteration.
+        prev_peer2 = prev_peer;
+
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+
+
+        // ===== last
+	    // send results.  use rsend to avoid buffering
+		MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
+					 prev_peer2, resp_tag, _comm, &r_req );
+        total += recv_counts[prev_peer2];
+
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+
+
+        // wait for all send to finish.
+        BL_BENCH_END(idist, "recv_compute", total);
+
+
+        BL_BENCH_COLLECTIVE_START(idist, "cleanup", _comm);
+        MPI_Waitall(comm_size - 1, q_reqs.data(), MPI_STATUSES_IGNORE);
+        MPI_Waitall(comm_size - 1, r_reqs.data(), MPI_STATUSES_IGNORE);
+
+        free(buffers);
+        free(out_buffers);
+        BL_BENCH_END(idist, "cleanup", comm_size - 1);
+
+
+        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+
+
+    }
+  }
+
+
   namespace lz4 {
 
 

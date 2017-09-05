@@ -36,10 +36,12 @@
  * the precision is a function of the number of buckets, 1.04/sqrt(m), where m = 2^precision.
  *
  * TODO:
- * [ ] distributed estimation
- * [ ] exclude some leading bits (for use e.g. after data is distributed.)
+ * [ ] distributed estimation of global count
+ * [ ] distributed estimation of local count - average? NOT post distribution estimate per rank - distributed estimate is not needed then.
+ * [ ] distributed estimation of local count from global hash bins - scan input, estimate local.
+ * [X] exclude some leading bits (for use e.g. after data is distributed.)
  * [ ] exclude some trailing bits....
- * [ ] batch processing (to allow prefetching later.)
+ * [ ] batch processing (to allow prefetching later.)  - not needed for now since 2^12 fits in cache well.
  *
  *  Created on: Mar 1, 2017
  *      Author: tpan
@@ -52,6 +54,14 @@
 #include <stdint.h>
 #include <iostream> // std::cout
 #include <cmath>
+
+#ifdef USE_MPI
+#include <mxx/comm.hpp>
+#include <mxx/collective.hpp>
+#include <mxx/reduction.hpp>
+#endif
+
+
 // FROM https://github.com/hideo55/cpp-HyperLogLog.
 // modified to conform to the leftmost 1 bit convention, and faster implementation. and to make macro safer.
 // zero -> return 65.  else return b+1
@@ -90,16 +100,22 @@ inline uint8_t leftmost_set_bit(uint64_t x) {
 
 
 
-
-//========= specializations for std::hash. std::hash passes through primitive types, e.g. uint8_t.
-//   this creates problems in that the high bits are all 0.  so for std::hash,
-//   we use the lower bits for register and upper bits for the bit counts.
-//   also, for small datatypes, the number of leading zeros may be artificially large.
-//      we can fix this by tracking the minimum leading zero as well.
-// make the unused_msb be 0 for data type larger than 64, else 64  - actual data size.
+//========= general
+//   for all hash functions (assume good uniform distribution), the msb are used for register indexing,
+//   and lsb are for counting leading 0s.  both have to fit within the maximum number of bits used
+//   by hash values
+//========= specializations for std::hash.
+//   std::hash passes through primitive types, e.g. uint8_t, which only has 8 bits occupied.
+//   the high bits of the primitive types are used for register indexing while the low bits are
+//   used for leading zero counting.
+//   we define unused_msb to be 0 for data type larger than 64, else we use 64-sizeof(T)*8.
 //========== non-std::hash
-//   the unused msb is 0.
-
+//   the unused_msb is 0.
+//========== when same hash values are used for data distribution, followed by estimation (MPI)
+//   a rank receives values that have the top bits similar or identical, resulting in large number of
+//     empty slots.  instead, we treat the top bits used for distribution as "ignored.", and
+//     use next smallest bits as register index.
+//   64 bit.  0xIIRRVVVVVV  // MSB: ignored bits II;  high bits: register index RR;  low: values VVVVVV
 template <typename T, typename Hash,
 		uint8_t precision = 12U,
 		uint8_t unused_msb = (std::is_same<::std::hash<T>, Hash>::value) ?
@@ -125,17 +141,56 @@ protected:
 
 	Hash h;
 
-	inline void internal_update(uint64_t const & no_ignore) {
-		// bits we have are 0xRRVVVVVV0000
+	inline void internal_update(::std::vector<REG_T> & regs, uint64_t const & no_ignore) {
+		// no_ignore has bits 0xRRVVVVVV00, not that the II bits had already been shifted away.
 		// extract RR:      0x0000000000RR
         uint64_t i = no_ignore >> value_bits;   // first precision bits are for register id
-        // next count:  want to count 0xVVVVVV111111.
+        // next count:  want to count 0xVVVVVV1111.
         // compute lzcnt +1 from VVVVVV
         REG_T rank = leftmost_set_bit((no_ignore << precision) | lzc_mask);  // then find leading 1 in remaining
-        if (rank > registers[i]) {
-            registers[i] = rank;
+        if (rank > regs[i]) {
+            regs[i] = rank;
         }
 	}
+
+  double estimate_internal(::std::vector<REG_T> const & regs) const {
+        double estimate = static_cast<double>(0.0);
+        double sum = static_cast<double>(0.0);
+
+        assert(regs.size() == nRegisters);
+
+        // compute the denominator of the harmonic mean
+        for (size_t i = 0; i < nRegisters; i++) {
+            sum += static_cast<double>(1.0) / static_cast<double>(1ULL << regs[i]);
+        }
+        estimate = amm / sum; // E in the original paper
+
+        if (estimate <= static_cast<double>(5ULL * (nRegisters >> 1ULL))) {  // 5m/2
+          size_t zeros = count_zeros(regs);
+          if (zeros > 0ULL) {
+//            std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
+        return linear_count(zeros);
+          } else
+            return estimate;
+//        } else if (estimate > (1.0 / 30.0) * pow_2_32) {
+          // don't need this because of 64bit.
+//            estimate = neg_pow_2_32 * log(1.0 - (estimate / pow_2_32));
+        } else
+          return estimate;
+  }
+
+  inline uint64_t count_zeros(::std::vector<REG_T> const & regs) const {
+    uint64_t zeros = 0;
+    for (size_t i = 0; i < nRegisters; i++) {
+      if (regs[i] == 0) ++zeros;
+    }
+    return zeros;
+  }
+
+  inline double linear_count(uint64_t const & zeros) const {
+    return static_cast<double>(nRegisters) *
+        std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
+  }
 
 
 public:
@@ -210,42 +265,19 @@ public:
 
 
 	inline void update(T const & val) {
-        internal_update(h(val) << ignored_msb);
+    internal_update(this->registers, h(val) << ignored_msb);
 	}
 
 	inline void update_via_hashval(uint64_t const & hash) {
-        internal_update(hash << ignored_msb);
+    internal_update(this->registers, hash << ignored_msb);
 	}
-
 
 	double estimate() const {
-        double estimate = static_cast<double>(0.0);
-        double sum = static_cast<double>(0.0);
-
-        // compute the denominator of the harmonic mean
-        for (size_t i = 0; i < nRegisters; i++) {
-            sum += static_cast<double>(1.0) / static_cast<double>(1ULL << registers[i]);
-        }
-        estimate = amm / sum; // E in the original paper
-
-        if (estimate <= static_cast<double>(5ULL * (nRegisters >> 1ULL))) {  // 5m/2
-        	size_t zeros = count_zeros();
-        	if (zeros > 0ULL) {
-//        		std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
-				return linear_count(zeros);
-        	} else
-        		return estimate;
-//        } else if (estimate > (1.0 / 30.0) * pow_2_32) {
-        	// don't need this because of 64bit.
-//            estimate = neg_pow_2_32 * log(1.0 - (estimate / pow_2_32));
-        } else
-        	return estimate;
+	  return estimate_internal(this->registers);
 	}
 
-
-
 	void merge(hyperloglog64 const & other) {
-		// procisions identical, so don't need to check number of registers either.
+		// precisions identical, so don't need to check number of registers either.
 
 		// iterate over both, merge, and update the zero count.
 		for (size_t i = 0; i < nRegisters; ++i) {
@@ -253,167 +285,107 @@ public:
 		}
 	}
 
-	inline uint64_t count_zeros() const {
-		uint64_t zeros = 0;
-		for (size_t i = 0; i < nRegisters; i++) {
-			if (registers[i] == 0) ++zeros;
-		}
-		return zeros;
-	}
-
-	inline double linear_count(uint64_t const & zeros) const {
-		return static_cast<double>(nRegisters) *
-				std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
-	}
-
 	void clear() {
 		registers.assign(nRegisters, static_cast<REG_T>(0));
 	}
 
+
+
+
+#ifdef USE_MPI
+	// distributed merge, for estimating globally
+	::std::vector<REG_T> merge_distributed(::mxx::comm const & comm) {
+	  return ::mxx::allreduce(registers, ::mxx::max<REG_T>(), comm);
+	}
+
+
+	// global estimate for the current object
+  inline double estimate_global(::mxx::comm const & comm) const {
+    return estimate(merge_distributed(comm));
+  }
+
+  /// estimate per node, assuming that the hash values and original input values are uniformly randomly distributed (good balance)
+  inline double estimate_average_per_rank(::mxx::comm const & comm) const {
+    return estimate_global(comm) / static_cast<double>(comm.size());
+  }
+
+
+
+
+  // global estimate for new data.
+  template <typename SIZE>
+  inline double estimate_global_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+                                           ::mxx::comm const & comm) const {
+    // create the registers
+    ::std::vector<REG_T> regs(nRegisters, static_cast<REG_T>(0));
+
+    // perform updates on the registers.
+    for (; first != last; ++first) {
+      internal_update(regs, (*first) << ignored_msb);
+    }
+
+    // now merge distributed and estimate
+    return estimate(::mxx::allreduce(regs, ::mxx::max<REG_T>(), comm));
+  }
+
+  /// estimate per node, assuming that the hash values and original input values are uniformly randomly distributed (good balance)
+  template <typename SIZE>
+  inline double estimate_average_per_rank_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+                                          ::mxx::comm const & comm) const {
+    return estimate_global_by_hashval(first, last, send_counts, comm) / static_cast<double>(comm.size());
+  }
+
+
+
+
+  // distributed estimate.  it is not clear that this way is mathematically correct, other than relying on the fact that
+  // the input on different nodes should be iid with uniform distribution, so that individual buckets should be iids as well.
+  // input: source hash value array, or input array, and bucket send counts.
+  // internal:  2^precision buckets
+  // final: reduced 2^precision buckets
+  // output: estimate.
+  template <typename SIZE>
+  double estimate_per_rank_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+                                      ::mxx::comm const & comm) {
+    // create the registers
+    ::std::vector<REG_T> regs(nRegisters, static_cast<REG_T>(0));
+
+    // perform updates on the registers.
+    for (; first != last; ++first) {
+      internal_update(regs, (*first) << ignored_msb);
+    }
+
+    // now merge distributed and estimate
+    return estimate(::mxx::allreduce(regs, ::mxx::max<REG_T>(), comm));
+
+
+    // all_to_all reduce  - compute registers for each bucket, bucket id rank ^ step, and exchange.
+    // p iterations, but each iteration uses 2^precision bytes in mem, instead of each with 2^precision * P bytes in mem (potentially too much).
+
+    // use khmxx::incremental::map_ialltoall_reduce?
+
+  }
+  // NOT using MPI_reduce per bucket: (2^precision)*log(p) for each of p iterations. in time and space.  the above is (2^precision)*p
+
+  // distributed estimate.
+  // assuming that bins do not need to contain strictly partitioned data, then the same bin on each rank with the same hash
+  // value ranges can be treated as separate and independent bins.
+  // then we can shuffle the bins thus construct new registers.
+  // in fact, for each bucket, we only need max(1, (2^precision)/p) bins and the rest of the algorithm can be similar to estimate per rank algo.
+  // however, recall that the bits for mapping to ranks are the most significant bits
+  // and they are excluded, so we'd need some way to properly assign the bins.
+  template <typename SIZE>
+  double estimate_per_rank_experimental_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+                                        ::mxx::comm const & comm) {
+    return 0.0;
+  }
+
+
+#endif
+
+
 };
 
-
-
-
-
-////========= specializations for std::hash. std::hash passes through primitive types, e.g. uint8_t.
-////   this creates problems in that the high bits are all 0.  so for std::hash,
-////   we use the lower bits for register and upper bits for the bit counts.
-////   also, for small datatypes, the number of leading zeros may be artificially large.
-////      we can fix this by tracking the minimum leading zero as well.
-//// make the unused_msb be 0 for data type larger than 64, else 64  - actual data size.
-//template <typename T, uint8_t precision>
-//class hyperloglog64<T, std::hash<T>, precision, (sizeof(T) >= 8) ? 0 : (64 - (sizeof(T) * 8ULL))> {
-//
-//	  static_assert((precision < (sizeof(T) * 8ULL)) && (precision >= 4ULL) && (precision <= 16ULL),
-//			  "precision must be set to lower than sizeof(T) * 8 and in range [4, 16]");
-//
-//protected:
-//	  static constexpr uint8_t data_bits = ((sizeof(T) * 8ULL) > 64ULL) ? 64ULL : (sizeof(T) * 8ULL);
-//	  static constexpr uint8_t value_bits = data_bits - precision - ignored_msb;
-//	  static constexpr uint8_t lead_zero_bits = 64ULL - value_bits;  // in case sizeof(T) < 8.  exclude reg bits and ignored leading zeros..
-//
-//	  // register mask is the upper most precision bits.
-//  static constexpr uint64_t nRegisters = 0x1ULL << precision;
-//  static constexpr uint64_t shifted_reg_mask = nRegisters - 1ULL;   // need to shift right value_bits first.
-//  static constexpr uint64_t val_mask = ~(0x0ULL) >> lead_zero_bits;
-//
-//  double amm;
-//
-//	using REG_T = uint8_t;
-//	std::array<REG_T, nRegisters> registers;  // stores count of leading zeros
-//
-//  std::hash<T> h;
-//
-//public:
-//  static constexpr double est_error_rate = static_cast<double>(1.04) / static_cast<double>(0x1ULL << (precision >> 1ULL));   // avoid std::sqrt in constexpr.
-//
-//
-//  hyperloglog64() {
-//    registers.fill(static_cast<REG_T>(0));
-//
-//        switch (precision) {
-//            case 4:
-//                amm = static_cast<double>(0.673);
-//                break;
-//            case 5:
-//                amm = static_cast<double>(0.697);
-//                break;
-//            case 6:
-//                amm = static_cast<double>(0.709);
-//                break;
-//            default:
-//                amm = static_cast<double>(0.7213) / (static_cast<double>(1.0) + static_cast<double>(1.079) / static_cast<double>(nRegisters));
-//                break;
-//        }
-//        amm *= static_cast<double>(0x1ULL << (precision << 1ULL));  // 2 ^(precision *2)
-//  }
-//
-//  hyperloglog64(hyperloglog64 const & other) : amm(other.amm), registers(other.registers) {}
-//
-//  hyperloglog64(hyperloglog64 && other) : amm(other.amm),
-//      registers(std::move(other.registers)) {}
-//
-//
-//  hyperloglog64& operator=(hyperloglog64 const & other) {
-//    amm = other.amm;
-//    registers = other.registers;
-//  }
-//
-//  hyperloglog64& operator=(hyperloglog64 && other) {
-//    amm = other.amm;
-//    registers.swap(std::move(other.registers));
-//  }
-//
-//  void swap(hyperloglog64 & other) {
-//    std::swap(amm, other.amm);
-//    std::swap(registers, other.registers);
-//  }
-//
-//  inline void update(T const & val) {
-//        update_via_hashval(h(val));
-//  }
-//  inline void update_via_hashval(uint64_t const & hash) {
-//        uint64_t i = (hash >> value_bits) & shifted_reg_mask;   // first precision bits are for register id
-//        uint8_t rank = leftmost_set_bit(hash & val_mask) - lead_zero_bits;  // then find leading 1 in remaining
-//        if (rank > registers[i]) {
-//            registers[i] = rank;
-//        }
-//  }
-//
-//  double estimate() const {
-//        double estimate = static_cast<double>(0.0);
-//        double sum = static_cast<double>(0.0);
-//
-//        // compute the denominator of the harmonic mean
-//        for (size_t i = 0; i < nRegisters; i++) {
-//            sum += static_cast<double>(1.0) / static_cast<double>(1ULL << registers[i] );
-//        }
-//        estimate = amm / sum; // E in the original paper
-//
-//        if (estimate <= static_cast<double>(5ULL * (nRegisters >> 1ULL))) { // 5m/2
-//        	size_t zeros = count_zeros();
-//        	if (zeros > 0ULL) {
-////        		std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
-//				return linear_count(zeros);
-//        	} else
-//        		return estimate;
-////        } else if (estimate > (1.0 / 30.0) * pow_2_32) {
-//            // don't need below because of 64bit.
-////            estimate = neg_pow_2_32 * log(1.0 - (estimate / pow_2_32));
-//        } else
-//          return estimate;
-//  }
-//
-//
-//
-//  void merge(hyperloglog64 const & other) {
-//    // precisions identical, so don't need to check number of registers either.
-//
-//    // iterate over both, merge, and update the zero count.
-//    for (size_t i = 0; i < nRegisters; ++i) {
-//      registers[i] = std::max(registers[i], other.registers[i]);
-//    }
-//  }
-//
-//	inline uint64_t count_zeros() const {
-//		uint64_t zeros = 0;
-//		for (size_t i = 0; i < nRegisters; i++) {
-//			if (registers[i] == 0) ++zeros;
-//		}
-//		return zeros;
-//	}
-//
-//	inline double linear_count(uint64_t const & zeros) const {
-//		return static_cast<double>(nRegisters) *
-//				std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
-//	}
-//
-//	void clear() {
-//		registers.fill(static_cast<REG_T>(0));
-//	}
-//
-//};
 
 
 

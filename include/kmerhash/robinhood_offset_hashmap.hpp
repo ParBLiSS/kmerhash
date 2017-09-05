@@ -592,6 +592,10 @@ public:
 		this->hll.set_ignored_msb(ignore_msb);
 	}
 
+	inline hyperloglog64<key_type, hasher, 12>& get_hll() {
+		return this->hll;
+	}
+
 
 	/**
 	 * @brief get the load factors.
@@ -1721,7 +1725,7 @@ protected:
 	// batch insert, minimizing number of loop conditionals and rehash checks.
 	// provide a set of precomputed hash values.  Also allows resize in case any estimation is not accurate.
 	template <typename InputIter, typename HashIter>
-	void insert_with_hint(InputIter input, HashIter hashes, size_t input_size) {
+	void insert_batch_with_hint(InputIter input, HashIter hashes, size_t input_size) {
 
 
 #if defined(REPROBE_STAT)
@@ -1904,6 +1908,7 @@ protected:
 
 	}
 
+
 #if defined(REPROBE_STAT)
 	void reset_reprobe_stats() const {
 		this->reprobes = 0;
@@ -1976,7 +1981,6 @@ public:
 		return insert(std::make_pair(key, val));
 	}
 
-
 	// insert with iterator.  uses size estimate.
 	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
 	typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
@@ -2035,15 +2039,70 @@ public:
 		reserve(static_cast<size_t>(static_cast<double>(distinct_total_est) * (1.0 + hll_local.est_error_rate)));   // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
 
 		// now try to insert.  hashing done already.
-		insert_with_hint(begin, hash_vals, input_size);
+		insert_batch_with_hint(begin, hash_vals, input_size);
 
 
-		//        insert_with_hint(sh_input.data(), sh_hash_val.data(), sh_input.size());
+		//        insert_batch_with_hint(sh_input.data(), sh_hash_val.data(), sh_input.size());
 		// finally, update the hyperloglog estimator.  just swap.
 		hll.swap(hll_local);
 		free(hash_vals);
 
 #if defined(REPROBE_STAT)
+		print_reprobe_stats("INSERT ITER", input_size, (lsize - before));
+#endif
+	}
+
+
+
+	// insert with iterator.  uses size estimate.
+	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
+	typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
+	void insert_no_resize(Iter begin, Iter end) {
+#if defined(REPROBE_STAT)
+		std::cout << "INSERT ITERATOR" << std::endl;
+
+		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+		} else {
+			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+		}
+
+		reset_reprobe_stats();
+		size_type before = lsize;
+#endif
+
+		if (begin == end) return;
+
+		size_t input_size = std::distance(begin, end);
+
+		// compute hash value array, and estimate the number of unique entries in current.  then merge with current and get the after count.
+		//std::vector<size_t> hash_vals;
+		//hash_vals.reserve(input.size());
+		size_t* hash_vals = nullptr;
+		int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 64, sizeof(size_t) * input_size);
+		if (ret) {
+			free(hash_vals);
+			throw std::length_error("failed to allocate aligned memory");
+		}
+
+		size_t hval;
+		Iter it = begin;
+		for (size_t i = 0; i < input_size; ++i, ++it) {
+			hval = hash( (*it).first );
+			this->hll.update_via_hashval(hval);
+			// using mm_stream here does not make a differnece.
+			//_mm_stream_si64(reinterpret_cast<long long int*>(hash_vals + i), *(reinterpret_cast<long long int*>(&hval)));
+			hash_vals[i] = hval;
+		}
+
+		// now try to insert.  hashing done already.
+		insert_batch_with_hint(begin, hash_vals, input_size);
+
+		// finally, update the hyperloglog estimator.  just swap.
+		free(hash_vals);
+
+#if defined(REPROBE_STAT)
+		std::cout << " estimate total input cardinality as " << (this->hll.estimate()) << " actual " << lsize << std::endl;
 		print_reprobe_stats("INSERT ITER", input_size, (lsize - before));
 #endif
 	}
@@ -3207,65 +3266,66 @@ public:
 	// similar to insert with iterator in structure.  prefetch stuff is delegated to insert_with_hint_no_resize.
 	void insert(::std::vector<value_type> const & input) {
 
-#if defined(REPROBE_STAT)
-		std::cout << "INSERT VECTOR" << std::endl;
-		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
-			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-		} else {
-			std::cout << "STATUS: container alignment on value boundary" << std::endl;
-		}
-
-		reset_reprobe_stats();
-		size_type before = lsize;
-#endif
-
-		// compute hash value array, and estimate the number of unique entries in current.  then merge with current and get the after count.
-		//std::vector<size_t> hash_vals;
-		//hash_vals.reserve(input.size());
-		size_t* hash_vals = nullptr;
-		int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 16, sizeof(size_t) * input.size());
-		if (ret) {
-			free(hash_vals);
-			throw std::length_error("failed to allocate aligned memory");
-		}
-
-		auto hll_local = this->hll.make_empty_copy();
-
-		size_t hval;
-		for (size_t i = 0; i < input.size(); ++i) {
-			hval = hash(input[i].first);
-			hll_local.update_via_hashval(hval);
-			// using mm_stream here does not make a differnece.
-			//_mm_stream_si64(reinterpret_cast<long long int*>(hash_vals + i), *(reinterpret_cast<long long int*>(&hval)));
-			hash_vals[i] = hval;
-		}
-
-		// estimate the number of unique entries in input.
-#if defined(REPROBE_STAT)
-		double distinct_input_est = hll_local.estimate();
-#endif
-
-		hll_local.merge(hll);
-		double distinct_total_est = hll_local.estimate();
-
-#if defined(REPROBE_STAT)
-		std::cout << " estimate input cardinality as " << distinct_input_est << " total after insertion " << distinct_total_est << std::endl;
-#endif
-		// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
-		reserve(static_cast<size_t>(static_cast<double>(distinct_total_est) * (1.0 + hll_local.est_error_rate)));   // this updates the bucket counts also.  overestimate by 10%
-
-
-		// now try to insert.  hashing done already.
-		insert_with_hint(input.begin(), hash_vals, input.size());
-
-		//        insert_with_hint(sh_input.data(), sh_hash_val.data(), sh_input.size());
-		// finally, update the hyperloglog estimator.  just swap.
-		hll.swap(hll_local);
-		free(hash_vals);
-
-#if defined(REPROBE_STAT)
-		print_reprobe_stats("INSERT VEC", input.size(), (lsize - before));
-#endif
+		insert(input.cbegin(), input.cend());
+//#if defined(REPROBE_STAT)
+//		std::cout << "INSERT VECTOR" << std::endl;
+//		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+//			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//		} else {
+//			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//		}
+//
+//		reset_reprobe_stats();
+//		size_type before = lsize;
+//#endif
+//
+//		// compute hash value array, and estimate the number of unique entries in current.  then merge with current and get the after count.
+//		//std::vector<size_t> hash_vals;
+//		//hash_vals.reserve(input.size());
+//		size_t* hash_vals = nullptr;
+//		int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 16, sizeof(size_t) * input.size());
+//		if (ret) {
+//			free(hash_vals);
+//			throw std::length_error("failed to allocate aligned memory");
+//		}
+//
+//		auto hll_local = this->hll.make_empty_copy();
+//
+//		size_t hval;
+//		for (size_t i = 0; i < input.size(); ++i) {
+//			hval = hash(input[i].first);
+//			hll_local.update_via_hashval(hval);
+//			// using mm_stream here does not make a differnece.
+//			//_mm_stream_si64(reinterpret_cast<long long int*>(hash_vals + i), *(reinterpret_cast<long long int*>(&hval)));
+//			hash_vals[i] = hval;
+//		}
+//
+//		// estimate the number of unique entries in input.
+//#if defined(REPROBE_STAT)
+//		double distinct_input_est = hll_local.estimate();
+//#endif
+//
+//		hll_local.merge(hll);
+//		double distinct_total_est = hll_local.estimate();
+//
+//#if defined(REPROBE_STAT)
+//		std::cout << " estimate input cardinality as " << distinct_input_est << " total after insertion " << distinct_total_est << std::endl;
+//#endif
+//		// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
+//		reserve(static_cast<size_t>(static_cast<double>(distinct_total_est) * (1.0 + hll_local.est_error_rate)));   // this updates the bucket counts also.  overestimate by 10%
+//
+//
+//		// now try to insert.  hashing done already.
+//		insert_batch_with_hint(input.begin(), hash_vals, input.size());
+//
+//		//        insert_batch_with_hint(sh_input.data(), sh_hash_val.data(), sh_input.size());
+//		// finally, update the hyperloglog estimator.  just swap.
+//		hll.swap(hll_local);
+//		free(hash_vals);
+//
+//#if defined(REPROBE_STAT)
+//		print_reprobe_stats("INSERT VEC", input.size(), (lsize - before));
+//#endif
 	}
 
 
