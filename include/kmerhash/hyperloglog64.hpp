@@ -153,7 +153,29 @@ protected:
         }
 	}
 
-  double estimate_internal(::std::vector<REG_T> const & regs) const {
+  inline void internal_update(REG_T* regs, uint64_t const & no_ignore) {
+    // no_ignore has bits 0xRRVVVVVV00, not that the II bits had already been shifted away.
+    // extract RR:      0x0000000000RR
+        uint64_t i = no_ignore >> value_bits;   // first precision bits are for register id
+        // next count:  want to count 0xVVVVVV1111.
+        // compute lzcnt +1 from VVVVVV
+        REG_T rank = leftmost_set_bit((no_ignore << precision) | lzc_mask);  // then find leading 1 in remaining
+        if (rank > regs[i]) {
+            regs[i] = rank;
+        }
+  }
+
+  inline void internal_merge(REG_T* target, const REG_T* src) {
+    // precisions identical, so don't need to check number of registers either.
+
+    // iterate over both, merge, and update the zero count.
+    for (size_t i = 0; i < nRegisters; ++i) {
+      target[i] = ::std::max(target[i], src[i]);
+    }
+  }
+
+
+  double internal_estimate(::std::vector<REG_T> const & regs) const {
         double estimate = static_cast<double>(0.0);
         double sum = static_cast<double>(0.0);
 
@@ -179,7 +201,39 @@ protected:
           return estimate;
   }
 
+  double internal_estimate(REG_T* regs) const {
+        double estimate = static_cast<double>(0.0);
+        double sum = static_cast<double>(0.0);
+
+        // compute the denominator of the harmonic mean
+        for (size_t i = 0; i < nRegisters; i++) {
+            sum += static_cast<double>(1.0) / static_cast<double>(1ULL << regs[i]);
+        }
+        estimate = amm / sum; // E in the original paper
+
+        if (estimate <= static_cast<double>(5ULL * (nRegisters >> 1ULL))) {  // 5m/2
+          size_t zeros = count_zeros(regs);
+          if (zeros > 0ULL) {
+//            std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
+        return linear_count(zeros);
+          } else
+            return estimate;
+//        } else if (estimate > (1.0 / 30.0) * pow_2_32) {
+          // don't need this because of 64bit.
+//            estimate = neg_pow_2_32 * log(1.0 - (estimate / pow_2_32));
+        } else
+          return estimate;
+  }
+
   inline uint64_t count_zeros(::std::vector<REG_T> const & regs) const {
+    uint64_t zeros = 0;
+    for (size_t i = 0; i < nRegisters; i++) {
+      if (regs[i] == 0) ++zeros;
+    }
+    return zeros;
+  }
+
+  inline uint64_t count_zeros(REG_T* regs) const {
     uint64_t zeros = 0;
     for (size_t i = 0; i < nRegisters; i++) {
       if (regs[i] == 0) ++zeros;
@@ -265,31 +319,24 @@ public:
 
 
 	inline void update(T const & val) {
-    internal_update(this->registers, h(val) << ignored_msb);
+      internal_update(this->registers, h(val) << ignored_msb);
 	}
 
 	inline void update_via_hashval(uint64_t const & hash) {
-    internal_update(this->registers, hash << ignored_msb);
+      internal_update(this->registers, hash << ignored_msb);
 	}
 
 	double estimate() const {
-	  return estimate_internal(this->registers);
+	  return internal_estimate(this->registers);
 	}
 
 	void merge(hyperloglog64 const & other) {
-		// precisions identical, so don't need to check number of registers either.
-
-		// iterate over both, merge, and update the zero count.
-		for (size_t i = 0; i < nRegisters; ++i) {
-			registers[i] = std::max(registers[i], other.registers[i]);
-		}
+	  internal_merge(this->registers.data(), other.registers.data());
 	}
 
 	void clear() {
 		registers.assign(nRegisters, static_cast<REG_T>(0));
 	}
-
-
 
 
 #ifdef USE_MPI
@@ -310,12 +357,10 @@ public:
   }
 
 
-
-
   // global estimate for new data.
   template <typename SIZE>
-  inline double estimate_global_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
-                                           ::mxx::comm const & comm) const {
+  inline double estimate_local_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+                                           ::mxx::comm const & comm) {
     // create the registers
     ::std::vector<REG_T> regs(nRegisters, static_cast<REG_T>(0));
 
@@ -325,28 +370,224 @@ public:
     }
 
     // now merge distributed and estimate
-    return estimate(::mxx::allreduce(regs, ::mxx::max<REG_T>(), comm));
+    return internal_estimate(regs);
   }
 
-  /// estimate per node, assuming that the hash values and original input values are uniformly randomly distributed (good balance)
+  // global estimate for new data.
+  template <typename SIZE>
+  inline double estimate_global_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+                                           ::mxx::comm const & comm) {
+    // create the registers
+    ::std::vector<REG_T> regs(nRegisters, static_cast<REG_T>(0));
+
+    // perform updates on the registers.
+    for (; first != last; ++first) {
+      internal_update(regs, (*first) << ignored_msb);
+    }
+
+    // now merge distributed and estimate
+    return internal_estimate(::mxx::allreduce(regs, ::mxx::max<REG_T>(), comm));
+  }
+
+  /// estimate per node, assuming that the hash values and original input values are
+  // uniformly randomly distributed (good balance)
+  // NOTE: inexact estimate.  does not require permutation.  PREFERRED.   uses Allreduce, with log(p) iterations (likely).
   template <typename SIZE>
   inline double estimate_average_per_rank_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
-                                          ::mxx::comm const & comm) const {
+                                          ::mxx::comm const & comm) {
     return estimate_global_by_hashval(first, last, send_counts, comm) / static_cast<double>(comm.size());
   }
 
 
 
 
-  // distributed estimate.  it is not clear that this way is mathematically correct, other than relying on the fact that
-  // the input on different nodes should be iid with uniform distribution, so that individual buckets should be iids as well.
+  // distributed estimate.  exact solution, performed bucket by bucket.
   // input: source hash value array, or input array, and bucket send counts.
   // internal:  2^precision buckets
   // final: reduced 2^precision buckets
   // output: estimate.
+  // NOTE: exact, but requires permuting the hash values.  also, P iterations of merge, so slower for high P.
+  // assumes accumulating has the correct data.
   template <typename SIZE>
-  double estimate_per_rank_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+  void update_per_rank_by_hashval_internal(REG_T* accumulating, size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
                                       ::mxx::comm const & comm) {
+
+    size_t input_size = ::std::distance(first, last);
+
+    assert((send_counts.size() == comm.size()) && "send_count size not same as _comm size.");
+
+    // make sure tehre is something to do.
+    bool empty = input_size == 0;
+    empty = mxx::all_of(empty);
+
+    if (empty) {
+      return;
+    }
+
+    // if there is comm size is 1.
+    if (comm.size() == 1) {
+      // perform updates on the registers.
+      for (; first != last; ++first) {
+        internal_update(accumulating, (*first) << ignored_msb);
+      }
+      return;
+    }
+
+    // compute the displacements.
+    std::vector<size_t> send_displs;
+    send_displs.reserve(send_counts.size() + 1);
+    send_displs.emplace_back(0ULL);
+    for (size_t i = 0; i < send_counts.size(); ++i) {
+      send_displs.emplace_back(send_displs.back() + send_counts[i]);
+    }
+
+    // setup the temporary storage.  double buffered.
+    // allocate recv
+    REG_T* buffers = nullptr;
+    int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, nRegisters * 4ULL * sizeof(REG_T));
+    if (ret) {
+      free(buffers);
+      throw std::length_error("failed to allocate aligned memory");
+    }
+    REG_T* updating = buffers;
+    REG_T* sending = buffers + nRegisters;
+    REG_T* recving = buffers + 2UL * nRegisters;
+    REG_T* recved = buffers + 3UL * nRegisters;
+
+
+    // loop and process each processor's assignment.  use isend and irecv.
+    const int ialltoall_reduce_tag = 1973;
+
+    // local (step 0) - skip the send recv, just directly process.
+    size_t comm_size = comm.size();
+    size_t comm_rank = comm.rank();
+    size_t curr_peer, next_peer, prev_peer = comm_rank;
+
+    bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
+
+    //===  for prev_peer:  first compute self estimate.
+    auto max = first + send_displs[prev_peer + 1];
+    memset(recved, 0, nRegisters * sizeof(REG_T));
+    for (auto it = first + send_displs[prev_peer]; it != max; ++it) {
+      internal_update(recved, (*it) << ignored_msb);
+    }
+
+    //=== for curr_peer:
+    if ( is_pow2 )  {  // power of 2
+      curr_peer = comm_rank ^ 1;
+    } else {
+      curr_peer = (comm_rank + 1) % comm_size;
+    }
+    // compute the array
+    max = first + send_displs[curr_peer + 1];
+    memset(sending, 0, nRegisters * sizeof(REG_T));
+    for (auto it = first + send_displs[curr_peer]; it != max; ++it) {
+      internal_update(sending, (*it) << ignored_msb);
+    }
+
+    size_t step;
+
+    mxx::datatype dt = mxx::get_datatype<REG_T>();
+    std::vector<MPI_Request> reqs(2);
+    int completed = false;
+
+    for (step = 2; step < comm_size; ++step) {
+      //====  first setup send and recv.
+
+      // send and recv next.  post recv first.
+      MPI_Irecv(recving, nRegisters, dt.type(),
+                curr_peer, ialltoall_reduce_tag, comm, &reqs[0] );
+      MPI_Isend(sending, nRegisters, dt.type(),
+                curr_peer, ialltoall_reduce_tag, comm, &reqs[1] );
+
+      // try using test to kick start the send?
+      MPI_Test(&reqs[1], &completed, MPI_STATUS_IGNORE);
+      //std::cout << "send from " << comm_rank << " to " << curr_peer << " is " << (completed ? "" : " not ") << " complete "<< std::endl;
+
+
+      //=== compute the local update.
+      // target rank
+      if ( is_pow2 )  {  // power of 2
+        next_peer = comm_rank ^ step;
+      } else {
+        next_peer = (comm_rank + step) % comm_size;
+      }
+      memset(updating, 0, nRegisters * sizeof(REG_T));
+      max = first + send_displs[next_peer + 1];
+      for (auto it = first + send_displs[next_peer]; it != max; ++it) {
+        internal_update(updating, (*it) << ignored_msb);
+      }
+
+      //=== and accumulate
+      internal_merge(accumulating, recved);
+      //std::cout << "  per rank estimate for step " << (step - 2) << " peer " << prev_peer << ": " << internal_estimate(accumulating) << std::endl;
+
+      // wait for both to complete
+      MPI_Waitall(2, reqs.data(), MPI_STATUSES_IGNORE);
+
+      // now swap.
+      std::swap(updating, sending);
+      std::swap(recving, recved);
+
+      prev_peer = curr_peer;
+      curr_peer = next_peer;
+
+    }
+
+    //=== process curr_peer
+    // send and recv next.  post recv first.
+    MPI_Irecv(recving, nRegisters, dt.type(),
+              curr_peer, ialltoall_reduce_tag, comm, &reqs[0] );
+    MPI_Isend(sending, nRegisters, dt.type(),
+              curr_peer, ialltoall_reduce_tag, comm, &reqs[1] );
+
+    // try using test to kick start the send?
+    MPI_Test(&reqs[1], &completed, MPI_STATUS_IGNORE);
+    //std::cout << "send from " << comm_rank << " to " << curr_peer << " is " << (completed ? "" : " not ") << " complete "<< std::endl;
+
+    //=== no more new updates
+
+    //=== and accumulate
+    internal_merge(accumulating, recved);
+    //std::cout << "  per rank estimate for step " << (comm_size - 2) << " peer " << prev_peer << ": " << internal_estimate(accumulating) << std::endl;
+
+    // wait for both to complete
+    MPI_Waitall(2, reqs.data(), MPI_STATUSES_IGNORE);
+
+    // now swap.
+    std::swap(recving, recved);
+    prev_peer = curr_peer;
+
+    //=== last accumulate, for prev_peer
+    internal_merge(accumulating, recved);
+    //std::cout << "  per rank estimate for step " << (comm_size - 1) << " peer " << prev_peer << ": " << internal_estimate(accumulating) << std::endl;
+
+
+    free(buffers);
+
+  }
+  // NOT using MPI_reduce per bucket: (2^precision)*log(p) for each of p iterations. in time and space.  the above is (2^precision)*p
+
+  template <typename SIZE>
+  void update_per_rank_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+                                      ::mxx::comm const & comm) {
+    update_per_rank_by_hashval_internal(this->registers.data(), first, last, send_counts, comm);
+  }
+
+
+  // distributed estimate. it is not clear that this way is mathematically correct, other than relying on the fact that
+  // the input on different nodes should be iid with uniform distribution, so that individual buckets should be iids as well.
+  // assuming that bins do not need to contain strictly partitioned data, then the same bin on each rank with the same hash
+  // value ranges can be treated as separate and independent bins.
+  // then we can shuffle the bins thus construct new registers.
+  // in fact, for each bucket, we only need max(1, (2^precision)/p) bins and the rest of the algorithm can be similar to estimate per rank algo.
+  // however, recall that the bits for mapping to ranks are the most significant bits
+  // and they are excluded, so we'd need some way to properly assign the bins.
+  // NOTE: OVERESTIMATES BY NEARLY DOUBLE FOR Fvesca.  DO NOT USE.
+  template <typename SIZE>
+  ::std::vector<REG_T> update_per_rank_experimental_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+                                        ::mxx::comm const & comm) {
+    // first compute the local estimates
     // create the registers
     ::std::vector<REG_T> regs(nRegisters, static_cast<REG_T>(0));
 
@@ -355,29 +596,25 @@ public:
       internal_update(regs, (*first) << ignored_msb);
     }
 
-    // now merge distributed and estimate
-    return estimate(::mxx::allreduce(regs, ::mxx::max<REG_T>(), comm));
+    // now compute send counts.  each rank ends up with 2^precision number of entries.
+    size_t count = 0;
+    size_t last_sc = 0, sc= 0;
+    size_t comm_size = comm.size();
+    size_t comm_rank = comm.rank();
+    size_t rem = 0;
+    std::vector<SIZE> scounts;
+    scounts.reserve(comm_size);
+    for (size_t i = 1; i <= comm_size; ++i) {
+      count = i * nRegisters;
+      rem = count % comm_size;
+      sc = (count + ((comm_rank < rem) ? (comm_size - 1) : 0)) / comm_size;
+      scounts.emplace_back(sc - last_sc);
+      last_sc = sc;
+    }
 
 
-    // all_to_all reduce  - compute registers for each bucket, bucket id rank ^ step, and exchange.
-    // p iterations, but each iteration uses 2^precision bytes in mem, instead of each with 2^precision * P bytes in mem (potentially too much).
-
-    // use khmxx::incremental::map_ialltoall_reduce?
-
-  }
-  // NOT using MPI_reduce per bucket: (2^precision)*log(p) for each of p iterations. in time and space.  the above is (2^precision)*p
-
-  // distributed estimate.
-  // assuming that bins do not need to contain strictly partitioned data, then the same bin on each rank with the same hash
-  // value ranges can be treated as separate and independent bins.
-  // then we can shuffle the bins thus construct new registers.
-  // in fact, for each bucket, we only need max(1, (2^precision)/p) bins and the rest of the algorithm can be similar to estimate per rank algo.
-  // however, recall that the bits for mapping to ranks are the most significant bits
-  // and they are excluded, so we'd need some way to properly assign the bins.
-  template <typename SIZE>
-  double estimate_per_rank_experimental_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
-                                        ::mxx::comm const & comm) {
-    return 0.0;
+    // then shuffle.
+    return mxx::all2allv(regs, scounts, comm);
   }
 
 
