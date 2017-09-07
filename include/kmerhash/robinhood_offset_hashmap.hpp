@@ -1809,7 +1809,8 @@ protected:
 
 				// prefetch container
 				bid = *(hashes + i + INSERT_LOOKAHEAD) & mask;
-				if (is_normal(info_container[bid])) {
+				// intention is to write, so should prefetch...
+//				if (is_normal(info_container[bid])) {
 					bid1 = bid + 1;
 					bid += get_offset(info_container[bid]);
 					bid1 += get_offset(info_container[bid1]);
@@ -1823,7 +1824,7 @@ protected:
 					if (bid1 > (bid + value_per_cacheline))
 						KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 
-				}
+//				}
 
 				// first get the bucket id
 				insert_bid = insert_with_hint(container, info_container, *(hashes + i) & mask, *(input + i));
@@ -1861,8 +1862,8 @@ protected:
 			bid = *(hashes + i + INSERT_LOOKAHEAD) & mask;
 
 
-			// prefetch container
-			if (is_normal(info_container[bid])) {
+			// prefetch container.  intention is to write. so should alway prefetch.
+//			if (is_normal(info_container[bid])) {
 				bid1 = bid + 1;
 				bid += get_offset(info_container[bid]);
 				bid1 += get_offset(info_container[bid1]);
@@ -1875,7 +1876,7 @@ protected:
         // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH, bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
 				if (bid1 > (bid + value_per_cacheline))
 					KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
-			}
+//			}
 
 			insert_bid = insert_with_hint(container, info_container, *(hashes + i) & mask, *(input + i));
 			while (insert_bid == insert_failed) {
@@ -2006,7 +2007,7 @@ public:
 		//std::vector<size_t> hash_vals;
 		//hash_vals.reserve(input.size());
 		size_t* hash_vals = nullptr;
-		int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 16, sizeof(size_t) * input_size);
+		int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 64, sizeof(size_t) * input_size);
 		if (ret) {
 			free(hash_vals);
 			throw std::length_error("failed to allocate aligned memory");
@@ -2054,10 +2055,59 @@ public:
 
 
 
-	// insert with iterator.  uses size estimate.
+  // insert with iterator.  does not estimate or resize.
+  template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
+  typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
+  void insert_no_resize(Iter begin, Iter end) {
+#if defined(REPROBE_STAT)
+    std::cout << "INSERT ITERATOR" << std::endl;
+
+    if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+      std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+    } else {
+      std::cout << "STATUS: container alignment on value boundary" << std::endl;
+    }
+
+    reset_reprobe_stats();
+    size_type before = lsize;
+#endif
+
+    size_t input_size = std::distance(begin, end);
+
+    if (input_size == 0) return;
+
+    // compute hash value array, and estimate the number of unique entries in current.  then merge with current and get the after count.
+    //std::vector<size_t> hash_vals;
+    //hash_vals.reserve(input.size());
+    size_t* hash_vals = nullptr;
+    int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 64, sizeof(size_t) * input_size);
+    if (ret) {
+      free(hash_vals);
+      throw std::length_error("failed to allocate aligned memory");
+    }
+
+    Iter it = begin;
+    for (size_t i = 0; i < input_size; ++i, ++it) {
+      hash_vals[i] = hash( (*it).first );;
+    }
+
+    // now try to insert.  hashing done already.
+    insert_batch_with_hint(begin, hash_vals, input_size);
+
+    //        insert_batch_with_hint(sh_input.data(), sh_hash_val.data(), sh_input.size());
+    // finally, update the hyperloglog estimator.  just swap.
+    free(hash_vals);
+
+#if defined(REPROBE_STAT)
+    print_reprobe_stats("INSERT ITER", input_size, (lsize - before));
+#endif
+  }
+
+	// insert with iterator.  does not estimate or resize.  Slower than if hash were computed ahead of time.
+  // not clear why.
 	template <typename Iter, typename std::enable_if<std::is_constructible<value_type,
 	typename std::iterator_traits<Iter>::value_type >::value, int >::type = 1>
-	void insert_no_resize(Iter begin, Iter end) {
+	void insert_no_resize2(Iter begin, Iter end) {
 #if defined(REPROBE_STAT)
 		std::cout << "INSERT ITERATOR" << std::endl;
 
@@ -2071,38 +2121,159 @@ public:
 		size_type before = lsize;
 #endif
 
-		if (begin == end) return;
+    bucket_id_type id, bid1, bid;
+    size_t i;
 
-		size_t input_size = std::distance(begin, end);
+    size_t input_size = std::distance(begin, end);
 
-		// compute hash value array, and estimate the number of unique entries in current.  then merge with current and get the after count.
-		//std::vector<size_t> hash_vals;
-		//hash_vals.reserve(input.size());
-		size_t* hash_vals = nullptr;
-		int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 64, sizeof(size_t) * input_size);
-		if (ret) {
-			free(hash_vals);
-			throw std::length_error("failed to allocate aligned memory");
-		}
+    const size_t LAHEAD2 = 2 * INSERT_LOOKAHEAD;
 
-		size_t hval;
-		Iter it = begin;
-		for (size_t i = 0; i < input_size; ++i, ++it) {
-			hval = hash( (*it).first );
-			this->hll.update_via_hashval(hval);
-			// using mm_stream here does not make a differnece.
-			//_mm_stream_si64(reinterpret_cast<long long int*>(hash_vals + i), *(reinterpret_cast<long long int*>(&hval)));
-			hash_vals[i] = hval;
-		}
+    // allocate space for temporary hash value storage.
+    size_t* bids = nullptr;
+    int ret = posix_memalign(reinterpret_cast<void **>(&bids), 64, LAHEAD2 * sizeof(size_t));
+    if (ret) {
+      free(bids);
+      throw std::length_error("failed to allocate aligned memory");
+    }
 
-		// now try to insert.  hashing done already.
-		insert_batch_with_hint(begin, hash_vals, input_size);
+    //prefetch only if target_buckets is larger than INSERT_LOOKAHEAD
+    size_t max_prefetch = std::min(input_size, LAHEAD2);
+    // prefetch part 1.
+    for (i = 0; i < max_prefetch; ++i) {
+      bid = hash((*(begin + i)).first) & mask;
+      bids[i] = bid;
 
-		// finally, update the hyperloglog estimator.  just swap.
-		free(hash_vals);
+      // prefetch the info_container entry for ii.
+      KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + bid), _MM_HINT_T0);
+      // prefetch container as well - would be NEAR but may not be exact.
+      KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
+    }
+
+
+    // iterate based on size between rebids
+    size_t max2 = (input_size > LAHEAD2) ? input_size - LAHEAD2 : 0;
+    size_t max1 = (input_size > INSERT_LOOKAHEAD) ? input_size - INSERT_LOOKAHEAD : 0;
+    i = 0; //, i1 = INSERT_LOOKAHEAD, i2 = 2*INSERT_LOOKAHEAD;
+
+    size_t lmax;
+    size_t insert_bid;
+
+    while (i < max2) {
 
 #if defined(REPROBE_STAT)
-		std::cout << " estimate total input cardinality as " << (this->hll.estimate()) << " actual " << lsize << std::endl;
+      std::cout << "hint: checking if rehash needed.  i = " << i << std::endl;
+#endif
+
+      // first check if we need to resize.  within 1% of
+      if (static_cast<size_t>(static_cast<double>(lsize) * 1.01) >= max_load) {
+        rehash(buckets << 1);
+
+#if defined(REPROBE_STAT)
+        std::cout << "rehashed.  size = " << buckets << std::endl;
+        if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type))  > 0) {
+          std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+        } else {
+          std::cout << "STATUS: container alignment on value boundary" << std::endl;
+        }
+#endif
+
+      }
+
+      lmax = std::min(max_load - lsize + i, max2);
+
+
+      for (; i < lmax; ++i) {
+
+
+        // first get the bucket id
+        bid = bids[i % LAHEAD2];
+        insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
+        while (insert_bid == insert_failed) {
+          rehash(buckets << 1);  // resize.
+          insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
+        }
+        if (missing(insert_bid))
+          ++lsize;
+
+        //      std::cout << "insert vec lsize " << lsize << std::endl;
+        // prefetch info_container.
+        bid = hash((*(begin + i + LAHEAD2)).first) & mask;
+        KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + bid), _MM_HINT_T0);
+        bids[i % LAHEAD2] = bid;
+
+
+        // prefetch container
+        bid = bids[(i + INSERT_LOOKAHEAD) % LAHEAD2];
+//        if (is_normal(info_container[bid])) {
+          bid1 = bid + 1;
+          bid += get_offset(info_container[bid]);
+          bid1 += get_offset(info_container[bid1]);
+
+          KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
+
+          // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH, bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
+          if (bid1 > (bid + value_per_cacheline))
+            KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+//        }
+      }
+    }
+
+    if ((lsize + LAHEAD2) >= max_load) rehash(buckets << 1);  // TODO: SHOULD PREFETCH AGAIN
+
+
+    // second to last INSERT_LOOKAHEAD
+    for (; i < max1; ++i) {
+
+
+      // === same code as in insert(1)..
+
+      bid = bids[(i + INSERT_LOOKAHEAD) % LAHEAD2];
+
+
+      // prefetch container
+//      if (is_normal(info_container[bid])) {
+        bid1 = bid + 1;
+        bid += get_offset(info_container[bid]);
+        bid1 += get_offset(info_container[bid1]);
+
+        KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
+
+        // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH, bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
+        if (bid1 > (bid + value_per_cacheline))
+          KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+//      }
+
+      bid = bids[i % LAHEAD2];
+      insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
+      while (insert_bid == insert_failed) {
+        rehash(buckets << 1);  // resize.
+        insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
+      }
+      if (missing(insert_bid))
+        ++lsize;
+
+      //      std::cout << "insert vec lsize " << lsize << std::endl;
+    }
+
+
+    // last INSERT_LOOKAHEAD
+    for (; i < input_size; ++i) {
+
+      // === same code as in insert(1)..
+      bid = bids[i % LAHEAD2];
+      insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
+      while (insert_bid == insert_failed) {
+        rehash(buckets << 1);  // resize.
+        insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
+      }
+      if (missing(insert_bid))
+        ++lsize;
+
+      //      std::cout << "insert vec lsize " << lsize << std::endl;
+    }
+    free(bids);
+
+#if defined(REPROBE_STAT)
 		print_reprobe_stats("INSERT ITER", input_size, (lsize - before));
 #endif
 	}
@@ -3283,7 +3454,7 @@ public:
 //		//std::vector<size_t> hash_vals;
 //		//hash_vals.reserve(input.size());
 //		size_t* hash_vals = nullptr;
-//		int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 16, sizeof(size_t) * input.size());
+//		int ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 64, sizeof(size_t) * input.size());
 //		if (ret) {
 //			free(hash_vals);
 //			throw std::length_error("failed to allocate aligned memory");
