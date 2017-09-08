@@ -2762,36 +2762,36 @@ namespace khmxx
 								  ::mxx::comm const &_comm,
 								   size_t batch_size = 1) {
 
-      BL_BENCH_INIT(idist);
+//      BL_BENCH_INIT(idist);
 
       size_t input_size = ::std::distance(permuted, permuted_end);
 
       assert((send_counts.size() == _comm.size()) && "send_count size not same as _comm size.");
 
       // make sure tehre is something to do.
-      BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
+//      BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
       bool empty = input_size == 0;
       empty = mxx::all_of(empty);
-      BL_BENCH_END(idist, "empty", input_size);
+//      BL_BENCH_END(idist, "empty", input_size);
 
       if (empty) {
-        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+//        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
         return;
       }
 
       // if there is comm size is 1.
       if (_comm.size() == 1) {
-        BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
+//        BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
         compute(permuted, permuted_end);
-        BL_BENCH_END(idist, "compute_1", input_size);
+//        BL_BENCH_END(idist, "compute_1", input_size);
 
-        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+//        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
         return;
       }
 
 
       // get the recv counts.
-      BL_BENCH_COLLECTIVE_START(idist, "a2a_counts", _comm);
+//      BL_BENCH_COLLECTIVE_START(idist, "a2a_counts", _comm);
       ::std::vector<SIZE> recv_counts(send_counts.size(), 0);
       mxx::all2all(send_counts.data(), 1, recv_counts.data(), _comm);
 
@@ -2806,11 +2806,11 @@ namespace khmxx
 
         send_displs.emplace_back(send_displs.back() + send_counts[i]);
       }
-      BL_BENCH_END(idist, "a2a_counts", buffer_max);
+//      BL_BENCH_END(idist, "a2a_counts", buffer_max);
 
 
       // setup the temporary storage.  double buffered.
-      BL_BENCH_COLLECTIVE_START(idist, "a2av_alloc", _comm);
+//      BL_BENCH_COLLECTIVE_START(idist, "a2av_alloc", _comm);
       using V = typename ::std::iterator_traits<IT>::value_type;
 
       // allocate recv_compressed
@@ -2823,12 +2823,12 @@ namespace khmxx
       V* recving = buffers;
       V* computing = buffers + buffer_max;
 
-      BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
+//      BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
 
 
 
       // loop and process each processor's assignment.  use isend and irecv.
-      BL_BENCH_COLLECTIVE_START(idist, "a2av_isend", _comm);
+//      BL_BENCH_COLLECTIVE_START(idist, "a2av_isend", _comm);
 
       const int ialltoallv_tag = 1773;
 
@@ -2862,7 +2862,7 @@ namespace khmxx
       int completed;
       // kick start send.
       MPI_Testall(comm_size - 1, reqs.data(), &completed, MPI_STATUSES_IGNORE);
-      BL_BENCH_END(idist, "a2av_isend", comm_size);
+//      BL_BENCH_END(idist, "a2av_isend", comm_size);
 
 
 
@@ -2878,11 +2878,11 @@ namespace khmxx
 
 #if 1
       // current imple
-      BL_BENCH_START(idist);
+//      BL_BENCH_START(idist);
       // do remaining...
       for (step = 1; step < comm_size; ++step) {
         //====  first setup send and recv.
-          BL_BENCH_INIT(idist_loop);
+//          BL_BENCH_INIT(idist_loop);
 
         // target rank
         if ( is_pow2 )  {  // power of 2
@@ -2892,7 +2892,7 @@ namespace khmxx
         }
 
 //        BL_BENCH_LOOP_RESUME(idist, 0);
-        BL_BENCH_START(idist_loop);
+//        BL_BENCH_START(idist_loop);
 
         // send and recv next.  post recv first.
         MPI_Irecv(recving, recv_counts[curr_peer], dt.type(),
@@ -2907,12 +2907,12 @@ namespace khmxx
 //        std::cout << "recv from " << curr_peer << " to " << comm_rank << " is " << (completed ? "" : " not ") << " complete "<< std::endl;
 
         //        BL_BENCH_LOOP_PAUSE(idist, 0);
-        BL_BENCH_END(idist_loop, "irecv", curr_peer);
+//        BL_BENCH_END(idist_loop, "irecv", curr_peer);
 
 
 
 //        BL_BENCH_LOOP_RESUME(idist, 1);
-        BL_BENCH_START(idist_loop);
+//        BL_BENCH_START(idist_loop);
         // process previously received.
         compute(computing, computing + recv_counts[prev_peer]);
 
@@ -2921,21 +2921,21 @@ namespace khmxx
 
         // set up next iteration.
 //        BL_BENCH_LOOP_PAUSE(idist, 1);
-        BL_BENCH_END(idist_loop, "compute", recv_counts[prev_peer]);
+//        BL_BENCH_END(idist_loop, "compute", recv_counts[prev_peer]);
 
 
 //        BL_BENCH_LOOP_RESUME(idist, 2);
-        BL_BENCH_START(idist_loop);
+//        BL_BENCH_START(idist_loop);
         // now wait for irecv from this iteration to complete, in order to continue.
         MPI_Wait(&req, MPI_STATUS_IGNORE);
 //        BL_BENCH_LOOP_PAUSE(idist, 2);
-        BL_BENCH_END(idist_loop, "wait", prev_peer);
+//        BL_BENCH_END(idist_loop, "wait", prev_peer);
 
         prev_peer = curr_peer;
         // then swap pointer
         ::std::swap(recving, computing);
 
-        BL_BENCH_REPORT_NAMED(idist_loop, "khmxx:exch_permute_mod local");
+//        BL_BENCH_REPORT_NAMED(idist_loop, "khmxx:exch_permute_mod local");
 
       }
       // last process
@@ -2948,7 +2948,7 @@ namespace khmxx
 //      BL_BENCH_LOOP_END(idist, 0, "loop_irecv", total);
 //      BL_BENCH_LOOP_END(idist, 1, "loop_compute", total);
 //      BL_BENCH_LOOP_END(idist, 2, "loop_wait", total	);
-      BL_BENCH_END(idist, "irecv_compute", total);
+//      BL_BENCH_END(idist, "irecv_compute", total);
 #else
       // probe based impl  - allows progress when peer is out of order.
       // PERFORMANCE REGRESSION:  nearly 2x slower than above.  "wait" for early iterations, ranks 0-50 out of 64 were over 10x slower than compute (in 2.5s range)
@@ -2956,16 +2956,16 @@ namespace khmxx
       // therefore, we need to use iprobe...
 
 
-      BL_BENCH_START(idist);
+//      BL_BENCH_START(idist);
       // loop over probing.  use blocking probe as iprobe would add code complexity right now.
       //MPI_Status stat;
       for (step = 1; step < comm_size; ++step) {
         //====  first setup send and recv.
-        BL_BENCH_INIT(idist_loop);
+//        BL_BENCH_INIT(idist_loop);
 
 
         //        BL_BENCH_LOOP_RESUME(idist, 0);
-        BL_BENCH_START(idist_loop);
+//        BL_BENCH_START(idist_loop);
 
         // blocking probe, only to get the source rank for irecv
         size_t s = step;
@@ -2987,11 +2987,11 @@ namespace khmxx
                   curr_peer, ialltoallv_tag, _comm, &req );
 
         //        BL_BENCH_LOOP_PAUSE(idist, 0);
-        BL_BENCH_END(idist_loop, "irecv", curr_peer);
+//        BL_BENCH_END(idist_loop, "irecv", curr_peer);
 
 
 //        BL_BENCH_LOOP_RESUME(idist, 1);
-        BL_BENCH_START(idist_loop);
+//        BL_BENCH_START(idist_loop);
         // process previously received.
         compute(computing, computing + recv_counts[prev_peer]);
 
@@ -3000,22 +3000,22 @@ namespace khmxx
 
         // set up next iteration.
 //        BL_BENCH_LOOP_PAUSE(idist, 1);
-        BL_BENCH_END(idist_loop, "compute", recv_counts[prev_peer]);
+//        BL_BENCH_END(idist_loop, "compute", recv_counts[prev_peer]);
 
 
 //        BL_BENCH_LOOP_RESUME(idist, 2);
-        BL_BENCH_START(idist_loop);
+//        BL_BENCH_START(idist_loop);
         // now wait for irecv from this iteration to complete, in order to continue.
         MPI_Wait(&req, MPI_STATUS_IGNORE);
 //        BL_BENCH_LOOP_PAUSE(idist, 2);
-        BL_BENCH_END(idist_loop, "wait", prev_peer);
+//        BL_BENCH_END(idist_loop, "wait", prev_peer);
 
         prev_peer = curr_peer;
 
         // then swap pointer
         ::std::swap(recving, computing);
 
-        BL_BENCH_REPORT_NAMED(idist_loop, "khmxx:exch_permute_mod local");
+//        BL_BENCH_REPORT_NAMED(idist_loop, "khmxx:exch_permute_mod local");
 
       }
       // last process
@@ -3028,18 +3028,18 @@ namespace khmxx
 //      BL_BENCH_LOOP_END(idist, 0, "loop_irecv", total);
 //      BL_BENCH_LOOP_END(idist, 1, "loop_compute", total);
 //      BL_BENCH_LOOP_END(idist, 2, "loop_wait", total  );
-      BL_BENCH_END(idist, "irecv_compute", total);
+//      BL_BENCH_END(idist, "irecv_compute", total);
 
 #endif
 
-      BL_BENCH_START(idist);
+//      BL_BENCH_START(idist);
       MPI_Waitall(comm_size - 1, reqs.data(), MPI_STATUSES_IGNORE);
 
       free(buffers);
-      BL_BENCH_END(idist, "waitall_cleanup", comm_size - 1);
+//      BL_BENCH_END(idist, "waitall_cleanup", comm_size - 1);
 
 
-      BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+//      BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
 
     }
 
