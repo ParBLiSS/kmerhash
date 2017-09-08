@@ -52,6 +52,7 @@
 #include <iterator>  // advance, distance
 #include <sstream>  // stringstream for filea
 #include <cstdint>  // for uint8, etc.
+#include <ostream>  // std::flush
 
 #include <type_traits>
 
@@ -644,58 +645,148 @@ if (measure_mode == MEASURE_RESERVE)
 			throw std::length_error("failed to allocate aligned memory");
 		}
 
-		size_t est;
-		{
-			size_t hval;
-			hyperloglog64<key_type, hasher, 12> lhll;
-			for (size_t i = 0; i < input.size(); ++i) {
-				hval = this->key_to_rank.proc_trans_hash( input[i].first );
-				lhll.update_via_hashval(hval);
-				// using mm_stream here does not make a differnece.
-				//_mm_stream_si64(reinterpret_cast<long long int*>(hash_vals + i), *(reinterpret_cast<long long int*>(&hval)));
-				hash_vals[i] = hval;
-			}
-
-			// use the estimate to reserve
-			lhll.merge(this->c.get_hll());
-			size_t est = lhll.estimate();
-
-			this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + lhll.est_error_rate)));   // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
+		// compute hash val array
+		for (size_t i = 0; i < input.size(); ++i) {
+			hash_vals[i] = this->key_to_rank.proc_trans_hash( input[i].first );
 		}
+    BL_BENCH_END(insert, "hash", input.size());
 
-        BL_BENCH_END(insert, "estimate_and_alloc", est);
+
+
+
 
         // bucket
-        BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_BUCKET)
     __itt_resume();
 #endif
-		std::vector<size_t> send_counts;
-            size_t comm_size = this->comm.size();
+    size_t* permuted_hash = nullptr;
+    std::vector<size_t> send_counts;
+    size_t comm_size = this->comm.size();
+    size_t est = 0;
+
+//    if (this->empty()) {
+//      BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
+//      // empty. can compute avg estimate, and then during insert update the estimate.
+//      if (comm_size <= std::numeric_limits<uint8_t>::max()) {
+//        ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint8_t>(comm_size),
+//                                           send_counts, permuted);
+//      } else if (comm_size <= std::numeric_limits<uint16_t>::max()) {
+//        ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint16_t>(comm_size),
+//                                           send_counts, permuted);
+//      } else if (comm_size <= std::numeric_limits<uint32_t>::max()) {
+//        ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint32_t>(comm_size),
+//                                           send_counts, permuted);
+//      } else {
+//        ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint64_t>(comm_size),
+//                                           send_counts, permuted);
+//      }
+//
+//      BL_BENCH_END(insert, "permute", input.size());
+//
+//      BL_BENCH_COLLECTIVE_START(insert, "estimate", this->comm);
+//      auto lhll = this->c.get_hll().make_empty_copy();
+//
+//      est = lhll.estimate_average_per_rank_by_hashval(hash_vals, hash_vals + input.size(), send_counts, this->comm);
+//      BL_BENCH_END(insert, "estimate", est);
+//
+//      BL_BENCH_COLLECTIVE_START(insert, "alloc", this->comm);
+    //      free(hash_vals);
+//      this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + lhll.est_error_rate)));
+//      // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
+//      BL_BENCH_END(insert, "alloc", this->c.capacity());
+//
+//    } else {
+      // not empty, so need to permute hash too, and perform exact estimate.
+      BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
+
+        ret = posix_memalign(reinterpret_cast<void **>(&permuted_hash), 64, sizeof(size_t) * input.size());
+        if (ret) {
+          free(permuted_hash);
+          throw std::length_error("failed to allocate aligned memory");
+        }
+
+
             if (comm_size <= std::numeric_limits<uint8_t>::max()) {
               ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint8_t>(comm_size),
-                                                 send_counts, permuted);
+                                                 send_counts, permuted, permuted_hash);
             } else if (comm_size <= std::numeric_limits<uint16_t>::max()) {
               ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint16_t>(comm_size),
-                                                 send_counts, permuted);
+                                                 send_counts, permuted, permuted_hash);
             } else if (comm_size <= std::numeric_limits<uint32_t>::max()) {
               ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint32_t>(comm_size),
-                                                 send_counts, permuted);
+                                                 send_counts, permuted, permuted_hash);
             } else {
               ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint64_t>(comm_size),
-                                                 send_counts, permuted);
+                                                 send_counts, permuted, permuted_hash);
             }
+
+       free(hash_vals);
+       BL_BENCH_END(insert, "permute", input.size());
+
+       BL_BENCH_COLLECTIVE_START(insert, "estimate", this->comm);
+          // distributed update, merge with existing, since this is accurate.
+       this->c.get_hll().update_per_rank_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
+          // merge with existing
+       est = this->c.get_hll().estimate();
+       BL_BENCH_END(insert, "estimate", est);
+
+
+       BL_BENCH_COLLECTIVE_START(insert, "alloc", this->comm);
+       free(permuted_hash);
+
+        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->c.get_hll().est_error_rate)));
+        // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
+        BL_BENCH_END(insert, "alloc", this->c.capacity());
+
+//    }
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_BUCKET)
     __itt_pause();
 #endif
 
-	  	  BL_BENCH_END(insert, "permute", input.size());
 
-        // clean up
-        free(hash_vals);
-#else
+
+
+
+	      {
+
+//	        auto lhll = this->c.get_hll().make_empty_copy();
+	//        std::cout << " ignored msb " << static_cast<size_t>(lhll.get_ignored_msb());
+
+//          SOME EVAL CODE.  local estimate is over.  Experimental version overestimates too.
+	        // average is pretty good.  exact is needed when there is already data in table.
+//	        // compute average
+//	        BL_BENCH_COLLECTIVE_START(insert, "estimate_avg", this->comm);
+//	        est = lhll.estimate_average_per_rank_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
+//	//        std::cout << ", avg est = " << est << std::flush;
+//	        BL_BENCH_END(insert, "estimate_avg", est);
+//
+//	        // TODO: [X] hash_vals need to be permuted....
+//	        // compute exact
+//	        BL_BENCH_COLLECTIVE_START(insert, "estimate_per_rank", this->comm);
+//	        est = lhll.estimate_per_rank_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
+//	//        std::cout << ", per_rank est = " << est << std::flush;
+//	        BL_BENCH_END(insert, "estimate_per_rank", est);
+//
+//	        // TODO: [X] hash_vals need to be permuted....
+//	        // experimental
+//	        BL_BENCH_COLLECTIVE_START(insert, "estimate_experimental", this->comm);
+//	        est = lhll.estimate_per_rank_experimental_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
+//	//        std::cout << ", per_rank experimental est = " << est << std::flush;
+//	        BL_BENCH_END(insert, "estimate_experimental", est);
+//
+//	        // compute locally
+//	        BL_BENCH_COLLECTIVE_START(insert, "estimate_local", this->comm);
+//	        est = lhll.estimate_local_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
+//	//        std::cout << ", local est = " << est << std::flush;
+//	        BL_BENCH_END(insert, "estimate_local", est);
+
+	      }
+
+
+
+#else  // not overlap.
 
         // transform once.  bucketing and distribute will read it multiple times.
         BL_BENCH_COLLECTIVE_START(insert, "transform_bucket", this->comm);
@@ -709,7 +800,11 @@ if (measure_mode == MEASURE_BUCKET)
         __itt_pause();
 #endif
         BL_BENCH_END(insert, "transform_bucket", input.size());
-#endif
+
+
+#endif  // not overlapped.
+
+
         size_t before = this->c.size();
 
 #ifdef OVERLAPPED_COMM
@@ -722,7 +817,7 @@ if (measure_mode == MEASURE_BUCKET)
                                                     this->comm);
 
         BL_BENCH_END(insert, "a2a_insert", this->c.size());
-#else
+#else  // begin non-overlapping io.
 
 
   	BL_BENCH_COLLECTIVE_START(insert, "a2a_count", this->comm);
@@ -807,7 +902,7 @@ if (measure_mode == MEASURE_BUCKET)
 #endif
     	free(distributed);
         BL_BENCH_END(insert, "insert", this->c.size());
-#endif
+#endif  // not overlapping io.
 
         BL_BENCH_REPORT_MPI_NAMED(insert, "hashmap:insert_p", this->comm);
 
@@ -1580,7 +1675,7 @@ if (measure_mode == MEASURE_RESERVE)
 
 
 	  	// estimate and reserve
-        BL_BENCH_COLLECTIVE_START(insert, "estimate_and_alloc", this->comm);
+        BL_BENCH_COLLECTIVE_START(insert, "hash", this->comm);
 
 		// compute hash value array, and estimate the number of unique entries in current.  then merge with current and get the after count.
 		//std::vector<size_t> hash_vals;
@@ -1592,57 +1687,148 @@ if (measure_mode == MEASURE_RESERVE)
 			throw std::length_error("failed to allocate aligned memory");
 		}
 
-		size_t est = 0;
-		{
-			size_t hval;
-			hyperloglog64<key_type, hasher, 12> lhll;
-			for (size_t i = 0; i < input.size(); ++i) {
-				hval = this->key_to_rank.proc_trans_hash( input[i] );
-				lhll.update_via_hashval(hval);
-				// using mm_stream here does not make a differnece.
-				//_mm_stream_si64(reinterpret_cast<long long int*>(hash_vals + i), *(reinterpret_cast<long long int*>(&hval)));
-				hash_vals[i] = hval;
-			}
-
-			// use the estimate to reserve
-			lhll.merge(this->c.get_hll());
-			est = lhll.estimate();
-
-			this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + lhll.est_error_rate)));   // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
+		// compute hash val array
+		for (size_t i = 0; i < input.size(); ++i) {
+			hash_vals[i] = this->key_to_rank.proc_trans_hash( input[i] );
 		}
+    BL_BENCH_END(insert, "hash", input.size());
 
-        BL_BENCH_END(insert, "estimate_and_alloc", est);
+
+
+
 
         // bucket
-        BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_BUCKET)
     __itt_resume();
 #endif
-		std::vector<size_t> send_counts;
-            size_t comm_size = this->comm.size();
+    size_t* permuted_hash = nullptr;
+    std::vector<size_t> send_counts;
+    size_t comm_size = this->comm.size();
+    size_t est = 0;
+
+//    if (this->empty()) {
+//      BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
+//      // empty. can compute avg estimate, and then during insert update the estimate.
+//      if (comm_size <= std::numeric_limits<uint8_t>::max()) {
+//        ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint8_t>(comm_size),
+//                                           send_counts, permuted);
+//      } else if (comm_size <= std::numeric_limits<uint16_t>::max()) {
+//        ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint16_t>(comm_size),
+//                                           send_counts, permuted);
+//      } else if (comm_size <= std::numeric_limits<uint32_t>::max()) {
+//        ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint32_t>(comm_size),
+//                                           send_counts, permuted);
+//      } else {
+//        ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint64_t>(comm_size),
+//                                           send_counts, permuted);
+//      }
+//
+//      BL_BENCH_END(insert, "permute", input.size());
+//
+//      BL_BENCH_COLLECTIVE_START(insert, "estimate", this->comm);
+//      auto lhll = this->c.get_hll().make_empty_copy();
+//
+//      est = lhll.estimate_average_per_rank_by_hashval(hash_vals, hash_vals + input.size(), send_counts, this->comm);
+//      BL_BENCH_END(insert, "estimate", est);
+
+//
+//      BL_BENCH_COLLECTIVE_START(insert, "alloc", this->comm);
+//      free(hash_vals);
+//      this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + lhll.est_error_rate)));
+//      // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
+//      BL_BENCH_END(insert, "alloc", this->c.capacity());
+//
+//    } else {
+      // not empty, so need to permute hash too, and perform exact estimate.
+      BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
+
+        ret = posix_memalign(reinterpret_cast<void **>(&permuted_hash), 64, sizeof(size_t) * input.size());
+        if (ret) {
+          free(permuted_hash);
+          throw std::length_error("failed to allocate aligned memory");
+        }
+
+
             if (comm_size <= std::numeric_limits<uint8_t>::max()) {
               ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint8_t>(comm_size),
-                                                 send_counts, permuted);
+                                                 send_counts, permuted, permuted_hash);
             } else if (comm_size <= std::numeric_limits<uint16_t>::max()) {
               ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint16_t>(comm_size),
-                                                 send_counts, permuted);
+                                                 send_counts, permuted, permuted_hash);
             } else if (comm_size <= std::numeric_limits<uint32_t>::max()) {
               ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint32_t>(comm_size),
-                                                 send_counts, permuted);
+                                                 send_counts, permuted, permuted_hash);
             } else {
               ::khmxx::local::assign_and_permute(input.begin(), input.end(), hash_vals, static_cast<uint64_t>(comm_size),
-                                                 send_counts, permuted);
+                                                 send_counts, permuted, permuted_hash);
             }
+
+       free(hash_vals);
+       BL_BENCH_END(insert, "permute", input.size());
+
+       BL_BENCH_COLLECTIVE_START(insert, "estimate", this->comm);
+          // distributed update, merge with existing, since this is accurate.
+       this->c.get_hll().update_per_rank_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
+          // merge with existing
+       est = this->c.get_hll().estimate();
+       BL_BENCH_END(insert, "estimate", est);
+
+
+       BL_BENCH_COLLECTIVE_START(insert, "alloc", this->comm);
+       free(permuted_hash);
+
+        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->c.get_hll().est_error_rate)));
+        // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
+        BL_BENCH_END(insert, "alloc", this->c.capacity());
+
+//    }
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_BUCKET)
     __itt_pause();
 #endif
 
-	  	  BL_BENCH_END(insert, "permute", input.size());
 
-        // clean up
-        free(hash_vals);
+
+
+
+        {
+
+//          auto lhll = this->c.get_hll().make_empty_copy();
+  //        std::cout << " ignored msb " << static_cast<size_t>(lhll.get_ignored_msb());
+
+//          SOME EVAL CODE.  local estimate is over.  Experimental version overestimates too.
+          // average is pretty good.  exact is needed when there is already data in table.
+//          // compute average
+//          BL_BENCH_COLLECTIVE_START(insert, "estimate_avg", this->comm);
+//          est = lhll.estimate_average_per_rank_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
+//  //        std::cout << ", avg est = " << est << std::flush;
+//          BL_BENCH_END(insert, "estimate_avg", est);
+//
+//          // TODO: [X] hash_vals need to be permuted....
+//          // compute exact
+//          BL_BENCH_COLLECTIVE_START(insert, "estimate_per_rank", this->comm);
+//          est = lhll.estimate_per_rank_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
+//  //        std::cout << ", per_rank est = " << est << std::flush;
+//          BL_BENCH_END(insert, "estimate_per_rank", est);
+//
+//          // TODO: [X] hash_vals need to be permuted....
+//          // experimental
+//          BL_BENCH_COLLECTIVE_START(insert, "estimate_experimental", this->comm);
+//          est = lhll.estimate_per_rank_experimental_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
+//  //        std::cout << ", per_rank experimental est = " << est << std::flush;
+//          BL_BENCH_END(insert, "estimate_experimental", est);
+//
+//          // compute locally
+//          BL_BENCH_COLLECTIVE_START(insert, "estimate_local", this->comm);
+//          est = lhll.estimate_local_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
+//  //        std::cout << ", local est = " << est << std::flush;
+//          BL_BENCH_END(insert, "estimate_local", est);
+
+        }
+
+
+
 #else
 
 
