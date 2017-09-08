@@ -323,6 +323,7 @@ namespace khmxx
 
 
     // writes into separate array of results..  similar to bucketing_impl
+    // TODO: [X] remove the use of i2o.  in this case, there is no need.  question is whether to compute modulus 2x or use a L1 cacheable array.  choosing compute.
     template <typename IT, typename ASSIGN_TYPE, typename OT,
     typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
                                              ::std::random_access_iterator_tag >::value, int>::type = 1  >
@@ -363,24 +364,14 @@ namespace khmxx
 
         // 2 pass algo.
 
-        // first get the mapping array.
-        ASSIGN_TYPE * i2o = nullptr;
-        int ret = posix_memalign(reinterpret_cast<void **>(&i2o), 64, input_size * sizeof(ASSIGN_TYPE));
-        if (ret) {
-          free(i2o);
-          throw std::length_error("failed to allocate aligned memory");
-        }
-
         // [1st pass]: compute bucket counts and input2bucket assignment.
         // store input2bucket assignment in i2o temporarily.
         ASSIGN_TYPE p;
-        ASSIGN_TYPE* i2o_it = i2o;
-        for (auto it = _begin; it != _end; ++it, ++i2o_it, ++hash_begin) {
-            p = (*hash_begin) % num_buckets;
+        size_t* hit = hash_begin;
+        for (auto it = _begin; it != _end; ++it, ++hit) {
+            p = (*hit) % num_buckets;
 
             assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
-
-            *i2o_it = p;
 
             // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
             ++bucket_sizes[p];
@@ -418,27 +409,27 @@ namespace khmxx
         // next prefetch results
         std::vector<size_t> offsets(prefetch_dist, static_cast<size_t>(0));
 
-        i2o_it = i2o;
-        ASSIGN_TYPE* i2o_eit = i2o_it;
-        std::advance(i2o_eit, ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
+        hit = hash_begin;
+        size_t* heit = hit;
+        std::advance(heit, ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
         size_t i = 0;
-        for (; i2o_it != i2o_eit; ++i2o_it, ++i) {
-        	offsets[i] = bucket_offsets[*i2o_it]++;
+        for (; hit != heit; ++hit, ++i) {
+        	offsets[i] = bucket_offsets[(*hit) % num_buckets]++;
         	KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
         }
 
 
         // now start doing the work from prefetch_dist to end.
-
         IT it = _begin;
         i = 0;
-        i2o_eit = i2o + input_size;
-        for (; i2o_it != i2o_eit; ++it, ++i2o_it) {
+        heit = hash_begin + input_size;
+        for (; hit != heit; ++it, ++hit) {
         	*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
               // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
 
-        	offsets[i] = bucket_offsets[*i2o_it]++;
+        	offsets[i] = bucket_offsets[(*hit) % num_buckets]++;
         	KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
+
         	i = (i+1) % prefetch_dist;
         }
 
@@ -453,11 +444,11 @@ namespace khmxx
 //        //  IS NOT FASTER THAN PREFETCH...
 //
 //          // now start doing the work from start to end - 2 * prefetch_dist
-//          i2o_it = i2o;
+//          hit = hash_begin;
 //          size_t pos;
 //          // and finally, finish the last part.
-//          for (IT it = _begin; it != _end; ++it, ++i2o_it) {
-//            pos = bucket_offsets[*i2o_it]++;
+//          for (IT it = _begin; it != _end; ++it, ++hit) {
+//            pos = bucket_offsets[(*hit) % num_buckets]++;
 //
 //#if defined(ENABLE_PREFETCH)
 //            switch (sizeof(typename ::std::iterator_traits<IT>::value_type)) {
@@ -487,12 +478,133 @@ namespace khmxx
 //          }
 
 
+      }
 
-        free(i2o);
+    }
+
+
+    // writes into separate array of results..  similar to bucketing_impl
+    // TODO: [X] permute hash values too.
+    template <typename IT, typename ASSIGN_TYPE, typename OT,
+    typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
+                                             ::std::random_access_iterator_tag >::value, int>::type = 1  >
+    void
+    assign_and_permute(IT _begin, IT _end, size_t* hash_begin,
+                           ASSIGN_TYPE const num_buckets,
+                           std::vector<size_t> & bucket_sizes,
+                           OT results, size_t* permuted_hash,
+                           uint8_t prefetch_dist = 8) {
+
+      static_assert(::std::is_integral<ASSIGN_TYPE>::value, "ASSIGN_TYPE should be integral, preferably unsigned");
+
+      bucket_sizes.clear();
+
+      std::vector<size_t> bucket_offsets;
+
+      if (_begin == _end) return;  // no data in question.
+
+      // no bucket.
+      if (num_buckets == 0) throw std::invalid_argument("ERROR: number of buckets is 0");
+
+      // initialize number of elements per bucket
+      bucket_sizes.resize(num_buckets, 0);
+      bucket_offsets.resize(num_buckets, 0);
+
+      size_t input_size = std::distance(_begin, _end);
+
+      // single bucket.
+      if (num_buckets == 1) {
+        // set output buckets sizes
+        bucket_sizes[0] = input_size;
+
+        // set output values
+        std::copy(_begin, _end, results);
+        std::copy(hash_begin, hash_begin + input_size, permuted_hash);
+
+        return;
+      } else {
+
+        // 2 pass algo.
+
+        // [1st pass]: compute bucket counts and input2bucket assignment.
+        // store input2bucket assignment in i2o temporarily.
+        ASSIGN_TYPE p;
+        size_t* hit = hash_begin;
+        for (auto it = _begin; it != _end; ++it, ++hit) {
+            p = (*hit) % num_buckets;
+
+            assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
+
+            // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
+            ++bucket_sizes[p];
+        }
+
+        // since we decrement the offsets, we are filling from back.  to maintain stable, input is iterated from back.
+
+        // compute exclusive offsets
+        size_t sum = 0;
+        bucket_offsets[0] = 0;
+        for (size_t i = 1; i < num_buckets; ++i) {
+          sum += bucket_sizes[i-1];
+          bucket_offsets[i] = sum;
+        }
+
+
+
+        // [2nd pass]: saving elements into correct position, and save the final position.
+        // not prefetching the bucket offsets - should be small enough to fit in cache.
+
+        // ===========================
+        // direct prefetch does not do well because i2o has bucket assignments and not offsets.
+        // therefore bucket offset is not pointing to the right location yet.
+        // instead, use stream write?
+
+
+        // next prefetch results
+        std::vector<size_t> offsets(prefetch_dist, static_cast<size_t>(0));
+
+        hit = hash_begin;
+        size_t* heit = hit;
+        std::advance(heit, ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
+        size_t i = 0;
+        for (; hit != heit; ++hit, ++i) {
+          offsets[i] = bucket_offsets[(*hit) % num_buckets]++;
+          KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
+          KHMXX_PREFETCH(permuted_hash + offsets[i], _MM_HINT_T0);
+        }
+
+
+        // now start doing the work from prefetch_dist to end.
+        IT it = _begin;
+        size_t *hit2 = hash_begin;
+        i = 0;
+        heit = hash_begin + input_size;
+        for (; hit != heit; ++it, ++hit, ++hit2) {
+          *(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+          *(permuted_hash + offsets[i]) = *hit2;
+
+          offsets[i] = bucket_offsets[(*hit) % num_buckets]++;
+          KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
+          KHMXX_PREFETCH(permuted_hash + offsets[i], _MM_HINT_T0);
+
+          i = (i+1) % prefetch_dist;
+        }
+
+        // and finally, finish the last part.
+        for (; it != _end; ++it, ++hit2) {
+          *(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+          *(permuted_hash + offsets[i]) = *hit2;
+
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+          i = (i+1) % prefetch_dist;
+        }
 
       }
 
     }
+
+
 
 
 
@@ -2647,7 +2759,8 @@ namespace khmxx
       void ialltoallv_and_modify(IT permuted, IT permuted_end,
     		  	  	  	  	  	  ::std::vector<SIZE> const & send_counts,
 								  OP compute,
-								  ::mxx::comm const &_comm) {
+								  ::mxx::comm const &_comm,
+								   size_t batch_size = 1) {
 
       BL_BENCH_INIT(idist);
 
@@ -2739,13 +2852,16 @@ namespace khmxx
         if ( is_pow2 )  {  // power of 2
           curr_peer = comm_rank ^ step;
         } else {
-          curr_peer = (comm_rank + 1) % comm_size;
+          curr_peer = (comm_rank + step) % comm_size;
         }
 
         // issend all, avoids buffering.
         MPI_Isend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], dt.type(),
         			curr_peer, ialltoallv_tag, _comm, &reqs[step - 1] );
       }
+      int completed;
+      // kick start send.
+      MPI_Testall(comm_size - 1, reqs.data(), &completed, MPI_STATUSES_IGNORE);
       BL_BENCH_END(idist, "a2av_isend", comm_size);
 
 
@@ -2755,12 +2871,14 @@ namespace khmxx
 //      BL_BENCH_LOOP_START(idist, 0);
 //      BL_BENCH_LOOP_START(idist, 1);
 //      BL_BENCH_LOOP_START(idist, 2);
-      BL_BENCH_START(idist);
 
       size_t prev_peer = comm_rank;
       MPI_Request req;
       size_t total = 0;
-      int completed;
+
+#if 1
+      // current imple
+      BL_BENCH_START(idist);
       // do remaining...
       for (step = 1; step < comm_size; ++step) {
         //====  first setup send and recv.
@@ -2775,19 +2893,23 @@ namespace khmxx
 
 //        BL_BENCH_LOOP_RESUME(idist, 0);
         BL_BENCH_START(idist_loop);
+
         // send and recv next.  post recv first.
         MPI_Irecv(recving, recv_counts[curr_peer], dt.type(),
                   curr_peer, ialltoallv_tag, _comm, &req );
 
-        // try using test to kick start the send?
-        MPI_Test(&reqs[step - 1], &completed, MPI_STATUS_IGNORE);
-        std::cout << "send from " << comm_rank << " to " << curr_peer << " is " << (completed ? "" : " not ") << " complete "<< std::endl;
-        // try using iprobe and test to check irecv.
-        MPI_Iprobe(curr_peer, ialltoallv_tag, _comm, &completed, MPI_STATUS_IGNORE);
-        std::cout << "recv from " << curr_peer << " to " << comm_rank << " is " << (completed ? "" : " not ") << " complete "<< std::endl;
+        // doing a testall earlier.  iprobe should do the same thing as irecv.  so these have no point...
+//        // try using test to kick start the send?
+//        MPI_Test(&reqs[step - 1], &completed, MPI_STATUS_IGNORE);
+//        std::cout << "send from " << comm_rank << " to " << curr_peer << " is " << (completed ? "" : " not ") << " complete "<< std::endl;
+//        // try using iprobe and test to check irecv.
+//        MPI_Iprobe(curr_peer, ialltoallv_tag, _comm, &completed, MPI_STATUS_IGNORE);
+//        std::cout << "recv from " << curr_peer << " to " << comm_rank << " is " << (completed ? "" : " not ") << " complete "<< std::endl;
 
-//        BL_BENCH_LOOP_PAUSE(idist, 0);
+        //        BL_BENCH_LOOP_PAUSE(idist, 0);
         BL_BENCH_END(idist_loop, "irecv", curr_peer);
+
+
 
 //        BL_BENCH_LOOP_RESUME(idist, 1);
         BL_BENCH_START(idist_loop);
@@ -2796,9 +2918,6 @@ namespace khmxx
 
         // prep for next iteration
         total += recv_counts[prev_peer];
-
-        // then swap pointer
-        ::std::swap(recving, computing);
 
         // set up next iteration.
 //        BL_BENCH_LOOP_PAUSE(idist, 1);
@@ -2813,6 +2932,8 @@ namespace khmxx
         BL_BENCH_END(idist_loop, "wait", prev_peer);
 
         prev_peer = curr_peer;
+        // then swap pointer
+        ::std::swap(recving, computing);
 
         BL_BENCH_REPORT_NAMED(idist_loop, "khmxx:exch_permute_mod local");
 
@@ -2828,7 +2949,88 @@ namespace khmxx
 //      BL_BENCH_LOOP_END(idist, 1, "loop_compute", total);
 //      BL_BENCH_LOOP_END(idist, 2, "loop_wait", total	);
       BL_BENCH_END(idist, "irecv_compute", total);
+#else
+      // probe based impl  - allows progress when peer is out of order.
+      // PERFORMANCE REGRESSION:  nearly 2x slower than above.  "wait" for early iterations, ranks 0-50 out of 64 were over 10x slower than compute (in 2.5s range)
+      // note that probe checkes for messages from source ranks in increasing order, from 0 to ...
+      // therefore, we need to use iprobe...
 
+
+      BL_BENCH_START(idist);
+      // loop over probing.  use blocking probe as iprobe would add code complexity right now.
+      //MPI_Status stat;
+      for (step = 1; step < comm_size; ++step) {
+        //====  first setup send and recv.
+        BL_BENCH_INIT(idist_loop);
+
+
+        //        BL_BENCH_LOOP_RESUME(idist, 0);
+        BL_BENCH_START(idist_loop);
+
+        // blocking probe, only to get the source rank for irecv
+        size_t s = step;
+        do {
+          if ( is_pow2 )  {  // power of 2
+            curr_peer = comm_rank ^ s;
+          } else {
+            curr_peer = (comm_rank + s) % comm_size;
+          }
+
+          MPI_Iprobe(curr_peer, ialltoallv_tag, _comm, &completed, MPI_STATUS_IGNORE);
+          ++s;
+        } while (!completed);
+
+        // get the peer.
+        //curr_peer = stat.MPI_SOURCE;
+
+        MPI_Irecv(recving, recv_counts[curr_peer], dt.type(),
+                  curr_peer, ialltoallv_tag, _comm, &req );
+
+        //        BL_BENCH_LOOP_PAUSE(idist, 0);
+        BL_BENCH_END(idist_loop, "irecv", curr_peer);
+
+
+//        BL_BENCH_LOOP_RESUME(idist, 1);
+        BL_BENCH_START(idist_loop);
+        // process previously received.
+        compute(computing, computing + recv_counts[prev_peer]);
+
+        // prep for next iteration
+        total += recv_counts[prev_peer];
+
+        // set up next iteration.
+//        BL_BENCH_LOOP_PAUSE(idist, 1);
+        BL_BENCH_END(idist_loop, "compute", recv_counts[prev_peer]);
+
+
+//        BL_BENCH_LOOP_RESUME(idist, 2);
+        BL_BENCH_START(idist_loop);
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&req, MPI_STATUS_IGNORE);
+//        BL_BENCH_LOOP_PAUSE(idist, 2);
+        BL_BENCH_END(idist_loop, "wait", prev_peer);
+
+        prev_peer = curr_peer;
+
+        // then swap pointer
+        ::std::swap(recving, computing);
+
+        BL_BENCH_REPORT_NAMED(idist_loop, "khmxx:exch_permute_mod local");
+
+      }
+      // last process
+//      BL_BENCH_LOOP_RESUME(idist, 1);
+      compute(computing, computing + recv_counts[prev_peer]);
+      total += recv_counts[prev_peer];
+//      BL_BENCH_LOOP_PAUSE(idist, 1);
+
+      // wait for all send to finish.
+//      BL_BENCH_LOOP_END(idist, 0, "loop_irecv", total);
+//      BL_BENCH_LOOP_END(idist, 1, "loop_compute", total);
+//      BL_BENCH_LOOP_END(idist, 2, "loop_wait", total  );
+      BL_BENCH_END(idist, "irecv_compute", total);
+
+#endif
 
       BL_BENCH_START(idist);
       MPI_Waitall(comm_size - 1, reqs.data(), MPI_STATUSES_IGNORE);
@@ -2968,7 +3170,7 @@ namespace khmxx
           if ( is_pow2 )  {  // power of 2
             curr_peer = comm_rank ^ step;
           } else {
-            curr_peer = (comm_rank + 1) % comm_size;
+            curr_peer = (comm_rank + step) % comm_size;
           }
 
           // issend all, avoids buffering.
@@ -3006,17 +3208,17 @@ namespace khmxx
         // process previously received.
         compute(computing, computing + recv_counts[prev_peer], storing);
 
-        // then swap pointer
-        ::std::swap(recving, computing);
-        ::std::swap(storing, sending);
+
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&q_req, MPI_STATUS_IGNORE);
 
         // set up next iteration.
         size_t prev_peer2 = prev_peer;
         prev_peer = curr_peer;
 
-        // now wait for irecv from this iteration to complete, in order to continue.
-        MPI_Wait(&q_req, MPI_STATUS_IGNORE);
-
+        // then swap pointer
+        ::std::swap(recving, computing);
+        ::std::swap(storing, sending);
 
 
         // do remaining...
@@ -3041,6 +3243,11 @@ namespace khmxx
           // process previously received.
           compute(computing, computing + recv_counts[prev_peer], storing);
 
+
+          // now wait for irecv from this iteration to complete, in order to continue.
+          MPI_Wait(&q_req, MPI_STATUS_IGNORE);
+          MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+
           // then swap pointer
           ::std::swap(recving, computing);
           ::std::swap(storing, sending);
@@ -3048,10 +3255,6 @@ namespace khmxx
           // set up next iteration.
           prev_peer2 = prev_peer;
           prev_peer = curr_peer;
-
-          // now wait for irecv from this iteration to complete, in order to continue.
-          MPI_Wait(&q_req, MPI_STATUS_IGNORE);
-          MPI_Wait(&r_req, MPI_STATUS_IGNORE);
         }
 
         // ===== second to last
@@ -3063,19 +3266,20 @@ namespace khmxx
         // process previously received.
         compute(computing, computing + recv_counts[prev_peer], storing);
 
+
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+
         // then swap pointer
         ::std::swap(storing, sending);
 
         // set up next iteration.
         prev_peer2 = prev_peer;
 
-        // now wait for irecv from this iteration to complete, in order to continue.
-        MPI_Wait(&r_req, MPI_STATUS_IGNORE);
-
 
         // ===== last
-	    // send results.  use rsend to avoid buffering
-		MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
+	      // send results.  use rsend to avoid buffering
+		    MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
 					 prev_peer2, resp_tag, _comm, &r_req );
         total += recv_counts[prev_peer2];
 
@@ -3229,7 +3433,7 @@ namespace khmxx
           if ( is_pow2 )  {  // power of 2
             curr_peer = comm_rank ^ step;
           } else {
-            curr_peer = (comm_rank + 1) % comm_size;
+            curr_peer = (comm_rank + step) % comm_size;
           }
 
           // issend all, avoids buffering.
@@ -3267,6 +3471,10 @@ namespace khmxx
         // process previously received.
         compute(computing, computing + recv_counts[prev_peer], storing);
 
+
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&q_req, MPI_STATUS_IGNORE);
+
         // then swap pointer
         ::std::swap(recving, computing);
         ::std::swap(storing, sending);
@@ -3274,10 +3482,6 @@ namespace khmxx
         // set up next iteration.
         size_t prev_peer2 = prev_peer;
         prev_peer = curr_peer;
-
-        // now wait for irecv from this iteration to complete, in order to continue.
-        MPI_Wait(&q_req, MPI_STATUS_IGNORE);
-
 
 
         // do remaining...
@@ -3302,6 +3506,10 @@ namespace khmxx
           // process previously received.
           compute(computing, computing + recv_counts[prev_peer], storing);
 
+          // now wait for irecv from this iteration to complete, in order to continue.
+          MPI_Wait(&q_req, MPI_STATUS_IGNORE);
+          MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+
           // then swap pointer
           ::std::swap(recving, computing);
           ::std::swap(storing, sending);
@@ -3309,10 +3517,6 @@ namespace khmxx
           // set up next iteration.
           prev_peer2 = prev_peer;
           prev_peer = curr_peer;
-
-          // now wait for irecv from this iteration to complete, in order to continue.
-          MPI_Wait(&q_req, MPI_STATUS_IGNORE);
-          MPI_Wait(&r_req, MPI_STATUS_IGNORE);
         }
 
         // ===== second to last
@@ -3324,15 +3528,15 @@ namespace khmxx
         // process previously received.
         compute(computing, computing + recv_counts[prev_peer], storing);
 
+        // now wait for irecv from this iteration to complete, in order to continue.
+        MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+
+
         // then swap pointer
         ::std::swap(storing, sending);
 
         // set up next iteration.
         prev_peer2 = prev_peer;
-
-        // now wait for irecv from this iteration to complete, in order to continue.
-        MPI_Wait(&r_req, MPI_STATUS_IGNORE);
-
 
         // ===== last
 	    // send results.  use rsend to avoid buffering
