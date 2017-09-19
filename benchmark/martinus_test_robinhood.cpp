@@ -9,7 +9,7 @@
 #include <RobinHoodInfobyteFastforward.h>
 #include "kmerhash/hashmap_robinhood.hpp"
 #include "kmerhash/hashmap_robinhood_prefetch.hpp"
-#include "kmerhash/hashmap_robinhood_offsets_prefetch.hpp"
+#include "kmerhash/experimental/hashmap_robinhood_offsets_prefetch.hpp"
 #include "kmerhash/robinhood_offset_hashmap.hpp"
 #include "kmerhash/hashmap_linearprobe.hpp"
 #include "kmerhash/hash.hpp"
@@ -1293,13 +1293,13 @@ std::vector<std::vector<Stats>> bench_sequential_insert(size_t upTo, size_t time
 		m.set_min_load_factor(min_load);
         bench_batch_insert(m, mb, "Tony RHOffPreNoOverflow BATCH", upTo, times, all_stats);
     }
-    {
-        ::fsc::hashmap_robinhood_offsets<K, V, H> m;
-		m.set_max_load_factor(max_load);
-		m.set_min_load_factor(min_load);
-        bench_batch_insert_integrated(m, mb, "Tony RHOffPreNoOverflow BATCH integrated", upTo, times, all_stats);
-    }
-
+//    {
+//        ::fsc::hashmap_robinhood_offsets<K, V, H> m;
+//		m.set_max_load_factor(max_load);
+//		m.set_min_load_factor(min_load);
+//        bench_batch_insert_integrated(m, mb, "Tony RHOffPreNoOverflow BATCH integrated", upTo, times, all_stats);
+//    }
+//
 
     {
         ::fsc::hashmap_linearprobe_doubling<K, V, H> m;
