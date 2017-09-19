@@ -80,6 +80,7 @@ static int measure_mode = MEASURE_DISABLED;
 #include "index/quality_score_iterator.hpp"
 #include "index/kmer_hash.hpp"   // workaround for distributed_map_base requiring farm hash.
 
+#include "kmerhash/hash.hpp"
 #include "kmerhash/distributed_robinhood_map.hpp"
 #include "kmerhash/distributed_batched_robinhood_map.hpp"
 
@@ -202,6 +203,9 @@ using CountType = uint32_t;
 #elif (pDistHash == MURMUR)
 	template <typename KM>
 	using DistHash = bliss::kmer::hash::murmur<KM, true>;
+#elif (pDistHash == MURMUR32)
+	template <typename KM>
+	using DistHash = ::fsc::hash::murmur3sse32<KM>;
 #else // if (pDistHash == FARM)
 	template <typename KM>
 	using DistHash = bliss::kmer::hash::farm<KM, true>;
