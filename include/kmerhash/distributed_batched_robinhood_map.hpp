@@ -431,6 +431,90 @@ if (measure_mode == MEASURE_RESERVE)
         return send_counts;
       }
 
+      /// performs transform and bucketing using key_to_rank.
+      /// transforms input array in place but permuted is stored in bucketed. and returns bucket counts
+      /// appropriate when the input does not need to be permuted (insert, find, erase, update), when no output to match up, or output embeds the keys.
+      template <typename IT, typename OT>
+      std::vector<size_t> transform_iter_and_bucket(IT _begin, IT _end, OT bucketed) {
+
+    	  assert((this->comm.size() > 1) && "this function is for comm size larger than 1 only.");
+
+
+        BL_BENCH_INIT(transform_bucket);
+
+
+        BL_BENCH_COLLECTIVE_START(transform_bucket, "alloc", this->comm);
+#ifdef VTUNE_ANALYSIS
+if (measure_mode == MEASURE_RESERVE)
+    __itt_resume();
+#endif
+		  size_t input_size = ::std::distance(_begin, _end);
+		  std::vector<size_t> send_counts(this->comm.size());
+
+#ifdef VTUNE_ANALYSIS
+if (measure_mode == MEASURE_RESERVE)
+    __itt_pause();
+#endif
+        BL_BENCH_END(transform_bucket, "alloc", input_size);
+
+
+        // Since the bucketed is stored sepratedly, we can transform the input inplace, 1R+1W.
+        //
+        // transform once.  bucketing and distribute will read it multiple times.
+        BL_BENCH_COLLECTIVE_START(transform_bucket, "transform_input", this->comm);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_resume();
+#endif
+
+    using trans_iter_type = ::bliss::iterator::transform_iterator<IT, typename Base::InputTransform>;
+    typename Base::InputTransform trans;
+    trans_iter_type trans_begin(_begin, trans);
+    trans_iter_type trans_end(_end, trans);
+
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_pause();
+#endif
+        BL_BENCH_END(transform_bucket, "transform_input", input_size);
+
+
+          BL_BENCH_COLLECTIVE_START(transform_bucket, "permute", this->comm);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_BUCKET)
+      __itt_resume();
+#endif
+              size_t comm_size = this->comm.size();
+              if (comm_size <= std::numeric_limits<uint8_t>::max()) {
+                ::khmxx::local::assign_and_permute(trans_begin, trans_end,
+                                                   this->key_to_rank, static_cast<uint8_t>(comm_size),
+                                                   send_counts, bucketed);
+              } else if (comm_size <= std::numeric_limits<uint16_t>::max()) {
+                ::khmxx::local::assign_and_permute(trans_begin, trans_end,
+                                                   this->key_to_rank, static_cast<uint16_t>(comm_size),
+                                                   send_counts, bucketed);
+              } else if (comm_size <= std::numeric_limits<uint32_t>::max()) {
+                ::khmxx::local::assign_and_permute(trans_begin, trans_end,
+                                                   this->key_to_rank, static_cast<uint32_t>(comm_size),
+                                                   send_counts, bucketed);
+              } else {
+                ::khmxx::local::assign_and_permute(trans_begin, trans_end,
+                                                   this->key_to_rank, static_cast<uint64_t>(comm_size),
+                                                   send_counts, bucketed);
+              }
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_BUCKET)
+      __itt_pause();
+#endif
+
+  	  	  BL_BENCH_END(transform_bucket, "permute", input_size);
+
+
+        BL_BENCH_REPORT_MPI_NAMED(transform_bucket, "hashmap:transform_bucket", this->comm);
+
+
+        return send_counts;
+      }
 
 
     public:
@@ -1838,7 +1922,7 @@ if (measure_mode == MEASURE_BUCKET)
 if (measure_mode == MEASURE_TRANSFORM)
     __itt_resume();
 #endif
-    std::vector<size_t> send_counts = this->transform_and_bucket(input.begin(), input.end(), permuted);
+    std::vector<size_t> send_counts = this->transform_iter_and_bucket(input.begin(), input.end(), permuted);
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_TRANSFORM)
     __itt_pause();
