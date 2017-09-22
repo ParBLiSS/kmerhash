@@ -1049,6 +1049,8 @@ protected:
 		size_type m = target_buckets - 1;
 		assert((target_buckets & m) == 0);   // assert this is a power of 2.
 
+		uint8_t log_buckets = std::log2(buckets);  // should always be power of 2
+
 		//    std::cout << "RESIZE UP " << target_buckets << std::endl;
 
 		size_t id, bid, p;
@@ -1065,6 +1067,7 @@ protected:
 		//  so that at block boundaries we have the right offsets.
 		std::vector<size_t> hashes(lsize);
 		size_t j = 0;
+
 		// compute and store all hashes, and at the same time compute end of last bucket in each block.
 		for (bid = 0; bid < buckets; ++bid) {
 			if (is_normal(info_container[bid])) {
@@ -1078,7 +1081,7 @@ protected:
 					id = hashes[j] & m;
 
 					// figure out which block it is in.
-					bl = id / buckets;
+					bl = id >> log_buckets;
 
 					// count.  at least the bucket id + 1, or last insert target position + 1.
 					offsets[bl + 1] = std::max(offsets[bl + 1], id) + 1;
@@ -1106,7 +1109,7 @@ protected:
 					id = hashes[j] & m;
 
 					// figure out which block it is in.
-					bl = id / buckets;
+					bl = id >> log_buckets;
 
 					// now copy
 					pp = std::max(offsets[bl], id);
@@ -2039,6 +2042,9 @@ public:
     size_t lmax;
     size_t insert_bid;
 
+    assert((INSERT_LOOKAHEAD & (INSERT_LOOKAHEAD - 1)) == 0 && "INSERT_LOOKAHEAD should be a power of 2");
+    size_t LAHEAD2_MASK = LAHEAD2 - 1;
+
     while (i < max2) {
 
 #if defined(REPROBE_STAT)
@@ -2067,7 +2073,7 @@ public:
 
 
         // first get the bucket id
-        bid = bids[i % LAHEAD2];
+        bid = bids[i & LAHEAD2_MASK];
         insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
         while (insert_bid == insert_failed) {
           rehash(buckets << 1);  // resize.
@@ -2080,11 +2086,11 @@ public:
         // prefetch info_container.
         bid = hash((*(begin + i + LAHEAD2)).first) & mask;
         KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + bid), _MM_HINT_T0);
-        bids[i % LAHEAD2] = bid;
+        bids[i & LAHEAD2_MASK] = bid;
 
 
         // prefetch container
-        bid = bids[(i + INSERT_LOOKAHEAD) % LAHEAD2];
+        bid = bids[(i + INSERT_LOOKAHEAD) & LAHEAD2_MASK];
 //        if (is_normal(info_container[bid])) {
           bid1 = bid + 1;
           bid += get_offset(info_container[bid]);
@@ -2108,7 +2114,7 @@ public:
 
       // === same code as in insert(1)..
 
-      bid = bids[(i + INSERT_LOOKAHEAD) % LAHEAD2];
+      bid = bids[(i + INSERT_LOOKAHEAD) & LAHEAD2_MASK];
 
 
       // prefetch container
@@ -2124,7 +2130,7 @@ public:
           KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 //      }
 
-      bid = bids[i % LAHEAD2];
+      bid = bids[i & LAHEAD2_MASK];
       insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
       while (insert_bid == insert_failed) {
         rehash(buckets << 1);  // resize.
@@ -2141,7 +2147,7 @@ public:
     for (; i < input_size; ++i) {
 
       // === same code as in insert(1)..
-      bid = bids[i % LAHEAD2];
+      bid = bids[i & LAHEAD2_MASK];
       insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
       while (insert_bid == insert_failed) {
         rehash(buckets << 1);  // resize.
@@ -2400,7 +2406,8 @@ public:
 
 		BL_BENCH_START(insert_sort);
 		// ========= now count, including duplicates
-		size_t new_buckets = next_power_of_2(static_cast<size_t>(::std::ceil(static_cast<double>(distinct_total_est) / max_load_factor)));
+		size_t new_buckets =
+				next_power_of_2(static_cast<size_t>(::std::ceil(static_cast<double>(distinct_total_est) / max_load_factor)));
 		size_t padded_buckets = new_buckets + std::numeric_limits<info_type>::max() + 1;
 
 		std::cout << "EST distinct " << distinct_total_est << " buckets " << new_buckets << " padded " << padded_buckets << std::endl;
@@ -2657,7 +2664,8 @@ public:
 //	__itt_resume();
 //#endif
 		// ========= now count, including duplicates
-		size_t new_buckets = next_power_of_2(static_cast<size_t>(::std::ceil(static_cast<double>(distinct_total_est) / max_load_factor)));
+		size_t new_buckets =
+				next_power_of_2(static_cast<size_t>(::std::ceil(static_cast<double>(distinct_total_est) / max_load_factor)));
 		size_t padded_buckets = new_buckets + std::numeric_limits<info_type>::max() + 1;
 
 		std::cout << "EST distinct " << distinct_total_est << " buckets " << new_buckets << " padded " << padded_buckets << std::endl;

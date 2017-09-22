@@ -108,6 +108,9 @@ static int measure_mode = MEASURE_DISABLED;
 
 #define STD 21
 #define MURMUR 22
+#define MURMUR32 24
+#define MURMUR32sse 25
+#define CRC32C 26
 #define FARM 23
 
 #define POS 31
@@ -205,7 +208,13 @@ using CountType = uint32_t;
 	using DistHash = bliss::kmer::hash::murmur<KM, true>;
 #elif (pDistHash == MURMUR32)
 	template <typename KM>
-	using DistHash = ::fsc::hash::murmur3sse32<KM>;
+	using DistHash = ::fsc::hash::murmur32<KM>;
+#elif (pDistHash == MURMUR32sse)
+  template <typename KM>
+  using DistHash = ::fsc::hash::murmur3sse32<KM>;
+#elif (pDistHash == CRC32C)
+  template <typename KM>
+  using DistHash = ::fsc::hash::crc32c<KM>;
 #else // if (pDistHash == FARM)
 	template <typename KM>
 	using DistHash = bliss::kmer::hash::farm<KM, true>;

@@ -324,17 +324,18 @@ namespace khmxx
 
     // writes into separate array of results..  similar to bucketing_impl
     // TODO: [X] remove the use of i2o.  in this case, there is no need.  question is whether to compute modulus 2x or use a L1 cacheable array.  choosing compute.
-    template <typename IT, typename ASSIGN_TYPE, typename OT,
+    template <uint8_t prefetch_dist = 8, typename IT, typename ASSIGN_TYPE2, typename ASSIGN_TYPE, typename OT,
     typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
                                              ::std::random_access_iterator_tag >::value, int>::type = 1  >
     void
-    assign_and_permute(IT _begin, IT _end, size_t* hash_begin,
+    hashed_permute(IT _begin, IT _end, ASSIGN_TYPE2* hash_begin,
                            ASSIGN_TYPE const num_buckets,
                            std::vector<size_t> & bucket_sizes,
-                           OT results,
-						   uint8_t prefetch_dist = 8) {
+                           OT results) {
 
       static_assert(::std::is_integral<ASSIGN_TYPE>::value, "ASSIGN_TYPE should be integral, preferably unsigned");
+      static_assert((prefetch_dist & (prefetch_dist - 1)) == 0,
+    		  "prefetch dist should be a power of 2");
 
       bucket_sizes.clear();
 
@@ -351,6 +352,11 @@ namespace khmxx
 
       size_t input_size = std::distance(_begin, _end);
 
+      // check if num_buckets is a power of 2.
+      bool pow2_buckets = (num_buckets & (num_buckets - 1)) == 0;
+      ASSIGN_TYPE bucket_mask = num_buckets - 1;
+
+
       // single bucket.
       if (num_buckets == 1) {
         // set output buckets sizes
@@ -364,17 +370,26 @@ namespace khmxx
 
         // 2 pass algo.
 
+
         // [1st pass]: compute bucket counts and input2bucket assignment.
         // store input2bucket assignment in i2o temporarily.
         ASSIGN_TYPE p;
-        size_t* hit = hash_begin;
-        for (auto it = _begin; it != _end; ++it, ++hit) {
-            p = (*hit) % num_buckets;
+        ASSIGN_TYPE2* hit = hash_begin;
+        if (pow2_buckets) {
+			for (auto it = _begin; it != _end; ++it, ++hit) {
+				p = (*hit) & bucket_mask;
 
-            assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
+				// no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
+				++bucket_sizes[p];
+			}
+        } else {
+            for (auto it = _begin; it != _end; ++it, ++hit) {
+                p = (*hit) % num_buckets;
 
-            // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
-            ++bucket_sizes[p];
+                // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
+                ++bucket_sizes[p];
+            }
+
         }
 
         // since we decrement the offsets, we are filling from back.  to maintain stable, input is iterated from back.
@@ -386,16 +401,6 @@ namespace khmxx
         	sum += bucket_sizes[i-1];
         	bucket_offsets[i] = sum;
         }
-
-
-////         [2nd pass]: saving elements into correct position, and save the final position.
-////		below is for use with inclusive offsets.
-//        i2o_it = i2o;
-//        std::advance(i2o_it, input_size);
-//        for (IT it = _end; it != _begin; ) {
-//          *(results + (--bucket_offsets[*(--i2o_it)])) = *(--it);   // offset decremented by 1 before use.
-//              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
-//        }
 
         // [2nd pass]: saving elements into correct position, and save the final position.
         // not prefetching the bucket offsets - should be small enough to fit in cache.
@@ -410,36 +415,70 @@ namespace khmxx
         std::vector<size_t> offsets(prefetch_dist, static_cast<size_t>(0));
 
         hit = hash_begin;
-        size_t* heit = hit;
+        ASSIGN_TYPE2* heit = hit;
         std::advance(heit, ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
         size_t i = 0;
-        for (; hit != heit; ++hit, ++i) {
-        	offsets[i] = bucket_offsets[(*hit) % num_buckets]++;
-        	KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
+        size_t bid;
+        if (pow2_buckets) {
+			for (; hit != heit; ++hit, ++i) {
+				bid = bucket_offsets[(*hit) & bucket_mask]++;
+				offsets[i] = bid;
+				KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
+			}
+
+
+			// now start doing the work from prefetch_dist to end.
+			IT it = _begin;
+			i = 0;
+			heit = hash_begin + input_size;
+			for (; hit != heit; ++it, ++hit) {
+				*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+				  // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+
+			  bid = bucket_offsets[(*hit) & bucket_mask]++;
+			  offsets[i] = bid;
+				KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
+
+				i = (i+1) & (prefetch_dist - 1);
+			}
+
+			// and finally, finish the last part.
+			for (; it != _end; ++it) {
+				*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+				  // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+				i = (i+1) & (prefetch_dist - 1);
+			}
+        } else {
+			for (; hit != heit; ++hit, ++i) {
+				bid = bucket_offsets[(*hit) % num_buckets]++;
+				offsets[i] = bid;
+				KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
+			}
+
+
+			// now start doing the work from prefetch_dist to end.
+			IT it = _begin;
+			i = 0;
+			heit = hash_begin + input_size;
+			for (; hit != heit; ++it, ++hit) {
+				*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+				  // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+
+			  bid = bucket_offsets[(*hit) % num_buckets]++;
+			  offsets[i] = bid;
+				KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
+
+				i = (i+1) & (prefetch_dist - 1);
+			}
+
+			// and finally, finish the last part.
+			for (; it != _end; ++it) {
+				*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+				  // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+				i = (i+1) & (prefetch_dist - 1);
+			}
+
         }
-
-
-        // now start doing the work from prefetch_dist to end.
-        IT it = _begin;
-        i = 0;
-        heit = hash_begin + input_size;
-        for (; hit != heit; ++it, ++hit) {
-        	*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
-              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
-
-        	offsets[i] = bucket_offsets[(*hit) % num_buckets]++;
-        	KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
-
-        	i = (i+1) % prefetch_dist;
-        }
-
-        // and finally, finish the last part.
-        for (; it != _end; ++it) {
-        	*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
-              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
-        	i = (i+1) % prefetch_dist;
-        }
-
 //          // STREAMING APPROACH.  PREFETCH ABOVE WOULD NOT WORK RIGHT FOR high collision.
 //        //  IS NOT FASTER THAN PREFETCH...
 //
@@ -485,17 +524,18 @@ namespace khmxx
 
     // writes into separate array of results..  similar to bucketing_impl
     // TODO: [X] permute hash values too.
-    template <typename IT, typename ASSIGN_TYPE, typename OT,
+    template <uint8_t prefetch_dist = 8, typename IT, typename ASSIGN_TYPE, typename OT,
     typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
                                              ::std::random_access_iterator_tag >::value, int>::type = 1  >
     void
-    assign_and_permute(IT _begin, IT _end, size_t* hash_begin,
+    hashed_permute(IT _begin, IT _end, size_t* hash_begin,
                            ASSIGN_TYPE const num_buckets,
                            std::vector<size_t> & bucket_sizes,
-                           OT results, size_t* permuted_hash,
-                           uint8_t prefetch_dist = 8) {
+                           OT results, size_t* permuted_hash) {
 
       static_assert(::std::is_integral<ASSIGN_TYPE>::value, "ASSIGN_TYPE should be integral, preferably unsigned");
+      static_assert((prefetch_dist & (prefetch_dist - 1)) == 0,
+          		  "prefetch dist should be a power of 2");
 
       bucket_sizes.clear();
 
@@ -511,6 +551,11 @@ namespace khmxx
       bucket_offsets.resize(num_buckets, 0);
 
       size_t input_size = std::distance(_begin, _end);
+
+      // check if num_buckets is a power of 2.
+      bool pow2_buckets = (num_buckets & (num_buckets - 1)) == 0;
+      ASSIGN_TYPE bucket_mask = num_buckets - 1;
+
 
       // single bucket.
       if (num_buckets == 1) {
@@ -530,13 +575,21 @@ namespace khmxx
         // store input2bucket assignment in i2o temporarily.
         ASSIGN_TYPE p;
         size_t* hit = hash_begin;
-        for (auto it = _begin; it != _end; ++it, ++hit) {
-            p = (*hit) % num_buckets;
+        if (pow2_buckets) {
+			for (auto it = _begin; it != _end; ++it, ++hit) {
+				p = (*hit) & bucket_mask;
 
-            assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
+				// no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
+				++bucket_sizes[p];
+			}
+        } else {
+            for (auto it = _begin; it != _end; ++it, ++hit) {
+                p = (*hit) % num_buckets;
 
-            // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
-            ++bucket_sizes[p];
+                // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
+                ++bucket_sizes[p];
+            }
+
         }
 
         // since we decrement the offsets, we are filling from back.  to maintain stable, input is iterated from back.
@@ -567,39 +620,84 @@ namespace khmxx
         size_t* heit = hit;
         std::advance(heit, ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
         size_t i = 0;
-        for (; hit != heit; ++hit, ++i) {
-          offsets[i] = bucket_offsets[(*hit) % num_buckets]++;
-          KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
-          KHMXX_PREFETCH(permuted_hash + offsets[i], _MM_HINT_T0);
+        size_t bid;
+        if (pow2_buckets) {
+
+			for (; hit != heit; ++hit, ++i) {
+			  bid = bucket_offsets[(*hit) & bucket_mask]++;
+			  offsets[i] = bid;
+			  KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
+			  KHMXX_PREFETCH(permuted_hash + bid, _MM_HINT_T0);
+			}
+
+
+			// now start doing the work from prefetch_dist to end.
+			IT it = _begin;
+			size_t *hit2 = hash_begin;
+			i = 0;
+			heit = hash_begin + input_size;
+			for (; hit != heit; ++it, ++hit, ++hit2) {
+			  bid = offsets[i];
+			  *(results + bid) = *it;   // offset decremented by 1 before use.
+				  // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+			  *(permuted_hash + bid) = *hit2;
+
+			  bid = bucket_offsets[(*hit) & bucket_mask]++;
+			  offsets[i] = bid;
+			  KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
+			  KHMXX_PREFETCH(permuted_hash + bid, _MM_HINT_T0);
+
+			  i = (i+1) & (prefetch_dist - 1);
+			}
+
+			// and finally, finish the last part.
+			for (; it != _end; ++it, ++hit2) {
+			  bid = offsets[i];
+			  *(results + bid) = *it;   // offset decremented by 1 before use.
+			  *(permuted_hash + bid) = *hit2;
+
+				  // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+			  i = (i+1) & (prefetch_dist - 1);
+			}
+        } else {
+            for (; hit != heit; ++hit, ++i) {
+              bid = bucket_offsets[(*hit) % num_buckets]++;
+              offsets[i] = bid;
+              KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
+              KHMXX_PREFETCH(permuted_hash + bid, _MM_HINT_T0);
+            }
+
+
+            // now start doing the work from prefetch_dist to end.
+            IT it = _begin;
+            size_t *hit2 = hash_begin;
+            i = 0;
+            heit = hash_begin + input_size;
+            for (; hit != heit; ++it, ++hit, ++hit2) {
+              bid = offsets[i];
+              *(results + bid) = *it;   // offset decremented by 1 before use.
+                  // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+              *(permuted_hash + bid) = *hit2;
+
+              bid = bucket_offsets[(*hit) % num_buckets]++;
+              offsets[i] = bid;
+              KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
+              KHMXX_PREFETCH(permuted_hash + bid, _MM_HINT_T0);
+
+              i = (i+1) & (prefetch_dist - 1);
+            }
+
+            // and finally, finish the last part.
+            for (; it != _end; ++it, ++hit2) {
+              bid = offsets[i];
+              *(results + bid) = *it;   // offset decremented by 1 before use.
+              *(permuted_hash + bid) = *hit2;
+
+                  // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+              i = (i+1) & (prefetch_dist - 1);
+            }
+
         }
-
-
-        // now start doing the work from prefetch_dist to end.
-        IT it = _begin;
-        size_t *hit2 = hash_begin;
-        i = 0;
-        heit = hash_begin + input_size;
-        for (; hit != heit; ++it, ++hit, ++hit2) {
-          *(results + offsets[i]) = *it;   // offset decremented by 1 before use.
-              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
-          *(permuted_hash + offsets[i]) = *hit2;
-
-          offsets[i] = bucket_offsets[(*hit) % num_buckets]++;
-          KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
-          KHMXX_PREFETCH(permuted_hash + offsets[i], _MM_HINT_T0);
-
-          i = (i+1) % prefetch_dist;
-        }
-
-        // and finally, finish the last part.
-        for (; it != _end; ++it, ++hit2) {
-          *(results + offsets[i]) = *it;   // offset decremented by 1 before use.
-          *(permuted_hash + offsets[i]) = *hit2;
-
-              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
-          i = (i+1) % prefetch_dist;
-        }
-
       }
 
     }
@@ -609,7 +707,8 @@ namespace khmxx
 
 
     // writes into separate array of results..  similar to bucketing_impl
-    template <typename IT, typename Func, typename ASSIGN_TYPE, typename OT,
+    // TODO: [ ] speed up hash and count.  for 95M 31-mers, hash and count takes 2.6s, permute takes 1.6 sec.
+    template <uint8_t prefetch_dist = 8, typename IT, typename Func, typename ASSIGN_TYPE, typename OT,
     typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
                                              ::std::random_access_iterator_tag >::value, int>::type = 1  >
     void
@@ -617,10 +716,11 @@ namespace khmxx
                            Func const & key_func,
                            ASSIGN_TYPE const num_buckets,
                            std::vector<size_t> & bucket_sizes,
-                           OT results,
-						   uint8_t prefetch_dist = 8) {
+                           OT results) {
 
       static_assert(::std::is_integral<ASSIGN_TYPE>::value, "ASSIGN_TYPE should be integral, preferably unsigned");
+      static_assert((prefetch_dist & (prefetch_dist - 1)) == 0,
+    		  "prefetch dist should be a power of 2");
 
       bucket_sizes.clear();
 
@@ -649,6 +749,9 @@ namespace khmxx
       } else {
 
         // 2 pass algo.
+        BL_BENCH_INIT(assign_permute);
+
+        BL_BENCH_START(assign_permute);
 
         // first get the mapping array.
         ASSIGN_TYPE * i2o = nullptr;
@@ -657,6 +760,10 @@ namespace khmxx
           free(i2o);
           throw std::length_error("failed to allocate aligned memory");
         }
+
+        BL_BENCH_END(assign_permute, "alloc", input_size);
+
+        BL_BENCH_START(assign_permute);
 
         // [1st pass]: compute bucket counts and input2bucket assignment.
         // store input2bucket assignment in i2o temporarily.
@@ -672,26 +779,44 @@ namespace khmxx
             // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
             ++bucket_sizes[p];
         }
+        BL_BENCH_END(assign_permute, "hash_count", input_size);
 
-        // since we decrement the offsets, we are filling from back.  to maintain stable, input is iterated from back.
+// THIS IS FOR PROFILING ONLY
+//        BL_BENCH_START(assign_permute);
+//        // [1st pass]: compute bucket counts and input2bucket assignment.
+//        // store input2bucket assignment in i2o temporarily.
+//        ASSIGN_TYPE* i2o_it = i2o;
+//        for (auto it = _begin; it != _end; ++it, ++i2o_it) {
+//          *i2o_it = key_func(*it);
+//        }
+//        BL_BENCH_END(assign_permute, "hash", input_size);
+//
+//        BL_BENCH_START(assign_permute);
+//        // [1st pass]: compute bucket counts and input2bucket assignment.
+//        // store input2bucket assignment in i2o temporarily.
+//        i2o_it = i2o;
+//        ASSIGN_TYPE* i2o_eit = i2o + input_size;
+//        for (; i2o_it != i2o_eit; ++i2o_it) {
+//
+//            // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
+//            ++bucket_sizes[*i2o_it];
+//        }
+//        BL_BENCH_END(assign_permute, "count", input_size);
+// END PROFILING
 
+//        // since we decrement the offsets, we are filling from back.  to maintain stable, input is iterated from back.
+
+        BL_BENCH_START(assign_permute);
         // compute exclusive offsets
         size_t sum = 0;
         bucket_offsets[0] = 0;
-        for (size_t i = 1; i < num_buckets; ++i) {
+        size_t i = 1;
+        for (; i < num_buckets; ++i) {
         	sum += bucket_sizes[i-1];
         	bucket_offsets[i] = sum;
         }
+        BL_BENCH_END(assign_permute, "offset", num_buckets);
 
-
-////         [2nd pass]: saving elements into correct position, and save the final position.
-////		below is for use with inclusive offsets.
-//        i2o_it = i2o;
-//        std::advance(i2o_it, input_size);
-//        for (IT it = _end; it != _begin; ) {
-//          *(results + (--bucket_offsets[*(--i2o_it)])) = *(--it);   // offset decremented by 1 before use.
-//              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
-//        }
 
         // [2nd pass]: saving elements into correct position, and save the final position.
         // not prefetching the bucket offsets - should be small enough to fit in cache.
@@ -701,17 +826,24 @@ namespace khmxx
         // therefore bucket offset is not pointing to the right location yet.
         // instead, use stream write?
 
+        BL_BENCH_START(assign_permute);
 
         // next prefetch results
         std::vector<size_t> offsets(prefetch_dist, static_cast<size_t>(0));
 
         i2o_it = i2o;
-        ASSIGN_TYPE* i2o_eit = i2o_it;
+
+//        std::cout << "prefetch dist = " << static_cast<size_t>(prefetch_dist) << std::endl;
+
+        ASSIGN_TYPE* i2o_eit = i2o;
         std::advance(i2o_eit, ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
-        size_t i = 0;
+        i = 0;
+        size_t bid;
         for (; i2o_it != i2o_eit; ++i2o_it, ++i) {
-        	offsets[i] = bucket_offsets[*i2o_it]++;
-        	KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
+        	bid = bucket_offsets[*i2o_it]++;
+//          std::cout << "prefetching = " << static_cast<size_t>(i) << " at " << bid << std::endl;
+        	offsets[i] = bid;
+        	KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
         }
 
 
@@ -724,62 +856,474 @@ namespace khmxx
         	*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
               // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
 
-        	offsets[i] = bucket_offsets[*i2o_it]++;
-        	KHMXX_PREFETCH((&(*(results + offsets[i]))), _MM_HINT_T0);
-        	i = (i+1) % prefetch_dist;
+          bid = bucket_offsets[*i2o_it]++;
+          offsets[i] = bid;
+        	KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
+
+        	i = (i+1) & (prefetch_dist - 1);
         }
 
         // and finally, finish the last part.
         for (; it != _end; ++it) {
         	*(results + offsets[i]) = *it;   // offset decremented by 1 before use.
               // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
-        	i = (i+1) % prefetch_dist;
+        	i = (i+1) & (prefetch_dist - 1);
         }
 
-//          // STREAMING APPROACH.  PREFETCH ABOVE WOULD NOT WORK RIGHT FOR high collision.
-//        //  IS NOT FASTER THAN PREFETCH...
-//
-//          // now start doing the work from start to end - 2 * prefetch_dist
-//          i2o_it = i2o;
-//          size_t pos;
-//          // and finally, finish the last part.
-//          for (IT it = _begin; it != _end; ++it, ++i2o_it) {
-//            pos = bucket_offsets[*i2o_it]++;
-//
-//#if defined(ENABLE_PREFETCH)
-//            switch (sizeof(typename ::std::iterator_traits<IT>::value_type)) {
-//              case 4:
-//                _mm_stream_si32(reinterpret_cast<int*>(&(*(results + pos))), *(reinterpret_cast<int*>(&(*it))));
-//                break;
-//              case 8:
-//                _mm_stream_si64(reinterpret_cast<long long int*>(&(*(results + pos))), *(reinterpret_cast<long long int*>(&(*it))));
-//                break;
-//              case 16:
-//                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))), *(reinterpret_cast<__m128i*>(&(*it))));
-//                break;
-//              case 32:
-//                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))), *(reinterpret_cast<__m128i*>(&(*it))));
-//                _mm_stream_si128(reinterpret_cast<__m128i*>(&(*(results + pos))) + 1, *(reinterpret_cast<__m128i*>(&(*it)) + 1));
-//                break;
-//              default:
-//                // can't stream.  do old fashion way.
-//                *(results + pos) = *it;   // offset decremented by 1 before use.
-//                break;
-//            }
-//
-//#else
-//            *(results + pos) = *it;   // offset decremented by 1 before use.
-//#endif
-//            // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
-//          }
+        BL_BENCH_END(assign_permute, "permute", input_size);
 
-
+        BL_BENCH_START(assign_permute);
 
         free(i2o);
+
+        BL_BENCH_END(assign_permute, "free", input_size);
+
+        BL_BENCH_REPORT_NAMED(assign_permute, "assign_permute");
+
 
       }
 
     }
+
+
+    // writes into separate array of results..  similar to assign_and_permute, but only works for key_func with batch mode oeprator.
+    // TODO: [ ] speed up hash and count.  for 95M 31-mers, hash and count takes 2.6s, permute takes 1.6 sec.
+    // this
+    template <uint8_t prefetch_dist = 8, typename IT, typename Func, typename ASSIGN_TYPE, typename OT,
+    typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
+                                             ::std::random_access_iterator_tag >::value, int>::type = 1  >
+    void
+    batched_assign_and_permute(IT _begin, IT _end,
+                           Func const & key_func,
+                           ASSIGN_TYPE const num_buckets,
+                           std::vector<size_t> & bucket_sizes,
+                           OT results) {
+
+      static_assert(::std::is_integral<ASSIGN_TYPE>::value, "ASSIGN_TYPE should be integral, preferably unsigned");
+
+      static_assert(decltype(declval<decltype(declval<Func>().proc_trans_hash)>().h)::batch_size > 1, "Func hash function must have batch size greater than 1");
+
+      bucket_sizes.clear();
+
+      std::vector<size_t> bucket_offsets;
+
+      if (_begin == _end) return;  // no data in question.
+
+      // no bucket.
+      if (num_buckets == 0) throw std::invalid_argument("ERROR: number of buckets is 0");
+
+      // initialize number of elements per bucket
+      bucket_sizes.resize(num_buckets, 0);
+      bucket_offsets.resize(num_buckets, 0);
+
+      size_t input_size = std::distance(_begin, _end);
+
+      // single bucket.
+      if (num_buckets == 1) {
+        // set output buckets sizes
+        bucket_sizes[0] = input_size;
+
+        // set output values
+        std::copy(_begin, _end, results);
+
+        return;
+      } else {
+
+        // 2 pass algo.
+        BL_BENCH_INIT(assign_permute);
+
+        BL_BENCH_START(assign_permute);
+
+        // first get the mapping array.
+        ASSIGN_TYPE * i2o = nullptr;
+        int ret = posix_memalign(reinterpret_cast<void **>(&i2o), 64, input_size * sizeof(ASSIGN_TYPE));
+        if (ret) {
+          free(i2o);
+          throw std::length_error("failed to allocate aligned memory");
+        }
+
+        BL_BENCH_END(assign_permute, "alloc", input_size);
+
+        BL_BENCH_START(assign_permute);
+
+        // [1st pass]: compute bucket counts and input2bucket assignment.
+        // store input2bucket assignment in i2o temporarily.
+        ASSIGN_TYPE* i2o_it = i2o;
+        // do a few cachelines at a time.  probably a good compromise is to do batch_size number of cachelines
+        // 64 / sizeof(ASSIGN_TYPE)...
+        constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) *
+            decltype(declval<decltype(declval<Func>().proc_trans_hash)>().h)::batch_size;
+        IT it = _begin;
+        IT eit = _begin;
+        std::advance(eit, input_size - (input_size % block_size) );
+        size_t j;
+        for (; it != eit; it += block_size, i2o_it += block_size) {
+            key_func(&(*it), block_size, i2o_it);
+
+            // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
+            for (j = 0; j < block_size; ++j) {
+              ++bucket_sizes[*(i2o_it + j)];
+            }
+        }
+        // now deal with remainder.
+        size_t rem = input_size % block_size;
+        key_func(&(*it), rem, i2o_it);
+        for (j = 0; j < rem; ++j) {
+          ++bucket_sizes[*(i2o_it + j)];
+        }
+        BL_BENCH_END(assign_permute, "hash_count", input_size);
+
+//        // since we decrement the offsets, we are filling from back.  to maintain stable, input is iterated from back.
+
+        BL_BENCH_START(assign_permute);
+        // compute exclusive offsets
+        size_t sum = 0;
+        bucket_offsets[0] = 0;
+        size_t i = 1;
+        for (size_t i = 1; i < num_buckets; ++i) {
+          sum += bucket_sizes[i-1];
+          bucket_offsets[i] = sum;
+        }
+        BL_BENCH_END(assign_permute, "offset", num_buckets);
+
+
+        // [2nd pass]: saving elements into correct position, and save the final position.
+        // not prefetching the bucket offsets - should be small enough to fit in cache.
+
+        // ===========================
+        // direct prefetch does not do well because i2o has bucket assignments and not offsets.
+        // therefore bucket offset is not pointing to the right location yet.
+        // instead, use stream write?
+
+        BL_BENCH_START(assign_permute);
+
+        // next prefetch results
+        std::vector<size_t> offsets(prefetch_dist, static_cast<size_t>(0));
+
+        i2o_it = i2o;
+
+//        std::cout << "prefetch dist = " << static_cast<size_t>(prefetch_dist) << std::endl;
+
+        ASSIGN_TYPE* i2o_eit = i2o;
+        std::advance(i2o_eit, ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
+        i = 0;
+        size_t bid;
+        for (; i2o_it != i2o_eit; ++i2o_it, ++i) {
+          bid = bucket_offsets[*i2o_it]++;
+//          std::cout << "prefetching = " << static_cast<size_t>(i) << " at " << bid << std::endl;
+          offsets[i] = bid;
+          KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
+        }
+
+
+        // now start doing the work from prefetch_dist to end.
+
+        it = _begin;
+        i = 0;
+        i2o_eit = i2o + input_size;
+        for (; i2o_it != i2o_eit; ++it, ++i2o_it) {
+          *(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+
+          bid = bucket_offsets[*i2o_it]++;
+          offsets[i] = bid;
+          KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
+
+          i = (i+1) & (prefetch_dist -1 );
+        }
+
+        // and finally, finish the last part.
+        for (; it != _end; ++it) {
+          *(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+          i = (i+1) & (prefetch_dist -1 );
+        }
+
+        BL_BENCH_END(assign_permute, "permute", input_size);
+
+        BL_BENCH_START(assign_permute);
+        free(i2o);
+        BL_BENCH_END(assign_permute, "free", input_size);
+
+        BL_BENCH_REPORT_NAMED(assign_permute, "assign_permute");
+
+      }
+
+    }
+
+
+
+#if 0
+    // DO NOT USE.  testing for streaming store.  NOT FASTER.
+    // writes into separate array of results..  similar to bucketing_impl
+    // TODO: [ ] speed up hash and count.  for 95M 31-mers, hash and count takes 2.6s, permute takes 1.6 sec.
+    template <uint8_t prefetch_dist = 8, typename IT, typename Func, typename OT,
+    typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
+                                             ::std::random_access_iterator_tag >::value, int>::type = 1  >
+    void
+    streaming_assign_and_permute(IT _begin, IT _end,
+                           Func const & key_func,
+                           uint32_t const num_buckets,
+                           std::vector<size_t> & bucket_sizes,
+                           OT results) {
+        static_assert((prefetch_dist & (prefetch_dist - 1)) == 0,
+      		  "prefetch dist should be a power of 2");
+
+      bucket_sizes.clear();
+      using V = typename ::std::iterator_traits<IT>::value_type;
+
+      std::vector<size_t> bucket_offsets;
+
+      if (_begin == _end) return;  // no data in question.
+
+      // no bucket.
+      if (num_buckets == 0) throw std::invalid_argument("ERROR: number of buckets is 0");
+
+      // initialize number of elements per bucket
+      bucket_sizes.resize(num_buckets, 0);
+      bucket_offsets.resize(num_buckets, 0);
+
+      size_t input_size = std::distance(_begin, _end);
+
+      // single bucket.
+      if (num_buckets == 1) {
+        // set output buckets sizes
+        bucket_sizes[0] = input_size;
+
+        // set output values
+        std::copy(_begin, _end, results);
+
+        return;
+      } else {
+
+        // 2 pass algo.
+        BL_BENCH_INIT(assign_permute);
+
+        BL_BENCH_START(assign_permute);
+        // first get the mapping array.
+        uint32_t * i2o = nullptr;
+        int ret = posix_memalign(reinterpret_cast<void **>(&i2o), 64, input_size * sizeof(uint32_t));
+        if (ret) {
+          free(i2o);
+          throw std::length_error("failed to allocate aligned memory");
+        }
+
+
+        BL_BENCH_END(assign_permute, "alloc", input_size);
+
+
+        BL_BENCH_START(assign_permute);
+
+         // [1st pass]: compute bucket counts and input2bucket assignment.
+         // store input2bucket assignment in i2o temporarily.
+         // assume can fit in bucket id can fit in 32 bit.
+        // 0.47s for Fvesca, 64 cores, no hash computation, with or without streaming.
+        // 0.18s for Fvesca, 64 cores, no input mem access, with streaming. it is using movntdq...
+        // 0.52s for Fvesca, 16 cores. no input mem access, with streaming. it is using movntdq...
+         uint32_t ps[16];
+         uint32_t p;
+         size_t j = 0, ii=0, max16 = input_size - 16;
+         uint32_t* i2o_it = i2o;
+//         __m128i *it0, *it1, *it2, *it3;
+         __m128i x0, x1, x2, x3;
+         IT it = _begin;
+         for (; j < max16; j+= 16, i2o_it += 16) {
+           for (ii = 0; ii < 16; ++ii, ++it) {
+             ps[ii] = j;
+           }
+//           it0 = reinterpret_cast<__m128i*>(i2o_it)     ;
+//           it1 = reinterpret_cast<__m128i*>(i2o_it + 4) ;
+//           it2 = reinterpret_cast<__m128i*>(i2o_it + 8) ;
+//           it3 = reinterpret_cast<__m128i*>(i2o_it + 12);
+
+           // pre convert.  slower.  assembly now have consecutive movntdq
+           x0 = *(reinterpret_cast<__m128i*>(ps));
+           x1 = *(reinterpret_cast<__m128i*>(ps + 4));
+           x2 = *(reinterpret_cast<__m128i*>(ps + 8));
+           x3 = *(reinterpret_cast<__m128i*>(ps + 12));
+
+
+           // direct set to same j.  no effect.  direct set to separate values, no longer adjacent commands.
+//           x0 = _mm_set_epi32(j  , j+1, j+2, j+3);
+//           x1 = _mm_set_epi32(j+4, j+5, j+6, j+7);
+//           x2 = _mm_set_epi32(j+8, j+9, j+10, j+11);
+//           x3 = _mm_set_epi32(j+12, j+13, j+14, j+15);
+
+           // no real effect!!!?
+           _mm_stream_si128(reinterpret_cast<__m128i*>(i2o_it)     , x0);
+           _mm_stream_si128(reinterpret_cast<__m128i*>(i2o_it + 4) , x1);
+           _mm_stream_si128(reinterpret_cast<__m128i*>(i2o_it + 8) , x2);
+           _mm_stream_si128(reinterpret_cast<__m128i*>(i2o_it + 12), x3);
+         }
+         // left overs
+         for (; j < input_size; ++j, ++it, ++i2o_it) {
+           *i2o_it = j;
+         }
+         j = 0;
+         ii=0;
+         i2o_it = i2o;
+         it = _begin;
+         BL_BENCH_END(assign_permute, "stream", input_size);
+
+         BL_BENCH_START(assign_permute);
+
+          // [1st pass]: compute bucket counts and input2bucket assignment.
+          // store input2bucket assignment in i2o temporarily.
+          // assume can fit in bucket id can fit in 32 bit.
+         // 0.47s for Fvesca, 64 cores, no hash computation, with or without streaming.
+         // 0.16s for Fvesca, 64 cores, no input mem access, without streaming. it is using movntdq...
+         // 0.27s for Fvesca, 16 cores. no input mem access, without streaming. it is using movntdq...
+          for (; j < input_size; ++j, ++it, ++i2o_it) {
+            *i2o_it = j;
+          }
+          j = 0;
+          ii=0;
+          i2o_it = i2o;
+          it = _begin;
+          BL_BENCH_END(assign_permute, "no-stream", input_size);
+
+        BL_BENCH_START(assign_permute);
+
+        // [1st pass]: compute bucket counts and input2bucket assignment.
+        // store input2bucket assignment in i2o temporarily.
+        // 2.6s for Fvesca, 64 cores, with or without stream.
+        // 16 cores with stream: 10.45s. without stream 10.32s
+//        uint32_t ps[16];
+//        uint32_t p;
+//        size_t j = 0, ii=0, max16 = input_size - 16;
+//        uint32_t* i2o_it = i2o;
+//        IT it = _begin;
+//        for (; j < max16; j+= 16, i2o_it += 16) {
+//        	for (ii = 0; ii < 16; ++ii, ++it) {
+//                p = key_func(*it);
+//                assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
+//                // no prefetch here.  ASSUME comm size is smaller than what can reasonably fit in L1 cache.
+//        		++bucket_sizes[p];
+//        		ps[ii] = p;
+//        	}
+//        	// preconvert to __m128i slows it down by 0.4s for Fvesca, 64cores.
+//
+//        	// no real effect!!!?
+//            _mm_stream_si128(reinterpret_cast<__m128i*>(i2o_it)     , *(reinterpret_cast<__m128i*>(ps))     );
+//            _mm_stream_si128(reinterpret_cast<__m128i*>(i2o_it + 4) , *(reinterpret_cast<__m128i*>(ps + 4)) );
+//            _mm_stream_si128(reinterpret_cast<__m128i*>(i2o_it + 8) , *(reinterpret_cast<__m128i*>(ps + 8)) );
+//            _mm_stream_si128(reinterpret_cast<__m128i*>(i2o_it + 12), *(reinterpret_cast<__m128i*>(ps + 12)));
+//        }
+        // left overs
+        for (; j < input_size; ++j, ++it, ++i2o_it) {
+        	p = key_func(*it);
+			assert(((0 <= p) && ((size_t)p < num_buckets)) && "assigned bucket id is not valid");
+			// no prefetch here.  ASSUME comm size is smaller than what can reasonably fit in L1 cache.
+			++bucket_sizes[p];
+
+			*i2o_it = p;
+        }
+
+        BL_BENCH_END(assign_permute, "hash_count", input_size);
+
+//
+//        BL_BENCH_START(assign_permute);
+//        // [1st pass]: compute bucket counts and input2bucket assignment.
+//        // store input2bucket assignment in i2o temporarily.
+//        ASSIGN_TYPE* i2o_it = i2o;
+//        for (auto it = _begin; it != _end; ++it, ++i2o_it) {
+//          *i2o_it = key_func(*it);
+//        }
+//        BL_BENCH_END(assign_permute, "hash", input_size);
+//
+//        BL_BENCH_START(assign_permute);
+//        // [1st pass]: compute bucket counts and input2bucket assignment.
+//        // store input2bucket assignment in i2o temporarily.
+//        i2o_it = i2o;
+//        ASSIGN_TYPE* i2o_eit = i2o + input_size;
+//        for (; i2o_it != i2o_eit; ++i2o_it) {
+//
+//            // no prefetch here.  ASSUME comm size is smaller than what can reasonably live in L1 cache.
+//            ++bucket_sizes[*i2o_it];
+//        }
+//        BL_BENCH_END(assign_permute, "count", input_size);
+//
+//        // since we decrement the offsets, we are filling from back.  to maintain stable, input is iterated from back.
+
+        BL_BENCH_START(assign_permute);
+        // compute exclusive offsets
+        size_t sum = 0;
+        bucket_offsets[0] = 0;
+        size_t i = 1;
+        for (size_t i = 1; i < num_buckets; ++i) {
+          sum += bucket_sizes[i-1];
+          bucket_offsets[i] = sum;
+        }
+        BL_BENCH_END(assign_permute, "offset", num_buckets);
+
+
+        // [2nd pass]: saving elements into correct position, and save the final position.
+        // not prefetching the bucket offsets - should be small enough to fit in cache.
+
+        // ===========================
+        // direct prefetch does not do well because i2o has bucket assignments and not offsets.
+        // therefore bucket offset is not pointing to the right location yet.
+        // instead, use stream write?
+
+        BL_BENCH_START(assign_permute);
+
+        // next prefetch results
+        std::vector<size_t> offsets(prefetch_dist, static_cast<size_t>(0));
+
+        i2o_it = i2o;
+
+//        std::cout << "prefetch dist = " << static_cast<size_t>(prefetch_dist) << std::endl;
+
+        uint32_t* i2o_eit = i2o;
+        std::advance(i2o_eit, ::std::min(input_size, static_cast<size_t>(prefetch_dist)));
+        i = 0;
+        size_t bid;
+        for (; i2o_it != i2o_eit; ++i2o_it, ++i) {
+          bid = bucket_offsets[*i2o_it]++;
+//          std::cout << "prefetching = " << static_cast<size_t>(i) << " at " << bid << std::endl;
+          offsets[i] = bid;
+          KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
+        }
+
+
+        // now start doing the work from prefetch_dist to end.
+
+        it = _begin;
+        i = 0;
+        i2o_eit = i2o + input_size;
+        for (; i2o_it != i2o_eit; ++it, ++i2o_it) {
+          *(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+
+          bid = bucket_offsets[*i2o_it]++;
+          offsets[i] = bid;
+          KHMXX_PREFETCH((&(*(results + bid))), _MM_HINT_T0);
+
+          i = (i+1) & (prefetch_dist - 1);
+        }
+
+        // and finally, finish the last part.
+        for (; it != _end; ++it) {
+          *(results + offsets[i]) = *it;   // offset decremented by 1 before use.
+              // bucekted filled from back to front for each bucket, hence iterators are pre-decremented.
+          i = (i+1) & (prefetch_dist - 1);
+        }
+
+        BL_BENCH_END(assign_permute, "permute", input_size);
+
+        BL_BENCH_START(assign_permute);
+
+        free(i2o);
+
+        BL_BENCH_END(assign_permute, "free", input_size);
+
+        BL_BENCH_REPORT_NAMED(assign_permute, "assign_permute_stream");
+
+
+      }
+
+    }
+#endif
 
     /**
      * @brief   compute the element index mapping between input and bucketed output.
@@ -1085,7 +1629,7 @@ namespace khmxx
     /// write into a separate array.  blocked partitioning.
     /// returns bucket sizes array that contains the "uneven" remainders for use with alltoallv.
     /// block_bucket_size and n_blocks should be computed globally, which are used by alltoall.
-    template <typename IT, typename Func, typename ASSIGN_TYPE, typename OT,
+    template <uint8_t prefetch_dist = 8, typename IT, typename Func, typename ASSIGN_TYPE, typename OT,
     typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
                                              ::std::random_access_iterator_tag >::value, int>::type = 1  >
     void
@@ -1095,11 +1639,11 @@ namespace khmxx
                            size_t const & block_bucket_size,
                            size_t const & nblocks,
                            std::vector<size_t> & bucket_sizes,
-                           OT results,
-                           uint8_t prefetch_dist = 8) {
+                           OT results) {
 
       static_assert(::std::is_integral<ASSIGN_TYPE>::value, "ASSIGN_TYPE should be integral, preferably unsigned");
-
+      static_assert((prefetch_dist & (prefetch_dist - 1)) == 0,
+    		  "prefetch dist should be a power of 2");
       // no block.  so do it without blocks
       if ((block_bucket_size == 0) || (nblocks == 0)) {
         // no blocks. use standard permutation
@@ -1182,11 +1726,15 @@ namespace khmxx
         size_t last_block = block_size * nblocks;
         i2o_it = i2o;
         size_t pos;
+        std::vector<size_t> offsets_max;
+        for (size_t i = 0; i < bucket_sizes.size(); ++i) {
+      	  offsets_max.emplace_back((i+1) * block_bucket_size);
+        }
         for (IT it = _begin; it != _end; ++i2o_it, ++it) {
           p = *i2o_it;
           pos = bucket_offsets[p]++;
 
-#if defined(ENABLE_PREFETCH)
+#if 0 //defined(ENABLE_PREFETCH)
             switch (sizeof(typename ::std::iterator_traits<IT>::value_type)) {
               case 4:
                 _mm_stream_si32(reinterpret_cast<int*>(&(*(results + pos))), *(reinterpret_cast<int*>(&(*it))));
@@ -1212,17 +1760,19 @@ namespace khmxx
 #endif
 
 
-          // if the offset entry indicates full, move the offset to next block, unless we already have max number of blocks.
-          if (bucket_offsets[p] <= first_blocks) {
+          if (bucket_offsets[p] > last_block) {
+            continue;  // last part with NONBLOCKS, so let it continue;
+  //        } else if (offsets[bucket] == front_size) {  // last element of last bucket in last block in the front portion
+  //          offsets[bucket] = bucket_sizes[bucket];
+          } else if (bucket_offsets[p] == offsets_max[p] ) {  // full bucket.
 
-            // add 0 or block_size - block_bucket_size, depending on if modulus is 0.
-            bucket_offsets[p] += (((bucket_offsets[p] % block_bucket_size) == 0) * (block_size - block_bucket_size));
-
-          } else if (bucket_offsets[p] <= last_block) {
-
-            if ((bucket_offsets[p] % block_bucket_size) == 0) bucket_offsets[p] = bucket_sizes[p];
-          }  // else past the blocked portion, so increment of bucket_offsets is sufficient.
-
+            if (bucket_offsets[p] > first_blocks ) { // in last block
+            	bucket_offsets[p] = bucket_sizes[p];
+            } else {
+            	bucket_offsets[p] += block_size - block_bucket_size;
+            }
+            offsets_max[p] += block_size;
+          }
 
         }
 
@@ -1325,6 +1875,10 @@ namespace khmxx
 
       // walk through all.
       size_t bucket;
+      std::vector<SIZE> offsets_max;
+      for (size_t i = 0; i < bucket_sizes.size(); ++i) {
+    	  offsets_max.emplace_back((i+1) * block_bucket_size);
+      }
       for (size_t i = f; i < l; ++i) {
         bucket = i2o[i];
         i2o[i] = offsets[bucket]++;  // output position from bucket id (i2o[i]).  post increment.  already offset by f.
@@ -1334,12 +1888,14 @@ namespace khmxx
           continue;  // last part with NONBLOCKS, so let it continue;
 //        } else if (offsets[bucket] == front_size) {  // last element of last bucket in last block in the front portion
 //          offsets[bucket] = bucket_sizes[bucket];
-        } else if (offsets[bucket] % block_bucket_size == 0) {  // full bucket.
-          if (((offsets[bucket] + block_size - 1) / block_size) == nblocks) { // in last block
+        } else if (offsets[bucket] == offsets_max[bucket] ) {  // full bucket.
+
+          if (offsets[bucket] > ((nblocks - 1) * block_size) ) { // in last block
             offsets[bucket] = bucket_sizes[bucket];
           } else {
             offsets[bucket] += block_size - block_bucket_size;
           }
+          offsets_max[bucket] += block_size;
         }
       }
 
@@ -1416,20 +1972,27 @@ namespace khmxx
 
       // walk through all.
       size_t bucket;
+      std::vector<SIZE> offsets_max;
+      for (size_t i = 0; i < bucket_sizes.size(); ++i) {
+    	  offsets_max.emplace_back((i+1) * block_bucket_size);
+      }
       for (; i2o != i2o_end; ++i2o) {
         bucket = *i2o;
         *i2o = offsets[bucket]++;  // output position from bucket id (i2o[i]).  post increment.  already offset by f.
 
-        if (offsets[bucket] <= front_blocks) {
+        if (offsets[bucket] > last_block) {
+          continue;  // last part with NONBLOCKS, so let it continue;
+//        } else if (offsets[bucket] == front_size) {  // last element of last bucket in last block in the front portion
+//          offsets[bucket] = bucket_sizes[bucket];
+        } else if (offsets[bucket] == offsets_max[bucket] ) {  // full bucket.
 
-          // add 0 or block_size - block_bucket_size, depending on if modulus is 0.
-        	offsets[bucket] += (((offsets[bucket] % block_bucket_size) == 0) * (block_size - block_bucket_size));
-
-        } else if (offsets[bucket] <= last_block) {
-
-          if ((offsets[bucket] % block_bucket_size) == 0) offsets[bucket] = bucket_sizes[bucket];
-        }  // else past the blocked portion, so increment of bucket_offsets is sufficient.
-
+          if (offsets[bucket] > front_blocks ) { // in last block
+            offsets[bucket] = bucket_sizes[bucket];
+          } else {
+            offsets[bucket] += block_size - block_bucket_size;
+          }
+          offsets_max[bucket] += block_size;
+        }
       }
 
       // convert inclusive prefix sum back to counts.
@@ -1655,7 +2218,7 @@ namespace khmxx
         // and https://blog.merovius.de/2014/08/12/applying-permutation-in-constant.html
         size_t j, k;
         T v;
-        constexpr size_t mask = ~(0UL) << (sizeof(size_t) * 8 - 1);
+        constexpr size_t mask = ~(0UL) << ((sizeof(size_t) << 3) - 1);
 //        size_t counter = 0;
         for (size_t i = f; i < l; ++i) {
         	k = i2o[i];
@@ -1870,7 +2433,7 @@ namespace khmxx
         size_t j, k;
         T v;
 //        size_t counter = 0;
-        constexpr size_t mask = ~(0UL) << (sizeof(size_t) * 8 - 1);
+        constexpr size_t mask = ~(0UL) << ((sizeof(size_t) << 3) - 1);
         for (size_t i = f; i < l; ++i) {
         	k = i2o[i];				// position that the unbucketed was moved to in the bucketed list; source data
 //        	++counter;
@@ -2815,7 +3378,7 @@ namespace khmxx
 
       // allocate recv_compressed
       V* buffers = nullptr;
-      int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, buffer_max * 2ULL * sizeof(V));
+      int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, (buffer_max << 1) * sizeof(V));
       if (ret) {
         free(buffers);
         throw std::length_error("failed to allocate aligned memory");
@@ -2845,19 +3408,29 @@ namespace khmxx
       bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
       size_t step;
 
-      for (step = 1; step < comm_size; ++step) {
-        //====  first setup send and recv.
+      if (is_pow2) {
+          for (step = 1; step < comm_size; ++step) {
+            //====  first setup send and recv.
 
-        // target rank
-        if ( is_pow2 )  {  // power of 2
-          curr_peer = comm_rank ^ step;
-        } else {
-          curr_peer = (comm_rank + step) % comm_size;
-        }
+            // target rank
+		  curr_peer = comm_rank ^ step;
 
-        // issend all, avoids buffering.
-        MPI_Isend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], dt.type(),
-        			curr_peer, ialltoallv_tag, _comm, &reqs[step - 1] );
+            // issend all, avoids buffering.
+            MPI_Isend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], dt.type(),
+            			curr_peer, ialltoallv_tag, _comm, &reqs[step - 1] );
+          }
+      } else {
+          for (step = 1; step < comm_size; ++step) {
+            //====  first setup send and recv.
+
+            // target rank
+              curr_peer = (comm_rank + step) % comm_size;
+
+            // issend all, avoids buffering.
+            MPI_Isend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], dt.type(),
+            			curr_peer, ialltoallv_tag, _comm, &reqs[step - 1] );
+          }
+
       }
       int completed;
       // kick start send.
@@ -2969,17 +3542,21 @@ namespace khmxx
 
         // blocking probe, only to get the source rank for irecv
         size_t s = step;
-        do {
-          if ( is_pow2 )  {  // power of 2
-            curr_peer = comm_rank ^ s;
-          } else {
-            curr_peer = (comm_rank + s) % comm_size;
-          }
+        if ( is_pow2 )  {  // power of 2
+			do {
+				curr_peer = comm_rank ^ s;
 
-          MPI_Iprobe(curr_peer, ialltoallv_tag, _comm, &completed, MPI_STATUS_IGNORE);
-          ++s;
-        } while (!completed);
+			  MPI_Iprobe(curr_peer, ialltoallv_tag, _comm, &completed, MPI_STATUS_IGNORE);
+			  ++s;
+			} while (!completed);
+		  } else {
+			  do {
+				  curr_peer = (comm_rank + s) % comm_size;
 
+				MPI_Iprobe(curr_peer, ialltoallv_tag, _comm, &completed, MPI_STATUS_IGNORE);
+				++s;
+			  } while (!completed);
+		  }
         // get the peer.
         //curr_peer = stat.MPI_SOURCE;
 
@@ -3055,7 +3632,7 @@ namespace khmxx
                                              ::std::random_access_iterator_tag >::value &&
                                 ::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
                                              ::std::random_access_iterator_tag >::value, int>::type = 1>
-      void ialltoallv_and_query_one_on_one(IT permuted, IT permuted_end,
+      void ialltoallv_and_query_one_to_one(IT permuted, IT permuted_end,
                       ::std::vector<SIZE> const & send_counts,
                        OP compute,
                        OT result,
@@ -3116,7 +3693,7 @@ namespace khmxx
 
         // allocate recv_compressed
         V* buffers = nullptr;
-        int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, buffer_max * 2ULL * sizeof(V));
+        int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, (buffer_max << 1) * sizeof(V));
         if (ret) {
           free(buffers);
           throw std::length_error("failed to allocate aligned memory");
@@ -3128,7 +3705,7 @@ namespace khmxx
 
         // allocate recv_compressed
         U* out_buffers = nullptr;
-        ret = posix_memalign(reinterpret_cast<void **>(&out_buffers), 64, buffer_max * 2ULL * sizeof(U));
+        ret = posix_memalign(reinterpret_cast<void **>(&out_buffers), 64, (buffer_max << 1) * sizeof(U));
         if (ret) {
           free(out_buffers);
           throw std::length_error("failed to allocate aligned memory");
@@ -3379,7 +3956,7 @@ namespace khmxx
 
         // allocate recv_compressed
         V* buffers = nullptr;
-        int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, buffer_max * 2ULL * sizeof(V));
+        int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, (buffer_max << 1) * sizeof(V));
         if (ret) {
           free(buffers);
           throw std::length_error("failed to allocate aligned memory");
@@ -3391,7 +3968,7 @@ namespace khmxx
 
         // allocate recv_compressed
         U* out_buffers = nullptr;
-        ret = posix_memalign(reinterpret_cast<void **>(&out_buffers), 64, buffer_max * 2ULL * sizeof(U));
+        ret = posix_memalign(reinterpret_cast<void **>(&out_buffers), 64, (buffer_max << 1) * sizeof(U));
         if (ret) {
           free(out_buffers);
           throw std::length_error("failed to allocate aligned memory");
@@ -4652,7 +5229,7 @@ namespace khmxx
       BL_BENCH_START(scat_comp_gath_lm);
       SIZE min_bucket_size = *(::std::min_element(send_counts.begin(), send_counts.end()));
       min_bucket_size = ::mxx::allreduce(min_bucket_size, mxx::min<SIZE>(), _comm);
-      SIZE block_bucket_size = min_bucket_size / 2;  // block_bucket_size is at least 1/2 as large as the largest bucket.
+      SIZE block_bucket_size = min_bucket_size >> 1;  // block_bucket_size is at least 1/2 as large as the largest bucket.
       SIZE block_size = _comm.size() * block_bucket_size;
       SIZE first_part = 2 * block_size;   // this is at least 1/2 of the largest input.
       SIZE second_part_local = input.size() - first_part;
@@ -4662,7 +5239,7 @@ namespace khmxx
 
       SIZE second = second_part_local + second_part_remote;
       SIZE input_plus = input.size() + second_part_remote;
-      bool traditional = (second > (input_plus / 2));
+      bool traditional = (second > (input_plus >> 1));
       traditional = mxx::any_of(traditional, _comm);
       BL_BENCH_END(scat_comp_gath_lm, "a2av_count", first_part);
 
@@ -4956,7 +5533,7 @@ namespace khmxx
 //      BL_BENCH_COLLECTIVE_START(scat_comp_gath_v_lm, "a2av_count", _comm);
 //      SIZE min_bucket_size = *(::std::min_element(send_counts.begin(), send_counts.end()));
 //      min_bucket_size = ::mxx::allreduce(min_bucket_size, mxx::min<SIZE>(), _comm);
-//      SIZE block_bucket_size = min_bucket_size / 2;  // block_bucket_size is at least 1/2 as large as the largest bucket.
+//      SIZE block_bucket_size = min_bucket_size >> 1;  // block_bucket_size is at least 1/2 as large as the largest bucket.
 //      SIZE block_size = _comm.size() * block_bucket_size;
 //      SIZE first_part = 2 * block_size;   // this is at least 1/2 of the largest input.
 //      SIZE second_part_local = input.size() - first_part;
@@ -4966,7 +5543,7 @@ namespace khmxx
 //
 //      SIZE second = second_part_local + second_part_remote;
 //      SIZE input_plus = input.size() + second_part_remote;
-//      bool traditional = (second > (input_plus / 2));
+//      bool traditional = (second > (input_plus >> 1));
 //      traditional = mxx::any_of(traditional, _comm);
 //      BL_BENCH_END(scat_comp_gath_v_lm, "a2av_count", first_part);
 //
@@ -5277,7 +5854,7 @@ namespace khmxx
 
           // allocate the size.
           // TODO: reasonable values for the buffer?
-          std::size_t merge_n = (recv_n + 1) / 2;
+          std::size_t merge_n = (recv_n + 1) >> 1;
           std::vector<V> merge_buf(merge_n);
           // auto tmp = std::get_temporary_buffer<V>(merge_n);
 
