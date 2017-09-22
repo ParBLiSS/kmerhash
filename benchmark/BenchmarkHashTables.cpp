@@ -34,6 +34,7 @@
 //#include "kmerhash/experimental/hashmap_robinhood_doubling_offsets2.hpp"
 #include "kmerhash/hashmap_robinhood_offsets_prefetch.hpp"
 #include "kmerhash/robinhood_offset_hashmap.hpp"
+#include "kmerhash/hashmap_radixsort.hpp"
 
 #include "kmerhash/hashmap_robinhood_prefetch.hpp"
 
@@ -690,7 +691,7 @@ typename Kmer, typename Value>
 void benchmark_hashmap_insert_mode(std::string name, std::vector<::std::pair<Kmer, Value> > const & input, size_t const query_frac, int vector_mode, int measure_mode,
 		double const max_load, double const min_load, unsigned char const insert_prefetch, unsigned char const query_prefetch, ::mxx::comm const & comm) {
   BL_BENCH_INIT(map);
-
+  cout << "hi";
   std::vector<Kmer> query;
 
   BL_BENCH_START(map);
@@ -835,6 +836,141 @@ void benchmark_hashmap_insert_mode(std::string name, std::vector<::std::pair<Kme
 #endif
   BL_BENCH_END(map, "count2", counts.size());
 
+
+  BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
+}
+
+template <typename Kmer, typename Value>
+void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer, Value> > const & input, size_t const query_frac, int vector_mode, int measure_mode,
+		double const max_load, double const min_load, unsigned char const insert_prefetch, unsigned char const query_prefetch, ::mxx::comm const & comm) {
+  BL_BENCH_INIT(map);
+  cout << "hi";
+  std::vector<Kmer> query;
+
+  BL_BENCH_START(map);
+  // no transform involved.
+  
+
+  BL_BENCH_END(map, "reserve", input.size());
+
+    BL_BENCH_START(map);
+    query.resize(input.size() / query_frac);
+    std::transform(input.begin(), input.begin() + input.size() / query_frac, query.begin(),
+                   [](::std::pair<Kmer, Value> const & x){
+      return x.first;
+    });
+    BL_BENCH_END(map, "generate query", input.size());
+
+
+    BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ESTIMATE)
+        __itt_resume();
+#endif
+
+	// compute hyperloglog estimate for reference.
+	hyperloglog64<Kmer, StoreHash<Kmer>, 12> hll;
+	for (size_t i = 0; i < input.size(); ++i) {
+		hll.update(input[i].first);
+	}
+
+	double est = hll.estimate();
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ESTIMATE)
+        __itt_pause();
+#endif
+    BL_BENCH_END(map, "estimate", static_cast<size_t>(est));
+
+	std::cout << "insert testing: estimated distinct = " << est << " in " << input.size() << std::endl;
+
+
+    ::fsc::hashmap_radixsort<Kmer, StoreHash<Kmer>, ::equal_to<Kmer> > map(static_cast<size_t>(est));
+    std::string insert_type;
+    insert_type = "batch_insert";
+
+    Kmer *keyArray = (Kmer *)_mm_malloc(input.size() * sizeof(Kmer), 64);
+    int32_t i;
+    for(i = 0; i < input.size(); i++)
+    {
+        keyArray[i] = input[i].first;
+    }
+    BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_INSERT)
+        __itt_resume();
+#endif
+    int64_t startTick = __rdtsc();
+    map.insert(keyArray, input.size());
+    map.finalize_insert();
+    int64_t endTick = __rdtsc();
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_INSERT)
+        __itt_pause();
+#endif
+    BL_BENCH_END(map, insert_type, map.size());
+    cout << "insert ticks = " << (endTick - startTick) << endl;
+
+  map.sanity_check();
+  Kmer *queryArray = (Kmer *)_mm_malloc(query.size() * sizeof(Kmer), 64);
+  for(i = 0; i < query.size(); i++)
+  {
+      queryArray[i] = query[i];
+  }
+  uint32_t *findResult = (uint32_t *)_mm_malloc(query.size() * sizeof(uint32_t), 64);
+  BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_resume();
+#endif
+  size_t foundCount = map.find(queryArray, query.size(), findResult);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_pause();
+#endif
+  BL_BENCH_END(map, "find", foundCount);
+
+  uint8_t *countResult = (uint8_t *)_mm_malloc(query.size() * sizeof(uint8_t), 64);
+  BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT)
+        __itt_resume();
+#endif
+  foundCount = map.count(queryArray, query.size(), countResult);
+  //result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT)
+        __itt_pause();
+#endif
+  BL_BENCH_END(map, "count", foundCount);
+
+#if 1
+  BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ERASE)
+        __itt_resume();
+#endif
+  map.erase(queryArray, query.size());
+  size_t eraseCount = map.finalize_erase();
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_ERASE)
+        __itt_pause();
+#endif
+  BL_BENCH_END(map, "erase", eraseCount);
+
+
+  BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT2)
+        __itt_resume();
+#endif
+  foundCount = map.count(queryArray, query.size(), countResult);
+  //result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_COUNT2)
+        __itt_pause();
+#endif
+  BL_BENCH_END(map, "count2", foundCount);
+#endif
 
   BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
 }
@@ -1007,6 +1143,7 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
 #define ROBINHOOD_OFFSET_TYPE 7
 #define ROBINHOOD_OFFSET2_TYPE 9
 #define ROBINHOOD_PREFETCH_TYPE 8
+#define RADIXSORT_TYPE 10
 
 #define DNA_TYPE 1
 #define DNA5_TYPE 2
@@ -1062,6 +1199,7 @@ parse_cmdline(int argc, char** argv) {
 	  allowed.push_back("robinhood_offset");
       allowed.push_back("robinhood_prefetch");
 	  allowed.push_back("robinhood_offset_overflow");
+	  allowed.push_back("radixsort");
 	  TCLAP::ValuesConstraint<std::string> allowedVals( allowed );
 
 	  TCLAP::ValueArg<std::string> mapArg("m","map_type","type of map to use (default robinhood_offset_overflow)",false,"robinhood_offset_overflow",&allowedVals, cmd);
@@ -1134,6 +1272,8 @@ parse_cmdline(int argc, char** argv) {
 		  map = ROBINHOOD_OFFSET2_TYPE;
 	  } else if (map_type == "robinhood_prefetch") {
 		  map = ROBINHOOD_PREFETCH_TYPE;
+	  } else if (map_type == "radixsort") {
+		  map = RADIXSORT_TYPE;
 	  }
 
 	  std::string alpha = alphabetArg.getValue();
@@ -1813,6 +1953,38 @@ int main(int argc, char** argv) {
 					deserialize_vector<::std::pair<DNA16Kmer, size_t> >(fname),
 						  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
 				  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_nooverflow_DNA16", count, comm);
+			  } else {
+
+				  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
+			  }
+		} else if (map == RADIXSORT_TYPE) {
+		  //================ my new hashmap Robin hood
+			  if (dna == DNA_TYPE) {
+				  if (full) {
+					  BL_BENCH_START(test);
+					  benchmark_hashmap_radixsort<FullKmer, size_t>("hashmap_radixsort",
+                      deserialize_vector<::std::pair<FullKmer, size_t> >(fname),
+							  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+					  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
+				  } else {
+					  BL_BENCH_START(test);
+					  benchmark_hashmap_radixsort<Kmer, size_t>("hashmap_radixsort",
+					  deserialize_vector<::std::pair<Kmer, size_t> >(fname),
+							  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+					  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
+				  }
+			  } else if (dna == DNA5_TYPE) {
+				  BL_BENCH_START(test);
+				  benchmark_hashmap_radixsort<DNA5Kmer, size_t>("hashmap_radixsort",
+					deserialize_vector<::std::pair<DNA5Kmer, size_t> >(fname),
+						  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+				  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
+			  } else if (dna == DNA16_TYPE) {
+				  BL_BENCH_START(test);
+				  benchmark_hashmap_radixsort<DNA16Kmer, size_t>("hashmap_radixsort",
+					deserialize_vector<::std::pair<DNA16Kmer, size_t> >(fname),
+						  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+				  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
 			  } else {
 
 				  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
