@@ -43,7 +43,7 @@
 #define DISTRIBUTED_ROBINHOOD_MAP_HPP
 
 
-#include "kmerhash/hashmap_robinhood_offsets_prefetch.hpp"  // local storage hash table  // for multimap
+#include "kmerhash/experimental/hashmap_robinhood_offsets_prefetch.hpp"  // local storage hash table  // for multimap
 #include <utility> 			  // for std::pair
 
 //#include <sparsehash/dense_hash_map>  // not a multimap, where we need it most.

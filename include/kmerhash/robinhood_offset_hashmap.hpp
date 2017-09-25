@@ -1049,6 +1049,8 @@ protected:
 		size_type m = target_buckets - 1;
 		assert((target_buckets & m) == 0);   // assert this is a power of 2.
 
+		uint8_t log_buckets = std::log2(buckets);  // should always be power of 2
+
 		//    std::cout << "RESIZE UP " << target_buckets << std::endl;
 
 		size_t id, bid, p;
@@ -1065,6 +1067,7 @@ protected:
 		//  so that at block boundaries we have the right offsets.
 		std::vector<size_t> hashes(lsize);
 		size_t j = 0;
+
 		// compute and store all hashes, and at the same time compute end of last bucket in each block.
 		for (bid = 0; bid < buckets; ++bid) {
 			if (is_normal(info_container[bid])) {
@@ -1078,7 +1081,7 @@ protected:
 					id = hashes[j] & m;
 
 					// figure out which block it is in.
-					bl = id / buckets;
+					bl = id >> log_buckets;
 
 					// count.  at least the bucket id + 1, or last insert target position + 1.
 					offsets[bl + 1] = std::max(offsets[bl + 1], id) + 1;
@@ -1106,7 +1109,7 @@ protected:
 					id = hashes[j] & m;
 
 					// figure out which block it is in.
-					bl = id / buckets;
+					bl = id >> log_buckets;
 
 					// now copy
 					pp = std::max(offsets[bl], id);
@@ -1599,125 +1602,6 @@ protected:
 	}
 
 
-	/// this function searches for empty, do memmove, then increment info.  this is slightly slower than searching for empty and incrementing info at the same time.
-	bucket_id_type insert_with_hint_old(container_type & target,
-			info_container_type & target_info,
-			size_t const & id,
-			value_type const & v) {
-
-		assert(id < buckets);
-
-		// get the starting position
-		info_type info = target_info[id];
-
-		//    std::cout << "info " << static_cast<size_t>(info) << std::endl;
-		set_normal(target_info[id]);   // if empty, change it.  if normal, same anyways.
-
-		// if this is empty and no shift, then insert and be done.
-		if (info == info_empty) {
-			target[id] = v;
-			return make_missing_bucket_id(id);
-			//      return make_missing_bucket_id(id, target_info[id]);
-		}
-
-		// the bucket is either non-empty, or empty but offset by some amount
-
-		// get the range for this bucket.
-		size_t start = id + get_offset(info);
-		size_t next = id + 1 + get_offset(target_info[id + 1]);
-
-		// now search within bucket to see if already present.
-		if (is_normal(info)) {  // only for full bucket, of course.
-
-#if defined(REPROBE_STAT)
-			size_t reprobe = 0;
-#endif
-			for (size_t i = start; i < next; ++i) {
-				if (eq(v.first, target[i].first)) {
-					// check if value and what's in container match.
-					//          std::cout << "EXISTING.  " << v.first << ", " << target[i].first << std::endl;
-#if defined(REPROBE_STAT)
-					this->reprobes += reprobe;
-					this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
-#endif
-
-					// reduction if needed.  should optimize out if not needed.
-					if (! std::is_same<reducer, ::fsc::DiscardReducer>::value) target[i].second = reduc(target[i].second, v.second);
-
-					//return make_existing_bucket_id(i, info);
-					return make_existing_bucket_id(i);
-				}
-#if defined(REPROBE_STAT)
-				++reprobe;
-#endif
-			}
-
-#if defined(REPROBE_STAT)
-			this->reprobes += reprobe;
-			this->max_reprobes = std::max(this->max_reprobes, static_cast<info_type>(reprobe));
-#endif
-		}
-
-		// now for the non-empty, or empty with offset, shift and insert, starting from NEXT bucket.
-
-
-		// first swap in at start of bucket, then deal with the swapped.
-		// swap until empty info
-		// then insert into last empty,
-		// then update info until info_empty
-
-		// scan for the next empty position
-		size_t end = find_next_empty_pos(target_info, next);
-
-		if (end < next) {
-			std::cout << "val " << v.first << " id " << id <<
-					" info " << static_cast<size_t>(info) <<
-					" start info " << static_cast<size_t>(target_info[id]) <<
-					" next info " << static_cast<size_t>(target_info[id+1]) <<
-					" start " << static_cast<size_t>(start) <<
-					" next " << static_cast<size_t>(next) <<
-					" end " << static_cast<size_t>(end) <<
-					" buckets " << buckets <<
-					" actual " << target_info.size() << std::endl;
-
-			std::cout << "INFOs from 0 " << 0 << " to id " << id << ": " << std::endl;
-			print(0, id, "\t");
-
-//			std::cout << "INFOs from prev " << (id - get_offset(info)) << " to id " << id << ": " << std::endl;
-//			print((id - get_offset(info)), id, "\t");
-//
-			std::cout << "INFOs from id " << id << " to end " << end << ": " << std::endl;
-			print(id, end, "\t");
-
-			std::cout << "INFOs from end " << end << " to next " << next << ": " << std::endl;
-			print(end, next, "\t");
-
-			//print();
-			throw std::logic_error("end should not be before next");
-		}
-
-		// now compact backwards.  first do the container via MEMMOVE
-		// can potentially be optimized to use only swap, if distance is long enough.
-		memmove((target.data() + next + 1), (target.data() + next), sizeof(value_type) * (end - next));
-		// and increment the infos.
-		for (size_t i = id + 1; i <= end; ++i) {
-			++(target_info[i]);
-			assert(get_offset(target_info[i]) > 0);
-		}
-
-#if defined(REPROBE_STAT)
-		this->shifts += (end - id);
-		this->max_shifts = std::max(this->max_shifts, (end - id));
-		this->moves += (end - next);
-		this->max_moves = std::max(this->max_moves, (end - next));
-#endif
-
-		// that's it.
-		target[next] = v;
-		//    return make_missing_bucket_id(next, target_info[id]);
-		return make_missing_bucket_id(next);
-
-	}
 
 
 
@@ -2158,6 +2042,9 @@ public:
     size_t lmax;
     size_t insert_bid;
 
+    assert((INSERT_LOOKAHEAD & (INSERT_LOOKAHEAD - 1)) == 0 && "INSERT_LOOKAHEAD should be a power of 2");
+    size_t LAHEAD2_MASK = LAHEAD2 - 1;
+
     while (i < max2) {
 
 #if defined(REPROBE_STAT)
@@ -2186,7 +2073,7 @@ public:
 
 
         // first get the bucket id
-        bid = bids[i % LAHEAD2];
+        bid = bids[i & LAHEAD2_MASK];
         insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
         while (insert_bid == insert_failed) {
           rehash(buckets << 1);  // resize.
@@ -2199,11 +2086,11 @@ public:
         // prefetch info_container.
         bid = hash((*(begin + i + LAHEAD2)).first) & mask;
         KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + bid), _MM_HINT_T0);
-        bids[i % LAHEAD2] = bid;
+        bids[i & LAHEAD2_MASK] = bid;
 
 
         // prefetch container
-        bid = bids[(i + INSERT_LOOKAHEAD) % LAHEAD2];
+        bid = bids[(i + INSERT_LOOKAHEAD) & LAHEAD2_MASK];
 //        if (is_normal(info_container[bid])) {
           bid1 = bid + 1;
           bid += get_offset(info_container[bid]);
@@ -2227,7 +2114,7 @@ public:
 
       // === same code as in insert(1)..
 
-      bid = bids[(i + INSERT_LOOKAHEAD) % LAHEAD2];
+      bid = bids[(i + INSERT_LOOKAHEAD) & LAHEAD2_MASK];
 
 
       // prefetch container
@@ -2243,7 +2130,7 @@ public:
           KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
 //      }
 
-      bid = bids[i % LAHEAD2];
+      bid = bids[i & LAHEAD2_MASK];
       insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
       while (insert_bid == insert_failed) {
         rehash(buckets << 1);  // resize.
@@ -2260,7 +2147,7 @@ public:
     for (; i < input_size; ++i) {
 
       // === same code as in insert(1)..
-      bid = bids[i % LAHEAD2];
+      bid = bids[i & LAHEAD2_MASK];
       insert_bid = insert_with_hint(container, info_container, bid, *(begin + i));
       while (insert_bid == insert_failed) {
         rehash(buckets << 1);  // resize.
@@ -2519,7 +2406,8 @@ public:
 
 		BL_BENCH_START(insert_sort);
 		// ========= now count, including duplicates
-		size_t new_buckets = next_power_of_2(static_cast<size_t>(::std::ceil(static_cast<double>(distinct_total_est) / max_load_factor)));
+		size_t new_buckets =
+				next_power_of_2(static_cast<size_t>(::std::ceil(static_cast<double>(distinct_total_est) / max_load_factor)));
 		size_t padded_buckets = new_buckets + std::numeric_limits<info_type>::max() + 1;
 
 		std::cout << "EST distinct " << distinct_total_est << " buckets " << new_buckets << " padded " << padded_buckets << std::endl;
@@ -2776,7 +2664,8 @@ public:
 //	__itt_resume();
 //#endif
 		// ========= now count, including duplicates
-		size_t new_buckets = next_power_of_2(static_cast<size_t>(::std::ceil(static_cast<double>(distinct_total_est) / max_load_factor)));
+		size_t new_buckets =
+				next_power_of_2(static_cast<size_t>(::std::ceil(static_cast<double>(distinct_total_est) / max_load_factor)));
 		size_t padded_buckets = new_buckets + std::numeric_limits<info_type>::max() + 1;
 
 		std::cout << "EST distinct " << distinct_total_est << " buckets " << new_buckets << " padded " << padded_buckets << std::endl;
