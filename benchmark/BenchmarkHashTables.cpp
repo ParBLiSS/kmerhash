@@ -691,7 +691,6 @@ typename Kmer, typename Value>
 void benchmark_hashmap_insert_mode(std::string name, std::vector<::std::pair<Kmer, Value> > const & input, size_t const query_frac, int vector_mode, int measure_mode,
 		double const max_load, double const min_load, unsigned char const insert_prefetch, unsigned char const query_prefetch, ::mxx::comm const & comm) {
   BL_BENCH_INIT(map);
-  cout << "hi";
   std::vector<Kmer> query;
 
   BL_BENCH_START(map);
@@ -841,10 +840,8 @@ void benchmark_hashmap_insert_mode(std::string name, std::vector<::std::pair<Kme
 }
 
 template <typename Kmer, typename Value>
-void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer, Value> > const & input, size_t const query_frac, int vector_mode, int measure_mode,
-		double const max_load, double const min_load, unsigned char const insert_prefetch, unsigned char const query_prefetch, ::mxx::comm const & comm) {
+void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer, Value> > const & input, size_t const query_frac, int measure_mode, ::mxx::comm const & comm) {
   BL_BENCH_INIT(map);
-  cout << "hi";
   std::vector<Kmer> query;
 
   BL_BENCH_START(map);
@@ -1655,6 +1652,39 @@ int main(int argc, char** argv) {
 			  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 		  }
 
+	} else if (map == RADIXSORT_TYPE) {
+	  //================ my new hashmap Robin hood
+		  if (dna == DNA_TYPE) {
+			  if (full) {
+				  BL_BENCH_START(test);
+				  benchmark_hashmap_radixsort<FullKmer, size_t>("hashmap_radixsort",
+				generate_input<FullKmer, size_t>(count, repeat_rate, canonical),
+						  query_frac, measure, comm);
+				  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
+			  } else {
+				  BL_BENCH_START(test);
+				  benchmark_hashmap_radixsort<Kmer, size_t>("hashmap_radixsort",
+				generate_input<Kmer, size_t>(count, repeat_rate, canonical),
+						  query_frac, measure, comm);
+				  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
+			  }
+		  } else if (dna == DNA5_TYPE) {
+			  BL_BENCH_START(test);
+			  benchmark_hashmap_radixsort<DNA5Kmer, size_t>("hashmap_radixsort",
+				generate_input<DNA5Kmer, size_t>(count, repeat_rate, canonical),
+						  query_frac, measure, comm);
+			  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
+		  } else if (dna == DNA16_TYPE) {
+			  BL_BENCH_START(test);
+			  benchmark_hashmap_radixsort<DNA16Kmer, size_t>("hashmap_radixsort",
+				generate_input<DNA16Kmer, size_t>(count, repeat_rate, canonical),
+						  query_frac, measure, comm);
+			  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
+		  } else {
+
+			  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
+		  }
+
   } else if (map == ROBINHOOD_PREFETCH_TYPE) {
 
     //================ my new hashmap offsets
@@ -1964,26 +1994,26 @@ int main(int argc, char** argv) {
 					  BL_BENCH_START(test);
 					  benchmark_hashmap_radixsort<FullKmer, size_t>("hashmap_radixsort",
                       deserialize_vector<::std::pair<FullKmer, size_t> >(fname),
-							  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+							  query_frac, measure, comm);
 					  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
 				  } else {
 					  BL_BENCH_START(test);
 					  benchmark_hashmap_radixsort<Kmer, size_t>("hashmap_radixsort",
 					  deserialize_vector<::std::pair<Kmer, size_t> >(fname),
-							  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+							  query_frac, measure, comm);
 					  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
 				  }
 			  } else if (dna == DNA5_TYPE) {
 				  BL_BENCH_START(test);
 				  benchmark_hashmap_radixsort<DNA5Kmer, size_t>("hashmap_radixsort",
 					deserialize_vector<::std::pair<DNA5Kmer, size_t> >(fname),
-						  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+					      query_frac, measure, comm);
 				  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
 			  } else if (dna == DNA16_TYPE) {
 				  BL_BENCH_START(test);
 				  benchmark_hashmap_radixsort<DNA16Kmer, size_t>("hashmap_radixsort",
 					deserialize_vector<::std::pair<DNA16Kmer, size_t> >(fname),
-						  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
+						  query_frac, measure, comm);
 				  BL_BENCH_COLLECTIVE_END(test, "hashmap_radixsort", count, comm);
 			  } else {
 
