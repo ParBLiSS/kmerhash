@@ -1795,7 +1795,7 @@ int main(int argc, char** argv) {
 		  }
 
 	} else if (map == RADIXSORT_TYPE) {
-	  //================ my new hashmap Robin hood
+	  //================ my new hashmap Radixsort
 		  if (dna == DNA_TYPE) {
 			  if (full) {
 				  BL_BENCH_START(test);
@@ -2130,7 +2130,7 @@ int main(int argc, char** argv) {
 				  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 			  }
 		} else if (map == RADIXSORT_TYPE) {
-		  //================ my new hashmap Robin hood
+		  //================ my new hashmap Radixsort
 			  if (dna == DNA_TYPE) {
 				  if (full) {
 					  BL_BENCH_START(test);
