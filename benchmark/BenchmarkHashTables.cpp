@@ -886,7 +886,7 @@ void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer,
     insert_type = "batch_insert";
 
     Kmer *keyArray = (Kmer *)_mm_malloc(input.size() * sizeof(Kmer), 64);
-    int32_t i;
+    size_t i;
     for(i = 0; i < input.size(); i++)
     {
         keyArray[i] = input[i].first;
@@ -1305,7 +1305,7 @@ parse_cmdline(int argc, char** argv) {
 	  size_t query_frac = 2;
 	  size_t repeat_rate = 10;
 
-	  int insert_mode = ITER_MODE;
+	  int insert_mode = INDEX_MODE;
 	  int measure_mode = MEASURE_INSERT;
 
 	  double max_load = 0.8;
@@ -2102,26 +2102,26 @@ int main(int argc, char** argv) {
 			  if (dna == DNA_TYPE) {
 				  if (full) {
 					  BL_BENCH_START(test);
-					  benchmark_hashmap_insert_mode<::fsc::hashmap_robinhood_offsets>("hashmap_robinhood_offsets_nooverflow_Full",
+					  benchmark_hashmap<::fsc::hashmap_robinhood_offsets>("hashmap_robinhood_offsets_nooverflow_Full",
 					deserialize_vector<::std::pair<FullKmer, size_t> >(fname),
 							  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
 					  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_nooverflow_Full", count, comm);
 				  } else {
 					  BL_BENCH_START(test);
-					  benchmark_hashmap_insert_mode<::fsc::hashmap_robinhood_offsets>("hashmap_robinhood_offsets_nooverflow_DNA",
+					  benchmark_hashmap<::fsc::hashmap_robinhood_offsets>("hashmap_robinhood_offsets_nooverflow_DNA",
 					deserialize_vector<::std::pair<Kmer, size_t> >(fname),
 							  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
 					  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_nooverflow_DNA", count, comm);
 				  }
 			  } else if (dna == DNA5_TYPE) {
 				  BL_BENCH_START(test);
-				  benchmark_hashmap_insert_mode<::fsc::hashmap_robinhood_offsets>("hashmap_robinhood_offsets_nooverflow_DNA5",
+				  benchmark_hashmap<::fsc::hashmap_robinhood_offsets>("hashmap_robinhood_offsets_nooverflow_DNA5",
 					deserialize_vector<::std::pair<DNA5Kmer, size_t> >(fname),
 						  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
 				  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_nooverflow_DNA5", count, comm);
 			  } else if (dna == DNA16_TYPE) {
 				  BL_BENCH_START(test);
-				  benchmark_hashmap_insert_mode<::fsc::hashmap_robinhood_offsets>("hashmap_robinhood_offsets_nooverflow_DNA16",
+				  benchmark_hashmap<::fsc::hashmap_robinhood_offsets>("hashmap_robinhood_offsets_nooverflow_DNA16",
 					deserialize_vector<::std::pair<DNA16Kmer, size_t> >(fname),
 						  query_frac, batch_mode, measure, max_load, min_load, insert_prefetch, query_prefetch, comm);
 				  BL_BENCH_COLLECTIVE_END(test, "hashmap_robinhood_offsets_nooverflow_DNA16", count, comm);
