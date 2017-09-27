@@ -28,90 +28,107 @@
 /*
  * get the next power of 2 for unsigned integer type.  based on http://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
  */
+// USE THE SIZEOF SPECIALIZATIONS - no compiler warning about shifting more than size of element.
+//template <typename T>
+//inline T next_power_of_2(T x) {
+//	static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value, "ERROR: can only find power of 2 for unsigned integers.");
+//
+//	--x;
+//	switch (sizeof(T)) {
+//	case 8:
+//		x |= x >> 32;
+//	case 4:
+//		x |= x >> 16;
+//	case 2:
+//		x |= x >> 8;
+//	default:
+//		x |= x >> 4;
+//		x |= x >> 2;
+//		x |= x >> 1;
+//		break;
+//	}
+//	++x;
+//	return x;
+//}
+//
+#if defined(__LZCNT__)
+
+#include <x86intrin.h>
+
 template <typename T>
-inline T next_power_of_2(T x) {
-	static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value, "ERROR: can only find power of 2 for unsigned integers.");
+inline constexpr T next_power_of_2(T x) {
+
+  static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value,
+                "ERROR: can only find power of 2 for unsigned integers.");
+  return  0x1ULL << (64 - _lzcnt_u64(x-1));
+}
+
+#else
+
+template <typename T, typename ::std::enable_if<
+	 (sizeof(T) == 1), int>::type = 1>
+inline constexpr T next_power_of_2(T x) {
+  static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value,
+                "ERROR: can only find power of 2 for unsigned integers.");
 
 	--x;
-	switch (sizeof(T)) {
-	case 8:
-		x |= x >> 32;
-	case 4:
-		x |= x >> 16;
-	case 2:
-		x |= x >> 8;
-	default:
 		x |= x >> 4;
 		x |= x >> 2;
 		x |= x >> 1;
-		break;
-	}
 	++x;
 	return x;
 }
 
 
+template <typename T, typename ::std::enable_if<
+	 (sizeof(T) == 2), int>::type = 1>
+inline constexpr T next_power_of_2(T x) {
 
+  static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value,
+                "ERROR: can only find power of 2 for unsigned integers.");
+	--x;
+		x |= x >> 8;
+		x |= x >> 4;
+		x |= x >> 2;
+		x |= x >> 1;
+	++x;
+	return x;
+}
 
-//template <typename T, typename ::std::enable_if<
-//	::std::is_integral<T>::value && !::std::is_signed<T>::value &&
-//	 (sizeof(T) == 1), int>::type = 1>
-//inline constexpr T next_power_of_2(T x) {
-//
-//	--x;
-//		x |= x >> 4;
-//		x |= x >> 2;
-//		x |= x >> 1;
-//	++x;
-//	return x;
-//}
-//
-//
-//template <typename T, typename ::std::enable_if<
-//	::std::is_integral<T>::value && !::std::is_signed<T>::value &&
-//	 (sizeof(T) == 2), int>::type = 1>
-//inline constexpr T next_power_of_2(T x) {
-//
-//	--x;
-//		x |= x >> 8;
-//		x |= x >> 4;
-//		x |= x >> 2;
-//		x |= x >> 1;
-//	++x;
-//	return x;
-//}
-//
-//template <typename T, typename ::std::enable_if<
-//	::std::is_integral<T>::value && !::std::is_signed<T>::value &&
-//	 (sizeof(T) == 4), int>::type = 1>
-//inline constexpr T next_power_of_2(T x) {
-//
-//	--x;
-//	    x |= x >> 16;
-//		x |= x >> 8;
-//		x |= x >> 4;
-//		x |= x >> 2;
-//		x |= x >> 1;
-//	++x;
-//	return x;
-//}
-//
-//template <typename T, typename ::std::enable_if<
-//	::std::is_integral<T>::value && !::std::is_signed<T>::value &&
-//	 (sizeof(T) == 8), int>::type = 1 >
-//inline constexpr T next_power_of_2(T x) {
-//
-//	--x;
-//	    x |= x >> 32;
-//  	    x |= x >> 16;
-//		x |= x >> 8;
-//		x |= x >> 4;
-//		x |= x >> 2;
-//		x |= x >> 1;
-//	++x;
-//	return x;
-//}
+template <typename T, typename ::std::enable_if<
+	 (sizeof(T) == 4), int>::type = 1>
+inline constexpr T next_power_of_2(T x) {
+  static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value,
+                "ERROR: can only find power of 2 for unsigned integers.");
 
+	--x;
+	  x |= x >> 16;
+		x |= x >> 8;
+		x |= x >> 4;
+		x |= x >> 2;
+		x |= x >> 1;
+	++x;
+	return x;
+}
+
+template <typename T, typename ::std::enable_if<
+	 (sizeof(T) == 8), int>::type = 1 >
+inline constexpr T next_power_of_2(T x) {
+  static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value,
+                "ERROR: can only find power of 2 for unsigned integers.");
+
+	--x;
+	  x |= x >> 32;
+  	x |= x >> 16;
+		x |= x >> 8;
+		x |= x >> 4;
+		x |= x >> 2;
+		x |= x >> 1;
+	++x;
+	return x;
+}
+
+#endif
 
 
 #endif /* KMERHASH_MATH_UTILS_HPP_ */
