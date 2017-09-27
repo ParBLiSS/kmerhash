@@ -181,7 +181,12 @@ namespace dsc  // distributed std container
 
           template <typename OT, typename X = decltype(declval<typename Base::DistTransformedFunc>().h),
               typename ::std::enable_if<
+#if defined(__SSE4_1__)
               ::std::is_same<::fsc::hash::murmur3sse32<Key>, X>::value ||
+#endif
+#if defined(__AVX2__)
+              ::std::is_same<::fsc::hash::murmur3avx32<Key>, X>::value ||
+#endif
                ::std::is_same<::fsc::hash::crc32c<Key>, X>::value,
                 int>::type = 1>
           void operator()(Key const * x, size_t len, OT * ids) const {
@@ -193,7 +198,12 @@ namespace dsc  // distributed std container
 
           template <typename V, typename OT, typename X = decltype(declval<typename Base::DistTransformedFunc>().h),
               typename ::std::enable_if<
+#if defined(__SSE4_1__)
               ::std::is_same<::fsc::hash::murmur3sse32<Key>, X>::value ||
+#endif
+#if defined(__AVX2__)
+              ::std::is_same<::fsc::hash::murmur3avx32<Key>, X>::value ||
+#endif
                ::std::is_same<::fsc::hash::crc32c<Key>, X>::value,
                 int>::type = 1>
           void operator()(::std::pair<Key, V> const * x, size_t len, OT * ids) const {
@@ -250,7 +260,12 @@ namespace dsc  // distributed std container
 
           template <typename V, typename OT, typename X = decltype(declval<typename Base::DistTransformedFunc>().h),
               typename ::std::enable_if<
+#if defined(__SSE4_1__)
               ::std::is_same<::fsc::hash::murmur3sse32<Key>, X>::value ||
+#endif
+#if defined(__AVX2__)
+              ::std::is_same<::fsc::hash::murmur3avx32<Key>, X>::value ||
+#endif
                ::std::is_same<::fsc::hash::crc32c<Key>, X>::value,
                 int>::type = 1>
           void operator()(::std::pair<const Key, V> const * x, size_t len, OT * ids) const {
@@ -489,8 +504,13 @@ namespace dsc  // distributed std container
       /// appropriate when the input does not need to be permuted (insert, find, erase, update), when no output to match up, or output embeds the keys.
       template <typename IT, typename OT, typename X = decltype(declval<typename Base::DistTransformedFunc>().h),
       typename ::std::enable_if<
-        !(::std::is_same<::fsc::hash::murmur3sse32<Key>, X>::value ||
-            ::std::is_same<::fsc::hash::crc32c<Key>, X>::value),
+#if defined(__SSE4_1__)
+              !::std::is_same<::fsc::hash::murmur3sse32<Key>, X>::value &&
+#endif
+#if defined(__AVX2__)
+              !::std::is_same<::fsc::hash::murmur3avx32<Key>, X>::value &&
+#endif
+            !::std::is_same<::fsc::hash::crc32c<Key>, X>::value,
                      int>::type = 1>
       std::vector<size_t> transform_and_bucket(IT _begin, IT _end, OT bucketed) {
 
@@ -576,7 +596,12 @@ if (measure_mode == MEASURE_RESERVE)
       /// appropriate when the input does not need to be permuted (insert, find, erase, update), when no output to match up, or output embeds the keys.
       template <typename IT, typename OT, typename X = decltype(declval<typename Base::DistTransformedFunc>().h),
       typename ::std::enable_if<
-        ::std::is_same<::fsc::hash::murmur3sse32<Key>, X>::value ||
+#if defined(__SSE4_1__)
+              ::std::is_same<::fsc::hash::murmur3sse32<Key>, X>::value ||
+#endif
+#if defined(__AVX2__)
+              ::std::is_same<::fsc::hash::murmur3avx32<Key>, X>::value ||
+#endif
             ::std::is_same<::fsc::hash::crc32c<Key>, X>::value,
                      int>::type = 1>
       std::vector<size_t> transform_and_bucket(IT _begin, IT _end, OT bucketed) {
@@ -665,7 +690,12 @@ if (measure_mode == MEASURE_RESERVE)
       /// appropriate when the input does not need to be permuted (insert, find, erase, update), when no output to match up, or output embeds the keys.
       template <typename IT, typename OT, typename X = decltype(declval<typename Base::DistTransformedFunc>().h),
         typename ::std::enable_if<
-                    ::std::is_same<::fsc::hash::murmur3sse32<Key>, X>::value ||
+#if defined(__SSE4_1__)
+              ::std::is_same<::fsc::hash::murmur3sse32<Key>, X>::value ||
+#endif
+#if defined(__AVX2__)
+              ::std::is_same<::fsc::hash::murmur3avx32<Key>, X>::value ||
+#endif
                      ::std::is_same<::fsc::hash::crc32c<Key>, X>::value,
                    int>::type = 1>
       std::vector<size_t> transform_and_bucket(IT _begin, IT _end, OT bucketed) {
@@ -673,7 +703,7 @@ if (measure_mode == MEASURE_RESERVE)
         assert((this->comm.size() > 1) && "this function is for comm size larger than 1 only.");
 
 
-        if (this->comm.rank() == 0) std::cout << "murmur3sse32 based transform_and_bucket" << std::endl;
+        if (this->comm.rank() == 0) std::cout << "SSE Murmur32 or crc32c based transform_and_bucket" << std::endl;
         BL_BENCH_INIT(transform_bucket);
 
 

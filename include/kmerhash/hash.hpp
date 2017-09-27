@@ -105,7 +105,7 @@ namespace fsc {
       // original: body: 16 inst per iter of 4 bytes; tail: 15 instr. ; finalization:  8 instr.
       // about 4 inst per byte + 8, for each hash value.
       template <typename T, size_t bytes = sizeof(T)>
-      class Murmur3VEC {
+      class Murmur3AVX {
 
         protected:
           // make static so initialization at beginning of class...
@@ -189,7 +189,7 @@ namespace fsc {
           }
 
         public:
-          Murmur3VEC(uint32_t _seed) :
+          Murmur3AVX(uint32_t _seed) :
             seed(_mm256_set1_epi32(_seed)),
             mix_const1(_mm256_set1_epi32(0x85ebca6b)),
             mix_const2(_mm256_set1_epi32(0xc2b2ae35)),
@@ -258,7 +258,7 @@ namespace fsc {
 
           /// NOTE: non-power of 2 length keys ALWAYS use AVX gather, which may be slower.
           template <size_t len = bytes,
-              typename std::enable_if<(len > 16) || ((len & (len - 1)) > 0), int>::type = 1>
+              typename std::enable_if<((len & (len - 1)) > 0) && ((len & 31) > 0), int>::type = 1>
           FSC_FORCE_INLINE __m256i hash8(T const *  key) const {
             // process 8 streams at a time.  all should be the same length.
 
@@ -323,6 +323,63 @@ namespace fsc {
             return h1;
 
           }
+
+
+          /// NOTE: multiples of 32.
+          template <size_t len = bytes,
+              typename std::enable_if<((len & 31) == 0), int>::type = 1>
+          FSC_FORCE_INLINE __m256i hash8(T const *  key) const {
+            // process 8 streams at a time.  all should be the same length.
+
+            // at this point, i32gather with its 20 cycle latency and 5 to 10 cycle CPI, no additional cost,
+            // and can pipeline 4 at a time, about 40 cycles?
+            // becomes competitive vs the shuffle/blend/permute approach, which grew superlinearly from 8 to 16 byte elements.
+            // while we still have 8 "update"s, the programming cost is becoming costly.
+          // an alternative might be using _mm256_set_m128i(_mm_lddqu_si128, _mm_lddqu_si128), which has about 5 cycles latency in total.
+          // still need to shuffle more than 4 times.
+
+            __m256i k0, k1, k2, k3, k4, k5, k6, k7;
+            __m256i h1 = seed;
+
+            //----------
+            // do it in blocks of 4 bytes.
+            const int nblocks = len >> 2;
+
+            // do blocks of 8 blocks
+            int i = 0;
+            for (; i < nblocks; i += 8) {
+              k0 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i    , offsets, 1);  // avx2
+              k1 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 1, offsets, 1);  // avx2
+              h1 = update32(h1, k0); // transpose 4x2  SSE2
+              k2 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 2, offsets, 1);  // avx2
+              h1 = update32(h1, k1); // transpose 4x2  SSE2
+              k3 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 3, offsets, 1);  // avx2
+              h1 = update32(h1, k2); // transpose 4x2  SSE2
+              k4 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 4, offsets, 1);  // avx2
+              h1 = update32(h1, k3); // transpose 4x2  SSE2
+              k5 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 5, offsets, 1);  // avx2
+              h1 = update32(h1, k4); // transpose 4x2  SSE2
+              k6 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 6, offsets, 1);  // avx2
+              h1 = update32(h1, k5); // transpose 4x2  SSE2
+              k7 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 7, offsets, 1);  // avx2
+
+              // already at the right places, so just call update32.
+              // row 0
+              h1 = update32(h1, k6); // transpose 4x2  SSE2
+              h1 = update32(h1, k7); // transpose 4x2  SSE2
+            }
+
+            //----------
+            // finalization
+            // or the length.
+            h1 = _mm256_xor_si256(h1, length);  // sse
+
+            h1 = fmix32(h1);  // ***** SSE4.1 **********
+
+            return h1;
+
+          }
+
 
           template <size_t len = bytes,
               typename std::enable_if<(len == 16), int>::type = 1>
@@ -570,13 +627,15 @@ namespace fsc {
 
       };
 
+#endif
 
-#elif defined(__SSE4_1__)
+
+#if defined(__SSE4_1__)
       // for 32 bit buckets
       // original: body: 16 inst per iter of 4 bytes; tail: 15 instr. ; finalization:  8 instr.
       // about 4 inst per byte + 8, for each hash value.
       template <typename T, size_t bytes = sizeof(T)>
-      class Murmur3VEC {
+      class Murmur3SSE {
 
         protected:
           // make static so initialization at beginning of class...
@@ -656,7 +715,7 @@ namespace fsc {
           }
 
         public:
-          Murmur3VEC(uint32_t _seed) :
+          Murmur3SSE(uint32_t _seed) :
             seed(_mm_set1_epi32(_seed)),
             mix_const1(_mm_set1_epi32(0x85ebca6b)),
             mix_const2(_mm_set1_epi32(0xc2b2ae35)),
@@ -679,159 +738,160 @@ namespace fsc {
           // finalize: 11 inst. for 4 elements.
           // about 5 inst per byte + 11 inst for 4 elements.
           // for types that are have size larger than 8 or not power of 2.
-          template <uint64_t len = bytes,
-              typename std::enable_if<(len > 8) || ((len & (len - 1)) > 0), int>::type = 1>
-          FSC_FORCE_INLINE void hash( T const * key, uint8_t nstreams, uint32_t * out) const {
-            // process 4 streams at a time.  all should be the same length.
+//          template <uint64_t len = bytes,
+//              typename std::enable_if<((len & (len - 1)) > 0) && ((len & 15) > 0), int>::type = 1>
+//          FSC_FORCE_INLINE void hash( T const * key, uint8_t nstreams, uint32_t * out) const {
+//            // process 4 streams at a time.  all should be the same length.
+//
+//            assert((nstreams <= 4) && "maximum number of streams is 4");
+//            assert((nstreams > 0) && "minimum number of streams is 1");
+//
+//            // example layout, with each dash representing 2 bytes
+//            //     AAAAABBBBBCCCCCDDDDDEEEEE
+//            // k0  --------
+//            // k1       --------
+//            // k2            --------
+//            // k3                 --------
+//            __m128i k0, k1, k2, k3, t0, t1;
+//            __m128i h1 = seed;
+//
+//            //----------
+//            // first do blocks of 16 bytes.
+//
+//            const int nblocks = len >> 4;
+//
+//            // init to zero
+//            switch (nstreams) {
+//              case 1: k1 = zero;  // SSE
+//              case 2: k2 = zero;  // SSE
+//              case 3: k3 = zero;  // SSE
+//              default:
+//                break;
+//            }
+//
+//            for (int i = 0; i < nblocks; ++i) {
+//              // read streams
+//              switch (nstreams) {
+//                case 4: k3 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 3) + i);  // SSE3
+//                case 3: k2 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 2) + i);  // SSE3
+//                case 2: k1 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 1) + i);  // SSE3
+//                case 1: k0 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key) + i);  // SSE3
+//                default:
+//                  break;
+//              }
+//
+//              // transpose the streams (4x4 matrix), so that each uint32 in h1 is one hash value.
+//              //  this adds extra 8 instructions in total
+//              t0 = _mm_unpacklo_epi32(k0, k1); // transpose 2x2   SSE2
+//              t1 = _mm_unpacklo_epi32(k2, k3); // transpose 2x2   SSE2
+//
+//              // row 0
+//              h1 = update32(h1, _mm_unpacklo_epi64(t0, t1)); // transpose 4x2  SSE2
+//
+//              // row 1
+//              h1 = update32(h1, _mm_unpackhi_epi64(t0, t1)); // transpose 4x2  SSE2
+//
+//              // transpose some more.
+//              t0 = _mm_unpackhi_epi32(k0, k1); // transpose 2x2  SSE2
+//              t1 = _mm_unpackhi_epi32(k2, k3); // transpose 2x2  SSE2
+//
+//              // row 2
+//              h1 = update32(h1, _mm_unpacklo_epi64(t0, t1));  // transpose 4x2  SSE2
+//
+//              // row 3
+//              h1 = update32(h1, _mm_unpackhi_epi64(t0, t1));   // transpose 4x2  SSE2
+//            }
+//
+//            // next do the remainder if any.
+//            if ((len & 0xF) > 0) {
+//
+//              // read more stream.  over read, and zero out.
+//              switch (nstreams) {
+//                case 4: k3 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 3) + nblocks);  // SSE3
+//                case 3: k2 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 2) + nblocks);  // SSE3
+//                case 2: k1 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 1) + nblocks);  // SSE3
+//                case 1: k0 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key) + nblocks);  // SSE3
+//                default:
+//                  break;
+//              }
+//
+//              // transpose (8 ops), set missing bytes to 0 (2 extra ops), and do as many words as there are.
+//
+//              // needed by all cases.
+//              t0 = _mm_unpacklo_epi32(k0, k1);         // transpose 2x2   SSE2
+//              t1 = _mm_unpacklo_epi32(k2, k3);         // transpose 2x2   SSE2
+//
+//
+//              // zeroing out unused bytes takes 2 instructions.
+//              constexpr uint8_t words = ((len & 15UL) + 3) >> 2;  // use ceiling word count.  else case 3 needs conditional to check for 12 bytes
+//              constexpr uint8_t rem = len & 0x3;
+//              //            std::cout << " len " << static_cast<size_t>(len) << " words " << static_cast<size_t>(words) <<
+//              //                " rem " << static_cast<size_t>(rem) << std::endl;
+//              switch (words) {
+//                case 4:
+//                  h1 = update32(h1, _mm_unpacklo_epi64(t0, t1)); // transpose 4x2  SSE2
+//                  h1 = update32(h1, _mm_unpackhi_epi64(t0, t1)); // transpose 4x2  SSE2
+//
+//                  t0 = _mm_unpackhi_epi32(k0, k1);         // transpose 2x2   SSE2
+//                  t1 = _mm_unpackhi_epi32(k2, k3);         // transpose 2x2   SSE2
+//                  h1 = update32(h1, _mm_unpacklo_epi64(t0, t1));
+//                  // last word needs to be padded with 0 always.
+//                  h1 =  update32_zeroing(h1, _mm_unpackhi_epi64(t0, t1), rem);  // remainder  > 0
+//                  break;
+//                case 3:
+//                  h1 = update32(h1, _mm_unpacklo_epi64(t0, t1)); // transpose 4x2  SSE2
+//                  h1 = update32(h1, _mm_unpackhi_epi64(t0, t1)); // transpose 4x2  SSE2
+//
+//                  t0 = _mm_unpackhi_epi32(k0, k1);         // transpose 2x2   SSE2
+//                  t1 = _mm_unpackhi_epi32(k2, k3);         // transpose 2x2   SSE2
+//                  // last word needs to be padded with 0.  3 rows only
+//                  h1 = (rem > 0) ?
+//                      update32_zeroing(h1, _mm_unpacklo_epi64(t0, t1), rem) :  // remainder  >= 0
+//                      update32(h1, _mm_unpacklo_epi64(t0, t1));
+//                  break;
+//                case 2:
+//                  h1 = update32(h1, _mm_unpacklo_epi64(t0, t1)); // transpose 4x2  SSE2
+//                  // last word needs to be padded with 0.  2 rows only.  rem >= 0
+//                  h1 = (rem > 0) ?
+//                      update32_zeroing(h1, _mm_unpackhi_epi64(t0, t1), rem) :  // remainder  >= 0
+//                      update32(h1, _mm_unpackhi_epi64(t0, t1));
+//                  break;
+//                case 1:
+//                  // last word needs to be padded with 0.  1 rows only.  remainder must be >= 0
+//                  h1 = (rem > 0) ?
+//                      update32_zeroing(h1, _mm_unpacklo_epi64(t0, t1), rem) :  // remainder  >= 0
+//                      update32(h1, _mm_unpacklo_epi64(t0, t1));
+//                  break;
+//                default:
+//                  break;
+//              }
+//
+//            }
+//
+//            //----------
+//            // finalization
+//            // or the length.
+//            h1 = _mm_xor_si128(h1, length);  // sse
+//
+//            h1 = fmix32(h1);  // ***** SSE4.1 **********
+//
+//            // store all 4 out
+//            switch (nstreams) {
+//              case 4: _mm_storeu_si128((__m128i*)out, h1);  // sse
+//              break;
+//              case 3: out[2] = _mm_extract_epi32(h1, 2);   // SSE4.1  2 cycles.  maskmoveu takes 10 (ivybridge)
+//              case 2: *(reinterpret_cast<uint64_t *>(out)) = _mm_extract_epi64(h1, 0);
+//              break;
+//              case 1: out[0] = _mm_extract_epi32(h1, 0);
+//              default:
+//                break;;
+//            }
+//          }
+//
 
-            assert((nstreams <= 4) && "maximum number of streams is 4");
-            assert((nstreams > 0) && "minimum number of streams is 1");
-
-            // example layout, with each dash representing 2 bytes
-            //     AAAAABBBBBCCCCCDDDDDEEEEE
-            // k0  --------
-            // k1       --------
-            // k2            --------
-            // k3                 --------
-            __m128i k0, k1, k2, k3, t0, t1;
-            __m128i h1 = seed;
-
-            //----------
-            // first do blocks of 16 bytes.
-
-            const int nblocks = len >> 4;
-
-            // init to zero
-            switch (nstreams) {
-              case 1: k1 = zero;  // SSE
-              case 2: k2 = zero;  // SSE
-              case 3: k3 = zero;  // SSE
-              default:
-                break;
-            }
-
-            for (int i = 0; i < nblocks; ++i) {
-              // read streams
-              switch (nstreams) {
-                case 4: k3 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 3) + i);  // SSE3
-                case 3: k2 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 2) + i);  // SSE3
-                case 2: k1 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 1) + i);  // SSE3
-                case 1: k0 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key) + i);  // SSE3
-                default:
-                  break;
-              }
-
-              // transpose the streams (4x4 matrix), so that each uint32 in h1 is one hash value.
-              //  this adds extra 8 instructions in total
-              t0 = _mm_unpacklo_epi32(k0, k1); // transpose 2x2   SSE2
-              t1 = _mm_unpacklo_epi32(k2, k3); // transpose 2x2   SSE2
-
-              // row 0
-              h1 = update32(h1, _mm_unpacklo_epi64(t0, t1)); // transpose 4x2  SSE2
-
-              // row 1
-              h1 = update32(h1, _mm_unpackhi_epi64(t0, t1)); // transpose 4x2  SSE2
-
-              // transpose some more.
-              t0 = _mm_unpackhi_epi32(k0, k1); // transpose 2x2  SSE2
-              t1 = _mm_unpackhi_epi32(k2, k3); // transpose 2x2  SSE2
-
-              // row 2
-              h1 = update32(h1, _mm_unpacklo_epi64(t0, t1));  // transpose 4x2  SSE2
-
-              // row 3
-              h1 = update32(h1, _mm_unpackhi_epi64(t0, t1));   // transpose 4x2  SSE2
-            }
-
-            // next do the remainder if any.
-            if ((len & 0xF) > 0) {
-
-              // read more stream.  over read, and zero out.
-              switch (nstreams) {
-                case 4: k3 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 3) + nblocks);  // SSE3
-                case 3: k2 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 2) + nblocks);  // SSE3
-                case 2: k1 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 1) + nblocks);  // SSE3
-                case 1: k0 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key) + nblocks);  // SSE3
-                default:
-                  break;
-              }
-
-              // transpose (8 ops), set missing bytes to 0 (2 extra ops), and do as many words as there are.
-
-              // needed by all cases.
-              t0 = _mm_unpacklo_epi32(k0, k1);         // transpose 2x2   SSE2
-              t1 = _mm_unpacklo_epi32(k2, k3);         // transpose 2x2   SSE2
-
-
-              // zeroing out unused bytes takes 2 instructions.
-              constexpr uint8_t words = ((len & 15UL) + 3) >> 2;  // use ceiling word count.  else case 3 needs conditional to check for 12 bytes
-              constexpr uint8_t rem = len & 0x3;
-              //            std::cout << " len " << static_cast<size_t>(len) << " words " << static_cast<size_t>(words) <<
-              //                " rem " << static_cast<size_t>(rem) << std::endl;
-              switch (words) {
-                case 4:
-                  h1 = update32(h1, _mm_unpacklo_epi64(t0, t1)); // transpose 4x2  SSE2
-                  h1 = update32(h1, _mm_unpackhi_epi64(t0, t1)); // transpose 4x2  SSE2
-
-                  t0 = _mm_unpackhi_epi32(k0, k1);         // transpose 2x2   SSE2
-                  t1 = _mm_unpackhi_epi32(k2, k3);         // transpose 2x2   SSE2
-                  h1 = update32(h1, _mm_unpacklo_epi64(t0, t1));
-                  // last word needs to be padded with 0 always.
-                  h1 =  update32_zeroing(h1, _mm_unpackhi_epi64(t0, t1), rem);  // remainder  > 0
-                  break;
-                case 3:
-                  h1 = update32(h1, _mm_unpacklo_epi64(t0, t1)); // transpose 4x2  SSE2
-                  h1 = update32(h1, _mm_unpackhi_epi64(t0, t1)); // transpose 4x2  SSE2
-
-                  t0 = _mm_unpackhi_epi32(k0, k1);         // transpose 2x2   SSE2
-                  t1 = _mm_unpackhi_epi32(k2, k3);         // transpose 2x2   SSE2
-                  // last word needs to be padded with 0.  3 rows only
-                  h1 = (rem > 0) ?
-                      update32_zeroing(h1, _mm_unpacklo_epi64(t0, t1), rem) :  // remainder  >= 0
-                      update32(h1, _mm_unpacklo_epi64(t0, t1));
-                  break;
-                case 2:
-                  h1 = update32(h1, _mm_unpacklo_epi64(t0, t1)); // transpose 4x2  SSE2
-                  // last word needs to be padded with 0.  2 rows only.  rem >= 0
-                  h1 = (rem > 0) ?
-                      update32_zeroing(h1, _mm_unpackhi_epi64(t0, t1), rem) :  // remainder  >= 0
-                      update32(h1, _mm_unpackhi_epi64(t0, t1));
-                  break;
-                case 1:
-                  // last word needs to be padded with 0.  1 rows only.  remainder must be >= 0
-                  h1 = (rem > 0) ?
-                      update32_zeroing(h1, _mm_unpacklo_epi64(t0, t1), rem) :  // remainder  >= 0
-                      update32(h1, _mm_unpacklo_epi64(t0, t1));
-                  break;
-                default:
-                  break;
-              }
-
-            }
-
-            //----------
-            // finalization
-            // or the length.
-            h1 = _mm_xor_si128(h1, length);  // sse
-
-            h1 = fmix32(h1);  // ***** SSE4.1 **********
-
-            // store all 4 out
-            switch (nstreams) {
-              case 4: _mm_storeu_si128((__m128i*)out, h1);  // sse
-              break;
-              case 3: out[2] = _mm_extract_epi32(h1, 2);   // SSE4.1  2 cycles.  maskmoveu takes 10 (ivybridge)
-              case 2: *(reinterpret_cast<uint64_t *>(out)) = _mm_extract_epi64(h1, 0);
-              break;
-              case 1: out[0] = _mm_extract_epi32(h1, 0);
-              default:
-                break;;
-            }
-          }
-
-
-          template <uint64_t len = bytes,
-              typename std::enable_if<(len <= 8) && ((len & (len - 1))== 0), int>::type = 1>
+          // power of 2, or multiples of 16.
+//          template <uint64_t len = bytes,
+//              typename std::enable_if<((len & (len - 1)) == 0) || ((len & 15) == 0), int>::type = 1>
           FSC_FORCE_INLINE void hash(T const * key, uint8_t nstreams, uint32_t * out) const {
             // process 4 streams at a time.  all should be the same length.
 
@@ -858,8 +918,9 @@ namespace fsc {
             _mm_storeu_si128((__m128i*)out, res);
           }
 
+          // not power of 2, and not multiples of 16.
           template <uint64_t len = bytes,
-              typename std::enable_if<(len > 8) || ((len & (len - 1)) > 0), int>::type = 1>
+              typename std::enable_if<((len & (len - 1)) > 0) && ((len & 15) > 0), int>::type = 1>
           FSC_FORCE_INLINE __m128i hash4(T const *  key) const {
             // process 4 streams at a time.  all should be the same length.
 
@@ -972,6 +1033,61 @@ namespace fsc {
             return h1;
 
           }
+
+
+          // multiples of 16
+          template <uint64_t len = bytes,
+              typename std::enable_if<((len & 15) == 0), int>::type = 1>
+          FSC_FORCE_INLINE __m128i hash4(T const *  key) const {
+            // process 4 streams at a time.  all should be the same length.
+
+            __m128i k0, k1, k2, k3, t0, t1;
+            __m128i h1 = seed;
+
+            //----------
+            // do blocks of 16 bytes.
+            const int nblocks = len >> 4;
+
+            // init to zero
+            for (int i = 0; i < nblocks; ++i) {
+
+              k0 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key) + i);  // SSE3
+              k1 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 1) + i);  // SSE3
+              k2 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 2) + i);  // SSE3
+              k3 = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(key + 3) + i);  // SSE3
+
+              // transpose the streams (4x4 matrix), so that each uint32 in h1 is one hash value.
+              //  this adds extra 8 instructions in total
+              t0 = _mm_unpacklo_epi32(k0, k1); // transpose 2x2   SSE2
+              t1 = _mm_unpacklo_epi32(k2, k3); // transpose 2x2   SSE2
+
+              // row 0
+              h1 = update32(h1, _mm_unpacklo_epi64(t0, t1)); // transpose 4x2  SSE2
+
+              // row 1
+              h1 = update32(h1, _mm_unpackhi_epi64(t0, t1)); // transpose 4x2  SSE2
+
+              // transpose some more.
+              t0 = _mm_unpackhi_epi32(k0, k1); // transpose 2x2  SSE2
+              t1 = _mm_unpackhi_epi32(k2, k3); // transpose 2x2  SSE2
+
+              // row 2
+              h1 = update32(h1, _mm_unpacklo_epi64(t0, t1));  // transpose 4x2  SSE2
+
+              // row 3
+              h1 = update32(h1, _mm_unpackhi_epi64(t0, t1));   // transpose 4x2  SSE2
+            }
+            //----------
+            // finalization
+            // or the length.
+            h1 = _mm_xor_si128(h1, length);  // sse
+
+            h1 = fmix32(h1);  // ***** SSE4.1 **********
+
+            return h1;
+
+          }
+
 
           template <uint64_t len = bytes,
               typename std::enable_if<(len == 8), int>::type = 1>
@@ -1137,7 +1253,13 @@ namespace fsc {
         /// operator to compute hash value
         inline uint64_t operator()(const T & key) const {
           if (sizeof(T) >= 8)  // more than 64 bits, so use the lower 64 bits.
-            return *(reinterpret_cast<uint64_t*>(&key));
+            return *(reinterpret_cast<uint64_t const *>(&key));
+          else if (sizeof(T) == 4)
+            return *(reinterpret_cast<uint32_t const *>(&key));
+          else if (sizeof(T) == 2)
+            return *(reinterpret_cast<uint16_t const *>(&key));
+          else if (sizeof(T) == 1)
+            return *(reinterpret_cast<uint8_t const *>(&key));
           else {
             // copy into 64 bits
             uint64_t out = 0;
@@ -1157,18 +1279,18 @@ namespace fsc {
      *
      */
     template <typename T>
-    class murmur3sse32 {
+    class murmur3avx32 {
 
 
       protected:
-        ::fsc::hash::sse::Murmur3VEC<T> hasher;
+        ::fsc::hash::sse::Murmur3AVX<T> hasher;
         mutable void const * kptrs[8];
         mutable uint32_t temp[8];
 
       public:
         static constexpr uint8_t batch_size = 8;
 
-        murmur3sse32(uint32_t const & _seed = 43 ) : hasher(_seed) {};
+        murmur3avx32(uint32_t const & _seed = 43 ) : hasher(_seed) {};
 
         inline uint32_t operator()(const T & key) const
         {
@@ -1270,8 +1392,9 @@ namespace fsc {
 
     };
 
+#endif
 
-#elif defined(__SSE4_1__)
+#if defined(__SSE4_1__)
     /**
      * @brief MurmurHash.  using lower 64 bits.
      *
@@ -1281,7 +1404,7 @@ namespace fsc {
 
 
       protected:
-        ::fsc::hash::sse::Murmur3VEC<T> hasher;
+        ::fsc::hash::sse::Murmur3SSE<T> hasher;
         mutable void const * kptrs[4];
         mutable uint32_t temp[4];
 
@@ -1676,7 +1799,7 @@ namespace fsc {
     };
 
   } // namespace hash
-} // namespace bliss
+} // namespace fsc
 
 
 

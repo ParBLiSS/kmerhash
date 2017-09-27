@@ -12,6 +12,11 @@ if (BUILD_BENCHMARKS)
 
 
 # EXECUTABLES
+	# benchmark executable for hash functions
+	add_executable(benchmark_hashes BenchmarkHashFunctions.cpp)
+	target_link_libraries(benchmark_hashes ${EXTRA_LIBS})
+
+
 	# benchmark executable, FARM and MURMUR
 	add_executable(benchmark_hashtables_FARM BenchmarkHashTables.cpp)
 	SET_TARGET_PROPERTIES(benchmark_hashtables_FARM

@@ -240,6 +240,8 @@ TYPED_TEST_P(KmerHashTest, farm)
 	this->template hash_vector64<bliss::kmer::hash::farm    >(std::string("farm"));
 }
 
+#if defined(__SSE4_1__)
+
 TYPED_TEST_P(KmerHashTest, murmur32sse)
 {
 	this->template hash_vector_vs_sse<fsc::hash::murmur32, fsc::hash::murmur3sse32>(std::string("murmur3_32_vs_sse"));
@@ -250,10 +252,31 @@ TYPED_TEST_P(KmerHashTest, murmur32sse_batch)
   this->template hash_vector_vs_sse_batch<fsc::hash::murmur32, fsc::hash::murmur3sse32>(std::string("murmur3_32_vs_sse_batch"));
 }
 
+#endif
+
+#if defined(__AVX2__)
+
+TYPED_TEST_P(KmerHashTest, murmur32avx)
+{
+  this->template hash_vector_vs_sse<fsc::hash::murmur32, fsc::hash::murmur3avx32>(std::string("murmur3_32_vs_avx"));
+}
+
+TYPED_TEST_P(KmerHashTest, murmur32avx_batch)
+{
+  this->template hash_vector_vs_sse_batch<fsc::hash::murmur32, fsc::hash::murmur3avx32>(std::string("murmur3_32_vs_avx_batch"));
+}
+
+#endif
 
 
-
-REGISTER_TYPED_TEST_CASE_P(KmerHashTest, stdcpp, iden, murmur, farm, murmur32sse, murmur32sse_batch);
+REGISTER_TYPED_TEST_CASE_P(KmerHashTest, iden, murmur, farm,
+#if defined(__SSE4_1__)
+                           murmur32sse, murmur32sse_batch,
+#endif
+#if defined(__AVX2__)
+                           murmur32avx, murmur32avx_batch,
+#endif
+                           stdcpp);
 
 //////////////////// RUN the tests with different types.
 
