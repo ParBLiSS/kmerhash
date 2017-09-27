@@ -46,8 +46,8 @@
 #define VEC 1
 #define ITER 2
 #define INTEGRATED 3
-#define SORT 4
-#define SHUFFLE 5
+//#define SORT 4
+//#define SHUFFLE 5
 
 
 /*
