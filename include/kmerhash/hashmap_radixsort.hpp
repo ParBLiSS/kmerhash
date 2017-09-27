@@ -67,9 +67,9 @@ public:
     {
         HashElement *sortBuf = this->sortBuf;
         uint16_t *countBuf = this->countSortBuf;
-        int32_t shift = this->binShift;
+        //int32_t shift = this->binShift;
         int32_t bufSize = this->sortBufSize;
-        int32_t binSize = this->binSize;
+        //int32_t binSize = this->binSize;
 #if 1
         if(size <= 1) return size;
         int32_t mask = bufSize - 1;
@@ -504,7 +504,7 @@ public:
         if(coherence != COHERENT)
         {
             printf("ERROR! The hashtable is not coherent at the moment. find() can not be serviced\n");
-            return NULL;
+            return 0ULL;
         }
         size_t foundCount = 0;
         int32_t PFD_INFO = 16;
@@ -541,7 +541,7 @@ public:
         if(coherence != COHERENT)
         {
             printf("ERROR! The hashtable is not coherent at the moment. count() can not be serviced\n");
-            return NULL;
+            return 0ULL;
         }
         size_t foundCount = 0;
         int32_t PFD_INFO = 16;

@@ -414,7 +414,7 @@ public:
 
     size_t input_size = ::std::distance(first, last);
 
-    assert((send_counts.size() == comm.size()) && "send_count size not same as _comm size.");
+    assert((static_cast<int>(send_counts.size()) == comm.size()) && "send_count size not same as _comm size.");
 
     // make sure tehre is something to do.
     bool empty = input_size == 0;

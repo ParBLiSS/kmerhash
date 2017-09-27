@@ -3329,7 +3329,7 @@ namespace khmxx
 
       size_t input_size = ::std::distance(permuted, permuted_end);
 
-      assert((send_counts.size() == _comm.size()) && "send_count size not same as _comm size.");
+      assert((static_cast<int>(send_counts.size()) == _comm.size()) && "send_count size not same as _comm size.");
 
       // make sure tehre is something to do.
 //      BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
