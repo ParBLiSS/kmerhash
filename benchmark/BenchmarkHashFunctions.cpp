@@ -2,6 +2,7 @@
 #include <algorithm>  // std::generate
 #include <cstdlib>    // std::rand
 #include <sstream>
+#include <exception>
 
 #include "kmerhash/hash.hpp"
 #include "utils/benchmark_utils.hpp"
@@ -78,6 +79,14 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
 
   BL_BENCH_START(benchmark);
   {
+    ::fsc::hash::farm32<DataStruct<N> > h;
+     benchmark_hash(h, data, out, count);
+  }
+  BL_BENCH_END(benchmark, "farm32", count);
+
+
+  BL_BENCH_START(benchmark);
+  {
     ::fsc::hash::murmur32<DataStruct<N> > h;
      benchmark_hash(h, data, out, count);
   }
@@ -132,6 +141,7 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
   BL_BENCH_END(benchmark, "murmur32avx8", count);
 #endif
 
+#if defined(__SSE4_2__)
   BL_BENCH_START(benchmark);
   {
     ::fsc::hash::crc32c<DataStruct<N> > h;
@@ -153,7 +163,7 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
 #endif
   }
   BL_BENCH_END(benchmark, "CRC32Cbatch", count);
-
+#endif
 
 
   std::stringstream ss;
@@ -238,7 +248,17 @@ int main(int argc, char** argv) {
 
 
   unsigned char* data = (unsigned char*) malloc(count * 256);
+
+  if (data == nullptr) {
+    throw std::invalid_argument("count is too large, or 0, and cannot allocation memory");
+  }
+
   unsigned int* hashes = (unsigned int*) malloc(count * sizeof(unsigned int));
+
+  if (hashes == nullptr) {
+    throw std::invalid_argument("count is too large, or 0, and cannot allocation memory");
+  }
+
 
   if ((el_size == 0) || (el_size ==   1)) benchmarks<  1>(count, data, hashes);
   if ((el_size == 0) || (el_size ==   2)) benchmarks<  2>(count, data, hashes);

@@ -1473,7 +1473,6 @@ namespace fsc {
         FSC_FORCE_INLINE void hash_and_mod(T const * keys, size_t count, OT * results, uint32_t modulus) const {
           size_t rem = count & 0x3;
           size_t max = count - rem;
-          size_t j = 0;
           size_t i = 0;
           for (; i < max; i += 4) {
             //            kptrs[0] = &(keys[i]);
@@ -1515,7 +1514,6 @@ namespace fsc {
 
           size_t rem = count & 0x3;
           size_t max = count - rem;
-          size_t j = 0;
           size_t i = 0;
           for (; i < max; i += 4) {
             //            kptrs[0] = &(keys[i]);
@@ -1621,12 +1619,15 @@ namespace fsc {
 
 
 
+#if defined(__SSE4_2__)
+
     /**
      * @brief crc.  32 bit hash..
      * @details  operator should require sizeof(T)/8  + 6 operations + 2 cycle latencies.
      *            require SSE4.2
      *
      *          prefetching did not help
+     *   algo at https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm_crc&expand=5247,1244
      */
     template <typename T>
     class crc32c {
@@ -1639,15 +1640,18 @@ namespace fsc {
         static constexpr size_t offset = (sizeof(T) >> 3) << 3;
 
         uint32_t hash1(const T & key) const {
-          uint64_t crc64 = 0;
 
           // block of 8 bytes
-          uint64_t const * data64 = reinterpret_cast<uint64_t const *>(&key);
-          for (size_t i = 0; i < blocks; ++i) {
-            crc64 = _mm_crc32_u64(crc64, data64[i]);
+          uint64_t crc64 = seed;
+          if (sizeof(T) >= 8) {
+            uint64_t const * data64 = reinterpret_cast<uint64_t const *>(&key);
+            for (size_t i = 0; i < blocks; ++i) {
+              crc64 = _mm_crc32_u64(crc64, data64[i]);
+            }
           }
 
           uint32_t crc = static_cast<uint32_t>(crc64);
+
           unsigned char const * data = reinterpret_cast<unsigned char const *>(&key);
 
           // rest.  do it cleanly
@@ -1662,16 +1666,17 @@ namespace fsc {
             crc =  _mm_crc32_u8(crc, *(reinterpret_cast< uint8_t const *>(data + off)));
           }
 
-          return _mm_crc32_u32(crc, seed);   // add the seed in at the end.
+          return crc;
         }
 
         void hash4(T const * keys, uint32_t * results) const {
           // loop over 3 keys at a time
-          uint64_t aa = 0;
-          uint64_t bb = 0;
-          uint64_t cc = 0;
-          uint64_t dd = 0;
-          {
+          uint64_t aa = seed;
+          uint64_t bb = seed;
+          uint64_t cc = seed;
+          uint64_t dd = seed;
+
+          if (sizeof(T) >= 8) {
             // block of 8 bytes
             uint64_t const *data64a = reinterpret_cast<uint64_t const *>(&(keys[0]));
             uint64_t const *data64b = reinterpret_cast<uint64_t const *>(&(keys[1]));
@@ -1718,10 +1723,10 @@ namespace fsc {
             d = _mm_crc32_u8(d, *(reinterpret_cast<uint8_t const *>(datad + off)));
           }
 
-          results[0] = _mm_crc32_u32(a, seed);
-          results[1] = _mm_crc32_u32(b, seed);
-          results[2] = _mm_crc32_u32(c, seed);
-          results[3] = _mm_crc32_u32(d, seed);
+          results[0] = a;
+          results[1] = b;
+          results[2] = c;
+          results[3] = d;
         }
 
       public:
@@ -1800,7 +1805,7 @@ namespace fsc {
           }
         }
     };
-
+#endif
 
 
 
@@ -1812,16 +1817,37 @@ namespace fsc {
     template <typename T>
     class farm {
 
+      protected:
+        uint64_t seed;
+
       public:
         static constexpr uint8_t batch_size = 1;
 
-        farm(uint32_t const & _seed = 43 ) {};
+        farm(uint64_t const & _seed = 43 ) : seed(_seed) {};
 
         /// operator to compute hash.  64 bit again.
         inline uint64_t operator()(const T & key) const {
-          return ::util::Hash(reinterpret_cast<const char*>(&key), sizeof(T));
+          return ::util::Hash64WithSeed(reinterpret_cast<const char*>(&key), sizeof(T), seed);
         }
     };
+
+    template <typename T>
+    class farm32 {
+
+      protected:
+        uint32_t seed;
+
+      public:
+        static constexpr uint8_t batch_size = 1;
+
+        farm32(uint32_t const & _seed = 43 ) : seed(_seed) {};
+
+        /// operator to compute hash.  64 bit again.
+        inline uint32_t operator()(const T & key) const {
+          return ::util::Hash32WithSeed(reinterpret_cast<const char*>(&key), sizeof(T), seed);
+        }
+    };
+
 
   } // namespace hash
 } // namespace fsc
