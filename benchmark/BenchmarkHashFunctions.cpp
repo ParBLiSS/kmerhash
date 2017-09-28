@@ -60,12 +60,14 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
   BL_BENCH_END(benchmark, "iden", count);
 
 
+
   BL_BENCH_START(benchmark);
   {
     ::fsc::hash::farm<DataStruct<N> > h;
      benchmark_hash(h, data, out, count);
   }
   BL_BENCH_END(benchmark, "farm", count);
+
 
   BL_BENCH_START(benchmark);
   {
@@ -84,6 +86,13 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
 #if defined(__SSE4_1__)
   BL_BENCH_START(benchmark);
   {
+    ::fsc::hash::murmur3sse32<DataStruct<N> > h;
+     benchmark_hash(h, data, out, count);
+  }
+  BL_BENCH_END(benchmark, "murmur32sse1", count);
+
+  BL_BENCH_START(benchmark);
+  {
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_MURMURSSE)
       __itt_resume();
@@ -95,12 +104,20 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
       __itt_pause();
 #endif
   }
-  BL_BENCH_END(benchmark, "murmur32sse", count);
+  BL_BENCH_END(benchmark, "murmur32sse4", count);
 #endif
 
 #if defined(__AVX2__)
   BL_BENCH_START(benchmark);
   {
+    ::fsc::hash::murmur3avx32<DataStruct<N> > h;
+     benchmark_hash(h, data, out, count);
+  }
+  BL_BENCH_END(benchmark, "murmur32avx1", count);
+
+  BL_BENCH_START(benchmark);
+  {
+
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_MURMURAVX)
       __itt_resume();
@@ -112,8 +129,15 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
       __itt_pause();
 #endif
   }
-  BL_BENCH_END(benchmark, "murmur32avx", count);
+  BL_BENCH_END(benchmark, "murmur32avx8", count);
 #endif
+
+  BL_BENCH_START(benchmark);
+  {
+    ::fsc::hash::crc32c<DataStruct<N> > h;
+     benchmark_hash(h, data, out, count);
+  }
+  BL_BENCH_END(benchmark, "CRC32C1", count);
 
   BL_BENCH_START(benchmark);
   {
@@ -128,7 +152,8 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
       __itt_pause();
 #endif
   }
-  BL_BENCH_END(benchmark, "CRC32C", count);
+  BL_BENCH_END(benchmark, "CRC32Cbatch", count);
+
 
 
   std::stringstream ss;
@@ -146,7 +171,7 @@ int main(int argc, char** argv) {
 #endif
 
       size_t count = 100000000;
-
+      size_t el_size = 0;
 
       try {
 
@@ -163,6 +188,7 @@ int main(int argc, char** argv) {
         // such as "-n Bishop".
 
         TCLAP::ValueArg<size_t> countArg("c","count","number of elements to hash", false, count, "size_t", cmd);
+        TCLAP::ValueArg<size_t> elSizeArg("e","el_size","size of elements in bytes. 0 to run all", false, el_size, "size_t", cmd);
 
     #ifdef VTUNE_ANALYSIS
         std::vector<std::string> measure_modes;
@@ -171,19 +197,20 @@ int main(int argc, char** argv) {
         measure_modes.push_back("crc32c");
         measure_modes.push_back("disabled");
         TCLAP::ValuesConstraint<std::string> measureModeVals( measure_modes );
-        TCLAP::ValueArg<std::string> measureModeArg("","measured_op","hash function to measure (default insert)",false,"disabled",&measureModeVals, cmd);
+        TCLAP::ValueArg<std::string> measureModeArg("","measured_op","hash function to measure (default disabled)",false,"disabled",&measureModeVals, cmd);
     #endif
 
         // Parse the argv array.
         cmd.parse( argc, argv );
 
         count = countArg.getValue();
-
+        el_size = elSizeArg.getValue();
+        std::cout << "Executing for " << el_size << " element size. " << std::endl;
 
     #ifdef VTUNE_ANALYSIS
         // set the default for query to filename, and reparse
         std::string measure_mode_str = measureModeArg.getValue();
-        if (comm.rank() == 0) std::cout << "Measuring " << measure_mode_str << std::endl;
+        std::cout << "Measuring " << measure_mode_str << std::endl;
 
         if (measure_mode_str == "murmur_sse") {
           measure_mode = MEASURE_MURMURSSE;
@@ -213,29 +240,29 @@ int main(int argc, char** argv) {
   unsigned char* data = (unsigned char*) malloc(count * 256);
   unsigned int* hashes = (unsigned int*) malloc(count * sizeof(unsigned int));
 
-  benchmarks<  1>(count, data, hashes);
-  benchmarks<  2>(count, data, hashes);
-  benchmarks<  3>(count, data, hashes);
-  benchmarks<  4>(count, data, hashes);
-  benchmarks<  5>(count, data, hashes);
-  benchmarks<  7>(count, data, hashes);
-  benchmarks<  8>(count, data, hashes);
-  benchmarks<  9>(count, data, hashes);
-  benchmarks< 15>(count, data, hashes);
-  benchmarks< 16>(count, data, hashes);
-  benchmarks< 17>(count, data, hashes);
-  benchmarks< 31>(count, data, hashes);
-  benchmarks< 32>(count, data, hashes);
-  benchmarks< 33>(count, data, hashes);
-  benchmarks< 63>(count, data, hashes);
-  benchmarks< 64>(count, data, hashes);
-  benchmarks< 65>(count, data, hashes);
-  benchmarks<127>(count, data, hashes);
-  benchmarks<128>(count, data, hashes);
-  benchmarks<129>(count, data, hashes);
-  benchmarks<255>(count, data, hashes);
-  benchmarks<256>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==   1)) benchmarks<  1>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==   2)) benchmarks<  2>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==   4)) benchmarks<  4>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==   8)) benchmarks<  8>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==  16)) benchmarks< 16>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==  32)) benchmarks< 32>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==  64)) benchmarks< 64>(count, data, hashes);
+  if ((el_size == 0) || (el_size == 128)) benchmarks<128>(count, data, hashes);
+  if ((el_size == 0) || (el_size == 256)) benchmarks<256>(count, data, hashes);
 
+  if ((el_size == 0) || (el_size ==   3)) benchmarks<  3>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==   5)) benchmarks<  5>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==   7)) benchmarks<  7>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==   9)) benchmarks<  9>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==  15)) benchmarks< 15>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==  17)) benchmarks< 17>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==  31)) benchmarks< 31>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==  33)) benchmarks< 33>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==  63)) benchmarks< 63>(count, data, hashes);
+  if ((el_size == 0) || (el_size ==  65)) benchmarks< 65>(count, data, hashes);
+  if ((el_size == 0) || (el_size == 127)) benchmarks<127>(count, data, hashes);
+  if ((el_size == 0) || (el_size == 129)) benchmarks<129>(count, data, hashes);
+  if ((el_size == 0) || (el_size == 255)) benchmarks<255>(count, data, hashes);
 
   free(data);
   free(hashes);

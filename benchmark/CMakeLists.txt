@@ -143,6 +143,7 @@ if (BUILD_BENCHMARKS)
 
 message(STATUS "VTUNE_ANALYSIS set to ${VTUNE_ANALYSIS}")
 if (ENABLE_VTUNE_PROFILING)
+	target_link_libraries(benchmark_hashes ittnotify dl)
 	target_link_libraries(benchmark_hashtables_FARM ittnotify dl)
 	target_link_libraries(benchmark_hashtables_MURMUR ittnotify dl)
 	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)

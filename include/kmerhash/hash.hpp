@@ -924,7 +924,7 @@ namespace fsc {
           FSC_FORCE_INLINE __m128i hash4(T const *  key) const {
             // process 4 streams at a time.  all should be the same length.
 
-            __m128i k0, k1, k2, k3, t0, t1;
+            __m128i k0, k1, k2, k3, t0, t1, t2, t3;
             __m128i h1 = seed;
 
             //----------
@@ -941,7 +941,9 @@ namespace fsc {
               // transpose the streams (4x4 matrix), so that each uint32 in h1 is one hash value.
               //  this adds extra 8 instructions in total
               t0 = _mm_unpacklo_epi32(k0, k1); // transpose 2x2   SSE2
+              t2 = _mm_unpackhi_epi32(k0, k1); // transpose 2x2  SSE2
               t1 = _mm_unpacklo_epi32(k2, k3); // transpose 2x2   SSE2
+              t3 = _mm_unpackhi_epi32(k2, k3); // transpose 2x2  SSE2
 
               // row 0
               h1 = update32(h1, _mm_unpacklo_epi64(t0, t1)); // transpose 4x2  SSE2
@@ -949,15 +951,11 @@ namespace fsc {
               // row 1
               h1 = update32(h1, _mm_unpackhi_epi64(t0, t1)); // transpose 4x2  SSE2
 
-              // transpose some more.
-              t0 = _mm_unpackhi_epi32(k0, k1); // transpose 2x2  SSE2
-              t1 = _mm_unpackhi_epi32(k2, k3); // transpose 2x2  SSE2
-
               // row 2
-              h1 = update32(h1, _mm_unpacklo_epi64(t0, t1));  // transpose 4x2  SSE2
+              h1 = update32(h1, _mm_unpacklo_epi64(t2, t3));  // transpose 4x2  SSE2
 
               // row 3
-              h1 = update32(h1, _mm_unpackhi_epi64(t0, t1));   // transpose 4x2  SSE2
+              h1 = update32(h1, _mm_unpackhi_epi64(t2, t3));   // transpose 4x2  SSE2
             }
 
             // next do the remainder if any.
@@ -1276,6 +1274,13 @@ namespace fsc {
 
     /**
      * @brief MurmurHash.  using lower 64 bits.
+     * @details computing 8 at a time.  Currently, both AVX and SSE are slower than farmhash, but faster than the 32 bit murmur3.
+     *    we are not using farmhash as it interferes with prefetching.
+     *
+     *    prefetch: NTA vs T0 - no difference.
+     *              reduce the number of prefetches based on input data type.  no difference.
+     *    tried prefetching here, which provides 10 to 15% improvement. however, it might still interfere with prefetching else where.
+     *    therefore we are disabling it.
      *
      */
     template <typename T>
@@ -1304,8 +1309,26 @@ namespace fsc {
         FSC_FORCE_INLINE void hash(T const * keys, size_t count, uint32_t * results) const {
           size_t rem = count & 0x7;
           size_t max = count - rem;
+//          constexpr size_t elem_per_cacheline = (64 + (sizeof(T) - 1)) / sizeof(T);
+//          size_t j = 0;
+//          for (; j < 8; j += elem_per_cacheline) {
+//        	  _mm_prefetch(reinterpret_cast<char const *>(keys + j), _MM_HINT_NTA);
+//          }
           size_t i = 0;
           for (; i < max; i += 8) {
+//            _mm_prefetch(reinterpret_cast<char const *>(keys + i + 8), _MM_HINT_NTA);
+//            if (sizeof(T) > 8) _mm_prefetch(reinterpret_cast<char const *>(keys + i + 12), _MM_HINT_T0);
+//            if (sizeof(T) > 16 ) {
+//              _mm_prefetch(reinterpret_cast<char const *>(keys + i + 10), _MM_HINT_NTA);
+//              _mm_prefetch(reinterpret_cast<char const *>(keys + i + 14), _MM_HINT_NTA);
+//            }
+//            if (sizeof(T) > 32 ) {
+//              _mm_prefetch(reinterpret_cast<char const *>(keys + i +  9), _MM_HINT_NTA);
+//              _mm_prefetch(reinterpret_cast<char const *>(keys + i + 11), _MM_HINT_NTA);
+//              _mm_prefetch(reinterpret_cast<char const *>(keys + i + 13), _MM_HINT_NTA);
+//              _mm_prefetch(reinterpret_cast<char const *>(keys + i + 15), _MM_HINT_NTA);
+//            }
+
             hasher.hash8(&(keys[i]), results + i);
           }
 
@@ -1359,7 +1382,6 @@ namespace fsc {
           size_t rem = count & 0x4;
           size_t max = count - rem;
           size_t i = 0;
-
           for (; i < max; i += 8) {
             hasher.hash8(&(keys[i]), temp);
             results[i]   = temp[0] & modulus;
@@ -1397,7 +1419,7 @@ namespace fsc {
 #if defined(__SSE4_1__)
     /**
      * @brief MurmurHash.  using lower 64 bits.
-     *
+     * @details.  prefetching did not help
      */
     template <typename T>
     class murmur3sse32 {
@@ -1451,6 +1473,7 @@ namespace fsc {
         FSC_FORCE_INLINE void hash_and_mod(T const * keys, size_t count, OT * results, uint32_t modulus) const {
           size_t rem = count & 0x3;
           size_t max = count - rem;
+          size_t j = 0;
           size_t i = 0;
           for (; i < max; i += 4) {
             //            kptrs[0] = &(keys[i]);
@@ -1492,8 +1515,8 @@ namespace fsc {
 
           size_t rem = count & 0x3;
           size_t max = count - rem;
+          size_t j = 0;
           size_t i = 0;
-
           for (; i < max; i += 4) {
             //            kptrs[0] = &(keys[i]);
             //            kptrs[1] = &(keys[i + 1]);
@@ -1602,6 +1625,8 @@ namespace fsc {
      * @brief crc.  32 bit hash..
      * @details  operator should require sizeof(T)/8  + 6 operations + 2 cycle latencies.
      *            require SSE4.2
+     *
+     *          prefetching did not help
      */
     template <typename T>
     class crc32c {
@@ -1716,14 +1741,14 @@ namespace fsc {
         FSC_FORCE_INLINE void hash(T const * keys, size_t count, uint32_t * results) const {
           // loop over 3 keys at a time
           size_t max = count - 3;
-          size_t j = 0;
-          for (; j < max; j += 4) {
-            hash4(keys + j, results + j);
+          size_t i = 0;
+          for (; i < max; i += 4) {
+            hash4(keys + i, results + i);
           }
 
           // handle the remainder
-          for (; j < count; ++j) {
-            results[j] = hash1(keys[j]);
+          for (; i < count; ++i) {
+            results[i] = hash1(keys[i]);
           }
         }
 
@@ -1733,19 +1758,19 @@ namespace fsc {
           uint32_t temp[4];
           // loop over 3 keys at a time
           size_t max = count - 3;
-          size_t j = 0;
-          for (; j < max; j += 4) {
-            hash4(keys + j, temp);
+          size_t i = 0;
+          for (; i < max; i += 4) {
+            hash4(keys + i, temp);
 
-            results[j]     = temp[0] % modulus;
-            results[j + 1] = temp[1] % modulus;
-            results[j + 2] = temp[2] % modulus;
-            results[j + 3] = temp[3] % modulus;
+            results[i]     = temp[0] % modulus;
+            results[i + 1] = temp[1] % modulus;
+            results[i + 2] = temp[2] % modulus;
+            results[i + 3] = temp[3] % modulus;
           }
 
           // handle the remainder
-          for (; j < count; ++j) {
-            results[j] = hash1(keys[j]) % modulus;
+          for (; i < count; ++i) {
+            results[i] = hash1(keys[i]) % modulus;
           }
         }
 
@@ -1759,19 +1784,19 @@ namespace fsc {
 
           // loop over 3 keys at a time
           size_t max = count - 3;
-          size_t j = 0;
-          for (; j < max; j += 4) {
-            hash4(keys + j, temp);
+          size_t i = 0;
+          for (; i < max; i += 4) {
+            hash4(keys + i, temp);
 
-            results[j]     = temp[0] & modulus;
-            results[j + 1] = temp[1] & modulus;
-            results[j + 2] = temp[2] & modulus;
-            results[j + 3] = temp[3] & modulus;
+            results[i]     = temp[0] & modulus;
+            results[i + 1] = temp[1] & modulus;
+            results[i + 2] = temp[2] & modulus;
+            results[i + 3] = temp[3] & modulus;
           }
 
           // handle the remainder
-          for (; j < count; ++j) {
-            results[j] = hash1(keys[j]) & modulus;
+          for (; i < count; ++i) {
+            results[i] = hash1(keys[i]) & modulus;
           }
         }
     };
