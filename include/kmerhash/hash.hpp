@@ -89,7 +89,6 @@
 // may want to check out CLHash, which uses carryless multiply instead of multiply.
 
 #include <x86intrin.h>
-#include <immintrin.h>
 
 namespace fsc {
 
@@ -324,7 +323,65 @@ namespace fsc {
 
           }
 
+#if 0
+          // USING load, INSERT plus unpack is faster than gather.
+          /// NOTE: multiples of 32.
+          template <size_t len = bytes,
+              typename std::enable_if<((len & 31) == 0), int>::type = 1>
+          FSC_FORCE_INLINE __m256i hash8_old(T const *  key) const {
+            // process 8 streams at a time.  all should be the same length.
 
+            // at this point, i32gather with its 20 cycle latency and 5 to 10 cycle CPI, no additional cost,
+            // and can pipeline 4 at a time, about 40 cycles?
+            // becomes competitive vs the shuffle/blend/permute approach, which grew superlinearly from 8 to 16 byte elements.
+            // while we still have 8 "update"s, the programming cost is becoming costly.
+          // an alternative might be using _mm256_set_m128i(_mm_lddqu_si128, _mm_lddqu_si128), which has about 5 cycles latency in total.
+          // still need to shuffle more than 4 times.
+
+            __m256i k0, k1, k2, k3; //, k4, k5, k6, k7;
+            __m256i h1 = seed;
+
+            //----------
+            // do it in blocks of 4 bytes.
+            const int nblocks = len >> 2;
+
+            // gathering 8 keys at a time, 4 bytes each time, so there is 1 gather for each 4 bytes..
+            int i = 0;
+            for (; i < nblocks; i+=4) {
+              k0 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i    , offsets, 1);  // avx2
+              k1 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 1, offsets, 1);  // avx2
+              k2 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 2, offsets, 1);  // avx2
+              k3 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 3, offsets, 1);  // avx2
+//              k4 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 4, offsets, 1);  // avx2
+//              k5 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 5, offsets, 1);  // avx2
+//              k6 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 6, offsets, 1);  // avx2
+//              k7 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 7, offsets, 1);  // avx2
+
+              // already at the right places, so just call update32.
+              // row 0
+              h1 = update32(h1, k0); // transpose 4x2  SSE2
+              h1 = update32(h1, k1); // transpose 4x2  SSE2
+              h1 = update32(h1, k2); // transpose 4x2  SSE2
+              h1 = update32(h1, k3); // transpose 4x2  SSE2
+//              h1 = update32(h1, k4); // transpose 4x2  SSE2
+//              h1 = update32(h1, k5); // transpose 4x2  SSE2
+//              h1 = update32(h1, k6); // transpose 4x2  SSE2
+//              h1 = update32(h1, k7); // transpose 4x2  SSE2
+            }
+
+            //----------
+            // finalization
+            // or the length.
+            h1 = _mm256_xor_si256(h1, length);  // sse
+
+            h1 = fmix32(h1);  // ***** SSE4.1 **********
+
+            return h1;
+
+          }
+#endif
+
+          // faster than gather.
           /// NOTE: multiples of 32.
           template <size_t len = bytes,
               typename std::enable_if<((len & 31) == 0), int>::type = 1>
@@ -338,35 +395,53 @@ namespace fsc {
           // an alternative might be using _mm256_set_m128i(_mm_lddqu_si128, _mm_lddqu_si128), which has about 5 cycles latency in total.
           // still need to shuffle more than 4 times.
 
-            __m256i k0, k1, k2, k3, k4, k5, k6, k7;
+            __m128i j0, j1, j2, j3, j4, j5, j6, j7;
+            __m256i k0, k1, k2, k3, t0, t1, t2;
             __m256i h1 = seed;
 
             //----------
-            // do it in blocks of 4 bytes.
-            const int nblocks = len >> 2;
+            // do it in blocks of 16 bytes.
+            const int nblocks = len >> 4;
 
-            // do blocks of 8 blocks
+            // gathering 8 keys at a time, 4 bytes each time, so there is 1 gather for each 4 bytes..
             int i = 0;
-            for (; i < nblocks; i += 8) {
-              k0 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i    , offsets, 1);  // avx2
-              k1 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 1, offsets, 1);  // avx2
-              h1 = update32(h1, k0); // transpose 4x2  SSE2
-              k2 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 2, offsets, 1);  // avx2
-              h1 = update32(h1, k1); // transpose 4x2  SSE2
-              k3 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 3, offsets, 1);  // avx2
-              h1 = update32(h1, k2); // transpose 4x2  SSE2
-              k4 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 4, offsets, 1);  // avx2
-              h1 = update32(h1, k3); // transpose 4x2  SSE2
-              k5 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 5, offsets, 1);  // avx2
-              h1 = update32(h1, k4); // transpose 4x2  SSE2
-              k6 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 6, offsets, 1);  // avx2
-              h1 = update32(h1, k5); // transpose 4x2  SSE2
-              k7 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 7, offsets, 1);  // avx2
+            for (; i < nblocks; ++i) {
+              j0 = _mm_lddqu_si128(reinterpret_cast<__m128i const*>(key)      + i); // SSE2
+              j1 = _mm_lddqu_si128(reinterpret_cast<__m128i const*>(key + 1 ) + i);
+              j2 = _mm_lddqu_si128(reinterpret_cast<__m128i const*>(key + 2 ) + i);
+              j3 = _mm_lddqu_si128(reinterpret_cast<__m128i const*>(key + 3 ) + i);
+              j4 = _mm_lddqu_si128(reinterpret_cast<__m128i const*>(key + 4 ) + i);
+              j5 = _mm_lddqu_si128(reinterpret_cast<__m128i const*>(key + 5 ) + i);
+              j6 = _mm_lddqu_si128(reinterpret_cast<__m128i const*>(key + 6 ) + i);
+              j7 = _mm_lddqu_si128(reinterpret_cast<__m128i const*>(key + 7 ) + i);
 
-              // already at the right places, so just call update32.
-              // row 0
-              h1 = update32(h1, k6); // transpose 4x2  SSE2
-              h1 = update32(h1, k7); // transpose 4x2  SSE2
+              // get the 32 byte vector.
+              // mixing 1st and 4th, so don't have to cross boundaries again  // AVX
+              k0 = _mm256_insertf128_si256(_mm256_castsi128_si256(j0), (j4), 1);
+              k1 = _mm256_insertf128_si256(_mm256_castsi128_si256(j1), (j5), 1);
+              k2 = _mm256_insertf128_si256(_mm256_castsi128_si256(j2), (j6), 1);
+              k3 = _mm256_insertf128_si256(_mm256_castsi128_si256(j3), (j7), 1);
+
+              // now unpack and update
+              t0 = _mm256_unpacklo_epi32(k0, k1);  // abABefEF
+              t1 = _mm256_unpacklo_epi32(k2, k3);  // cdCDghGH
+
+              t2 = _mm256_unpacklo_epi64(t0, t1);  // abcdefgh
+              h1 = update32(h1, t2);
+
+              t2 = _mm256_unpackhi_epi64(t0, t1);  // ABCDEFGH
+              h1 = update32(h1, t2);
+
+              // now unpack and update
+              t0 = _mm256_unpackhi_epi32(k0, k1);  // abABefEF
+              t1 = _mm256_unpackhi_epi32(k2, k3);  // cdCDghGH
+
+              t2 = _mm256_unpacklo_epi64(t0, t1);  // abcdefgh
+              h1 = update32(h1, t2);
+
+              t2 = _mm256_unpackhi_epi64(t0, t1);  // ABCDEFGH
+              h1 = update32(h1, t2);
+
             }
 
             //----------
@@ -394,10 +469,11 @@ namespace fsc {
             // k2                            -- -- -- --
             // k3                                         -- -- -- --
 
+
             __m256i k0, k1, k2, k3, t0, t1, t2, t3;
             __m256i h1 = seed;
 
-            // read input
+            // read input, 2 keys per vector.
             k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i*>(key));  // SSE3
             k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i*>(key + 2));  // SSE3
             k2 = _mm256_lddqu_si256(reinterpret_cast<const __m256i*>(key + 4));  // SSE3
@@ -480,7 +556,7 @@ namespace fsc {
             __m256i k0, k1, t0, t1;
             __m256i h1 = seed;
 
-            // read input
+            // read input, 4 keys per vector.
             k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i*>(key));  // SSE3
             k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i*>(key + 4));  // SSE3
 
@@ -531,7 +607,7 @@ namespace fsc {
             __m256i h1 = seed;
 
             // no extra inst
-            // blocks of 4
+            // 8 keys per vector, so perfect match.
             k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i*>(key));  // SSE3
 
             // row 0.  unpacklo puts it to aabbccdd
@@ -561,7 +637,7 @@ namespace fsc {
             __m256i k0;
             __m256i h1 = seed;
 
-            // blocks of 2
+            // 16 keys per vector. can potentially do 2 iters.
             k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i*>(key));  // SSE3
 
             // 2 extra inst
@@ -598,7 +674,7 @@ namespace fsc {
             __m256i k0, t0;
             __m256i h1 = seed;
 
-            // blocks of 2
+            // 32 keys per vector, can potentially do 4 rounds.
             k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i*>(key));  // SSE3
 
             // 2 extra calls.
@@ -1085,6 +1161,7 @@ namespace fsc {
             return h1;
 
           }
+
 
 
           template <uint64_t len = bytes,

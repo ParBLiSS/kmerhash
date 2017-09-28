@@ -14,6 +14,7 @@
 
 #ifdef VTUNE_ANALYSIS
 #define MEASURE_DISABLED 0
+#define MEASURE_FARM 1
 
 #define MEASURE_MURMURSSE 10
 #define MEASURE_MURMURAVX 11
@@ -64,8 +65,16 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
 
   BL_BENCH_START(benchmark);
   {
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_FARM)
+      __itt_resume();
+#endif
     ::fsc::hash::farm<DataStruct<N> > h;
      benchmark_hash(h, data, out, count);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_FARM)
+      __itt_pause();
+#endif
   }
   BL_BENCH_END(benchmark, "farm", count);
 
@@ -202,6 +211,7 @@ int main(int argc, char** argv) {
 
     #ifdef VTUNE_ANALYSIS
         std::vector<std::string> measure_modes;
+        measure_modes.push_back("farm");
         measure_modes.push_back("murmur_sse");
         measure_modes.push_back("murmur_avx");
         measure_modes.push_back("crc32c");
@@ -222,7 +232,9 @@ int main(int argc, char** argv) {
         std::string measure_mode_str = measureModeArg.getValue();
         std::cout << "Measuring " << measure_mode_str << std::endl;
 
-        if (measure_mode_str == "murmur_sse") {
+        if (measure_mode_str == "farm") {
+          measure_mode = MEASURE_FARM;
+        } else if (measure_mode_str == "murmur_sse") {
           measure_mode = MEASURE_MURMURSSE;
         } else if (measure_mode_str == "murmur_avx") {
           measure_mode = MEASURE_MURMURAVX;
