@@ -104,7 +104,7 @@ namespace fsc {
       // original: body: 16 inst per iter of 4 bytes; tail: 15 instr. ; finalization:  8 instr.
       // about 4 inst per byte + 8, for each hash value.
       template <typename T, size_t bytes = sizeof(T)>
-      class Murmur3AVX {
+      class Murmur32AVX {
 
         protected:
           // make static so initialization at beginning of class...
@@ -188,7 +188,7 @@ namespace fsc {
           }
 
         public:
-          Murmur3AVX(uint32_t _seed) :
+          Murmur32AVX(uint32_t _seed) :
             seed(_mm256_set1_epi32(_seed)),
             mix_const1(_mm256_set1_epi32(0x85ebca6b)),
             mix_const2(_mm256_set1_epi32(0xc2b2ae35)),
@@ -248,6 +248,11 @@ namespace fsc {
                 break;;
             }
           }
+
+
+          // TODO: [ ] hash1, do the k transform in parallel.  also use mask to keep only part wanted, rest of update and finalize do sequentially.
+          // above 2, the finalize and updates will dominate and better to do those in parallel.
+
 
           FSC_FORCE_INLINE void hash8(T const *  key, uint32_t * out) const {
             __m256i res = hash8(key);
@@ -711,7 +716,7 @@ namespace fsc {
       // original: body: 16 inst per iter of 4 bytes; tail: 15 instr. ; finalization:  8 instr.
       // about 4 inst per byte + 8, for each hash value.
       template <typename T, size_t bytes = sizeof(T)>
-      class Murmur3SSE {
+      class Murmur32SSE {
 
         protected:
           // make static so initialization at beginning of class...
@@ -791,7 +796,7 @@ namespace fsc {
           }
 
         public:
-          Murmur3SSE(uint32_t _seed) :
+          Murmur32SSE(uint32_t _seed) :
             seed(_mm_set1_epi32(_seed)),
             mix_const1(_mm_set1_epi32(0x85ebca6b)),
             mix_const2(_mm_set1_epi32(0xc2b2ae35)),
@@ -988,6 +993,9 @@ namespace fsc {
                 break;;
             }
           }
+
+          // TODO: [ ] hash1, do the k transform in parallel.  also use mask to keep only part wanted, rest of update and finalize do sequentially.
+          // above 2, the finalize and updates will dominate and better to do those in parallel.
 
           FSC_FORCE_INLINE void hash4(T const *  key, uint32_t * out) const {
             __m128i res = hash4(key);
@@ -1303,6 +1311,258 @@ namespace fsc {
 
 
 
+
+//      NOTE: no _mm_mullo_epi64 below avx512, so no point in this for Broadwell and earlier.
+//      // compute a pair of 64bit at a time, equivalent to the lower 64 bit of the 128 bit murmur hash.
+//      // this simplifies the computation given the originam murmur3 128bit has dependencies that
+//      // makes them hard to map to 128 bits.
+//      template <typename T, size_t bytes = sizeof(T)>
+//      class Murmur64SSE {
+//
+//
+//        protected:
+//          // make static so initialization at beginning of class...
+//          const __m128i seed;
+//          const __m128i mix_const1;
+//          const __m128i mix_const2;
+//          const __m128i c1;
+//          const __m128i c2;
+//          const __m128i c3;
+//          const __m128i c4_1;
+//          const __m128i c4_2;
+//          const __m128i zero;
+//          const __m128i length;
+//
+//          // input is 4 unsigned ints.
+//          FSC_FORCE_INLINE __m128i rotl64 ( __m128i x, int8_t r ) const
+//          {
+//            // return (x << r) | (x >> (32 - r));
+//            return _mm_or_si128(                // sse2
+//                            _mm_slli_epi64(x, r),           // sse2
+//                            _mm_srli_epi64(x, (64 - r)));   // sse2
+//          }
+//
+//
+//          FSC_FORCE_INLINE __m128i update64_partial( __m128i h, __m128i k,
+//        		  __m128i _c1, int8_t r, __m128i _c2) const {
+//
+//            //            k1 *= c1; k1  = ROTL64(k1,31); k1 *= c2; h1 ^= k1;
+//            //            k2 *= c2; k2  = ROTL64(k2,33); k2 *= c1; h2 ^= k2;
+//
+//            k = _mm_mullo_epi64(k, _c1);
+//            k = rotl64(k, r);
+//            k = _mm_mullo_epi64(k, _c2);
+//
+//            return _mm_xor_si128(h, k);
+//          }
+//
+//          FSC_FORCE_INLINE __m128i update64_partial1( __m128i h1, __m128i k1) const {
+//        	  return update64_partial(h1, k1, c1, 31, c2);
+//          }
+//          FSC_FORCE_INLINE __m128i update64_partial2( __m128i h2, __m128i k2) const {
+//        	  return update64_partial(h2, k2, c2, 33, c1);
+//          }
+//
+//
+//          FSC_FORCE_INLINE __m128i update64( __m128i h, __m128i h2, __m128i k,
+//        		  __m128i _c1, int8_t r1, __m128i _c2,
+//				  int8_t r2, __m128i _c4) const {
+//
+//            // k1 and k2 are independent.  but need to save original h2, and concate with current h1.
+//            //            k1 *= c1; k1  = ROTL64(k1,31); k1 *= c2; h1 ^= k1;
+//            //            h1 = ROTL64(h1,27); h1 += h2; h1 = h1*5+0x52dce729;
+//            //            k2 *= c2; k2  = ROTL64(k2,33); k2 *= c1; h2 ^= k2;
+//            //            h2 = ROTL64(h2,31); h2 += h1; h2 = h2*5+0x38495ab5;
+//            h = update64_partial(h, k, _c1, r1, _c2);
+//
+//            h = rotl64(h, r2);
+//
+//            h = _mm_add_epi64(h, h2);
+//
+//            return _mm_add_epi64(_mm_mullo_epi64(h, c3), _c4);
+//          }
+//
+//          FSC_FORCE_INLINE __m128i update64_1( __m128i h1, __m128i h2, __m128i k1) const {
+//        	  return update64(h1, h2, k1, c1, 31, c2, 27, c4_1);
+//          }
+//
+//          FSC_FORCE_INLINE __m128i update64_2( __m128i h2, __m128i h1, __m128i k2) const {
+//        	  return update64(h2, h1, k2, c2, 33, c1, 31, c4_2);
+//          }
+//
+//
+//          // count cannot be zero.
+//          FSC_FORCE_INLINE __m128i zeroing( __m128i k, uint8_t const & count) const {
+//            assert((count > 0) && (count < 8) && "count should be between 1 and 3");
+//
+//            unsigned int shift = (8U - count) * 8U;
+//            // clear the upper bytes
+//            return _mm_srli_epi64(_mm_slli_epi64(k, shift), shift);  // sse2
+//          }
+//
+//          // input is the 2 halves of the hash values.
+//          // this is called for h1 and h2 at the same time.
+//          // is ((h ^ f) * c) carryless multiplication with (f = h >> d)? NO.
+//          FSC_FORCE_INLINE __m128i fmix64 ( __m128i h ) const
+//          {
+//            h = _mm_xor_si128(h, _mm_srli_epi64(h, 33));  // k ^= k >> 33;                            sse2
+//            h = _mm_mullo_epi64(h, mix_const1);           // k *= BIG_CONSTANT(0xff51afd7ed558ccd);   sse4.1
+//            h = _mm_xor_si128(h, _mm_srli_epi64(h, 33));  // k ^= k >> 33;                            sse2
+//            h = _mm_mullo_epi64(h, mix_const2);           // k *= BIG_CONSTANT(0xc4ceb9fe1a85ec53);   sse4.1
+//            h = _mm_xor_si128(h, _mm_srli_epi64(h, 33));  // k ^= k >> 33;                            sse2
+//
+//            return h;
+//          }
+//
+//        public:
+//          Murmur64SSE(uint64_t _seed) :
+//            seed(_mm_set1_epi64x(_seed)),
+//            mix_const1(_mm_set1_epi64x(0xff51afd7ed558ccd)),  // same for h1 and h0
+//            mix_const2(_mm_set1_epi64x(0xc4ceb9fe1a85ec53)),  // same for h1 and h0
+//            c1(_mm_set1_epi64x(0x4cf5ad432745937f)),   // c1 and c2 are concat .  c2, c1 for k2, k1,
+//            c2(_mm_set1_epi64x(0x87c37b91114253d5)),   //  then c1 and c2 (flipped0 for the second computation.
+//            c3(_mm_set1_epi64x(5)),
+//            c4_1(_mm_set1_epi64x(0x38495ab5)),   //   different for h1 and h0
+//			      c4_2(_mm_set1_epi64x(0x52dce729)),   //   different for h1 and h0
+//            zero(_mm_setzero_si128()),// SSE2
+//            length(_mm_set1_epi64x(bytes))
+//        {}
+//
+//          // TODO: [ ] hash1, do the k transform in parallel.  also use mask to keep only part wanted, rest of update and finalize do sequentially.
+//          // above 2, the finalize and updates will dominate and better to do those in parallel.
+//          // TODO: [ ] hash2.  do 2 streams at the same time.
+//
+//          // multiples of 16 bytes
+//          template <uint64_t len = bytes>
+//          FSC_FORCE_INLINE __m128i hash2(T const * key) const {
+//
+//
+//            const int nblocks = len >> 4;
+//
+//            __m128i k1, k2, t1, t2;
+//            __m128i h1 = seed, h2 = seed;
+//
+//            for (size_t i = 0; i < nblocks; ++i) {
+//            	// aA and bB
+//              k1 = _mm_lddqu_si128(reinterpret_cast<__m128i const *>(key) + i);
+//              k2 = _mm_lddqu_si128(reinterpret_cast<__m128i const *>(key + 1) + i);
+//
+//              t1 = _mm_unpacklo_epi64(k1, k2);   //ab
+//              t2 = _mm_unpackhi_epi64(k1, k2);   //AB
+//
+//              // now update both at the same time.
+////              k1 *= c1; k1  = ROTL64(k1,31); k1 *= c2; h1 ^= k1;
+////              h1 = ROTL64(h1,27); h1 += h2; h1 = h1*5+0x52dce729;
+////              k2 *= c2; k2  = ROTL64(k2,33); k2 *= c1; h2 ^= k2;
+////              h2 = ROTL64(h2,31); h2 += h1; h2 = h2*5+0x38495ab5;
+//              h1 = update64_1(h1, h2, t1);
+//              h2 = update64_2(h2, h1, t2);
+//            }
+//
+//            // remainder
+//            if (len & 15) {
+//            	k1 = _mm_lddqu_si128(reinterpret_cast<__m128i const *>(key) + nblocks);		 //aA
+//            	k2 = _mm_lddqu_si128(reinterpret_cast<__m128i const *>(key + 1) + nblocks);  //bB
+//
+//            	t1 = _mm_unpacklo_epi64(k1, k2);   //ab
+//                t2 = _mm_unpackhi_epi64(k1, k2);   //AB
+//            }
+//            if ((len & 15) > 8) {
+//            	// zero out the extra stuff.
+//                t2 = zeroing(t2, (len & 7));
+//
+//            } else if ((len & 15) == 8) {
+//            	t2 = zero;
+//
+//            } else if ((len & 15) > 0) {
+//            	// zero out the extra stuff.
+//            	t1 = zeroing(t1, (len & 7));
+//
+//            	t2 = zero;
+//            }
+//            if (len & 15) {
+//                // now update
+//                h1 = update64_partial1(h1, t1);
+//                h2 = update64_partial1(h2, t2);
+//            }
+//
+//            // finalize
+//            h1 = _mm_xor_si128(h1, length);
+//            h2 = _mm_xor_si128(h2, length);
+//
+//            h1 = _mm_add_epi64(h1, h2);
+//            h2 = _mm_add_epi64(h2, h1);
+//
+//            h1 = fmix64(h1);
+//            h2 = fmix64(h2);
+//
+//            h1 = _mm_add_epi64(h1, h2);
+//            h2 = _mm_add_epi64(h2, h1);
+//
+//            return h1;
+//
+//            //
+//            //          //----------
+//            //          // finalization
+//            //
+//            //          h1 ^= len; h2 ^= len;
+//            //
+//            //          h1 += h2;
+//            //          h2 += h1;
+//            //
+//            //          h1 = fmix64(h1);
+//            //          h2 = fmix64(h2);
+//            //
+//            //          h1 += h2;
+//            //          h2 += h1;
+//            //
+//            //          ((uint64_t*)out)[0] = h1;
+//            //          ((uint64_t*)out)[1] = h2;
+//
+//          }
+//
+//          // useful for computing 4 32bit hashes in 1 pass (for hashing into less than 2^32 buckets)
+//          // assume 4 streams are available.
+//          // working with 4 bytes at a time because there are
+//          // init: 4 instr.
+//          // body: 13*4 + 12  per iter of 16 bytes
+//          // tail: about the same
+//          // finalize: 11 inst. for 4 elements.
+//          // about 5 inst per byte + 11 inst for 4 elements.
+//          // for types that are have size larger than 8 or not power of 2.
+//
+//          // power of 2, or multiples of 16.
+////          template <uint64_t len = bytes,
+////              typename std::enable_if<((len & (len - 1)) == 0) || ((len & 15) == 0), int>::type = 1>
+//          FSC_FORCE_INLINE void hash(T const * key, uint8_t nstreams, uint64_t * out) const {
+//            // process 4 streams at a time.  all should be the same length.
+//
+//            assert((nstreams <= 2) && "maximum number of streams is 2");
+//            assert((nstreams > 0) && "minimum number of streams is 1");
+//
+//            __m128i h1 = hash2(key);
+//
+//            // store all 4 out
+//            switch (nstreams) {
+//              case 2: _mm_storeu_si128((__m128i*)out, h1);  // sse
+//                break;
+//              case 1: out[0] = _mm_extract_epi64(h1, 0);
+//              default:
+//                break;;
+//            }
+//          }
+//
+//          FSC_FORCE_INLINE void hash2(T const *  key, uint64_t * out) const {
+//            __m128i res = hash2(key);
+//            _mm_storeu_si128((__m128i*)out, res);
+//          }
+//
+//      };
+//
+
+
+
+
 #endif
 
 
@@ -1365,7 +1625,7 @@ namespace fsc {
 
 
       protected:
-        ::fsc::hash::sse::Murmur3AVX<T> hasher;
+        ::fsc::hash::sse::Murmur32AVX<T> hasher;
         mutable void const * kptrs[8];
         mutable uint32_t temp[8];
 
@@ -1503,7 +1763,7 @@ namespace fsc {
 
 
       protected:
-        ::fsc::hash::sse::Murmur3SSE<T> hasher;
+        ::fsc::hash::sse::Murmur32SSE<T> hasher;
         mutable void const * kptrs[4];
         mutable uint32_t temp[4];
 
@@ -1627,6 +1887,92 @@ namespace fsc {
         // TODO: [ ] add a transform_hash_mod.
 
     };
+
+
+
+//    /**
+//     * @brief MurmurHash.  using lower 64 bits.
+//     * @details.  prefetching did not help
+//                  NOTE: no _mm_mullo_epi64.  so no point in this for Broadwell and earlier.
+//     */
+//    template <typename T>
+//    class murmur3sse64 {
+//
+//
+//      protected:
+//        ::fsc::hash::sse::Murmur64SSE<T> hasher;
+//        mutable void const * kptrs[2];
+//        mutable uint64_t temp[2];
+//
+//      public:
+//        static constexpr uint8_t batch_size = 2;
+//
+//        murmur3sse64(uint64_t const & _seed = 43 ) : hasher(_seed) {};
+//
+//        inline uint64_t operator()(const T & key) const
+//        {
+//          //          kptrs[0] = &key;
+//          uint64_t h;
+//          hasher.hash(&key, 1, &h);
+//          return h;
+//        }
+//
+//        // results always 32 bit.
+//        FSC_FORCE_INLINE void hash(T const * keys, size_t count, uint64_t * results) const {
+//          size_t rem = count & 0x1;
+//          size_t max = count - rem;
+//          size_t i = 0;
+//          for (; i < max; i += 2) {
+//            hasher.hash2(&(keys[i]), results + i);
+//          }
+//
+//          if (rem > 0)
+//            hasher.hash(&(keys[i]), rem, results + i);
+//        }
+//
+//        // assume consecutive memory layout.
+//        template<typename OT>
+//        FSC_FORCE_INLINE void hash_and_mod(T const * keys, size_t count, OT * results, uint64_t modulus) const {
+//          size_t rem = count & 0x1;
+//          size_t max = count - rem;
+//          size_t i = 0;
+//          for (; i < max; i += 2) {
+//            hasher.hash2(&(keys[i]), temp);
+//            results[i] = temp[0] % modulus;
+//            results[i+1] = temp[1] % modulus;
+//          }
+//
+//          if (rem > 0) {
+//              hasher.hash(&(keys[i]), rem, temp);
+//              results[i] = temp[0] % modulus;
+//          }
+//        }
+//
+//        // assume consecutive memory layout.
+//        // note that the paremter is modulus bits.
+//        template<typename OT>
+//        FSC_FORCE_INLINE void hash_and_mod_pow2(T const * keys, size_t count, OT * results, uint64_t modulus) const {
+//          assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
+//          --modulus;
+//
+//          size_t rem = count & 0x1;
+//          size_t max = count - rem;
+//          size_t i = 0;
+//          for (; i < max; i += 2) {
+//            hasher.hash2(&(keys[i]), temp);
+//            results[i]   = temp[0] & modulus;
+//            results[i+1] = temp[1] & modulus;
+//          }
+//
+//          if (rem > 0) {
+//            hasher.hash(&(keys[i]), rem, temp);
+//            results[i]   = temp[0] & modulus;
+//          }
+//        }
+//
+//
+//        // TODO: [ ] add a transform_hash_mod.
+//    };
 #endif
 
     /**

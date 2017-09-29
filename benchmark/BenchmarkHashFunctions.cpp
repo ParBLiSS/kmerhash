@@ -20,6 +20,8 @@
 #define MEASURE_MURMURAVX 11
 #define MEASURE_CRC32C 12
 
+//#define MEASURE_MURMURSSSE64 13
+
 static int measure_mode = MEASURE_DISABLED;
 
 #include <ittnotify.h>
@@ -123,6 +125,28 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
 #endif
   }
   BL_BENCH_END(benchmark, "murmur32sse4", count);
+// not implemented.
+//  BL_BENCH_START(benchmark);
+//  {
+//    ::fsc::hash::murmur3sse64<DataStruct<N> > h;
+//     benchmark_hash(h, data, out, count);
+//  }
+//  BL_BENCH_END(benchmark, "murmur64sse1", count);
+//
+//  BL_BENCH_START(benchmark);
+//  {
+//#ifdef VTUNE_ANALYSIS
+//  if (measure_mode == MEASURE_MURMURSSE)
+//      __itt_resume();
+//#endif
+//    ::fsc::hash::murmur3sse64<DataStruct<N> > h;
+//     benchmark_hash_batch(h, data, out, count);
+//#ifdef VTUNE_ANALYSIS
+//  if (measure_mode == MEASURE_MURMURSSE)
+//      __itt_pause();
+//#endif
+//  }
+//  BL_BENCH_END(benchmark, "murmur64sse4", count);
 #endif
 
 #if defined(__AVX2__)
@@ -214,6 +238,7 @@ int main(int argc, char** argv) {
         measure_modes.push_back("farm");
         measure_modes.push_back("murmur_sse");
         measure_modes.push_back("murmur_avx");
+//        measure_modes.push_back("murmur64_sse");
         measure_modes.push_back("crc32c");
         measure_modes.push_back("disabled");
         TCLAP::ValuesConstraint<std::string> measureModeVals( measure_modes );
@@ -238,6 +263,8 @@ int main(int argc, char** argv) {
           measure_mode = MEASURE_MURMURSSE;
         } else if (measure_mode_str == "murmur_avx") {
           measure_mode = MEASURE_MURMURAVX;
+//        } else if (measure_mode_str == "murmur64_sse") {
+//          measure_mode = MEASURE_MURMURSSE64;
         } else if (measure_mode_str == "crc32c") {
           measure_mode = MEASURE_CRC32C;
         } else {

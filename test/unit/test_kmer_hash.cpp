@@ -109,14 +109,14 @@ class KmerHashTest : public ::testing::Test {
       ASSERT_TRUE(same);
 
     }
-    template <template <typename> class B, template <typename> class H>
+    template <template <typename> class B, template <typename> class H, typename OT = uint32_t>
     void hash_vector_vs_sse(std::string name) {
 
         B<T> bop;
        H<T> op;
 
-       std::vector<uint32_t> truth(this->iterations, 0);
-       std::vector<uint32_t> test(this->iterations, 0);
+       std::vector<OT> truth(this->iterations, 0);
+       std::vector<OT> test(this->iterations, 0);
 
        for (size_t i = 0; i < this->iterations; ++i) {
          truth[i] = bop(this->kmers[i]);
@@ -139,14 +139,14 @@ class KmerHashTest : public ::testing::Test {
       ASSERT_TRUE(same);
 
     }
-    template <template <typename> class B, template <typename> class H>
+    template <template <typename> class B, template <typename> class H, typename OT = uint32_t>
     void hash_vector_vs_sse_batch(std::string name) {
 
         B<T> bop;
        H<T> op;
 
-       std::vector<uint32_t> truth(this->iterations, 0);
-       std::vector<uint32_t> test(this->iterations, 0);
+       std::vector<OT> truth(this->iterations, 0);
+       std::vector<OT> test(this->iterations, 0);
 
        for (size_t i = 0; i < this->iterations; ++i) {
          truth[i] = bop(this->kmers[i]);
@@ -252,6 +252,18 @@ TYPED_TEST_P(KmerHashTest, murmur32sse_batch)
   this->template hash_vector_vs_sse_batch<fsc::hash::murmur32, fsc::hash::murmur3sse32>(std::string("murmur3_32_vs_sse_batch"));
 }
 
+// unimplemented.
+//TYPED_TEST_P(KmerHashTest, murmur64sse)
+//{
+//  this->template hash_vector_vs_sse<fsc::hash::murmur, fsc::hash::murmur3sse64, size_t>(std::string("murmur3_64_vs_sse"));
+//}
+//
+//
+//TYPED_TEST_P(KmerHashTest, murmur64sse_batch)
+//{
+//  this->template hash_vector_vs_sse_batch<fsc::hash::murmur, fsc::hash::murmur3sse64, size_t>(std::string("murmur3_64_vs_sse_batch"));
+//}
+
 #endif
 
 #if defined(__AVX2__)
@@ -272,6 +284,7 @@ TYPED_TEST_P(KmerHashTest, murmur32avx_batch)
 REGISTER_TYPED_TEST_CASE_P(KmerHashTest, iden, murmur, farm,
 #if defined(__SSE4_1__)
                            murmur32sse, murmur32sse_batch,
+//                           murmur64sse, murmur64sse_batch,   unimplemented.
 #endif
 #if defined(__AVX2__)
                            murmur32avx, murmur32avx_batch,
