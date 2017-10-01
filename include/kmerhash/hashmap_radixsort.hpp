@@ -275,6 +275,7 @@ public:
         for(; i < count; i++)
             B[i - sizeA] = newBuf[i];
 
+		_mm_free(newBuf);
         return count;
     }
 
@@ -338,6 +339,17 @@ public:
         coherence = COHERENT;
         seed = 43;
     }
+
+	~hashmap_radixsort()
+	{
+		_mm_free(countArray);
+		_mm_free(hashTable);
+		_mm_free(overflowBuf);
+		_mm_free(sortBuf);
+		_mm_free(countSortBuf);
+		_mm_free(info_container);
+	}
+
 
     //uint64_t hash(uint64_t x)
     //{
