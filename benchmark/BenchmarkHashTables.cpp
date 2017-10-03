@@ -57,6 +57,7 @@
 #include <cstring>  // memcpy
 
 #include "kmerhash/io_utils.hpp"
+#include "kmerhash/hash.hpp"
 
 #ifdef VTUNE_ANALYSIS
 #include <ittnotify.h>
@@ -80,10 +81,15 @@
 // results:  google dense hash is fastest.
 // question is how to make google dense hash support multimap style operations?  vector is expensive...
 
+//TODO: [] refactor main function.
+
 #define STD 21
 #define MURMUR 22
 #define FARM 23
 #define IDEN 24
+#define MURMUR32 25
+#define MURMUR32sse 26
+#define MURMUR32avx 27
 
 
 #define LOOK_AHEAD 16
@@ -99,6 +105,15 @@
 #elif (pStoreHash == MURMUR)
   template <typename KM>
   using StoreHash = bliss::kmer::hash::murmur<KM, false>;
+#elif (pStoreHash == MURMUR32)
+  template <typename KM>
+  using StoreHash = fsc::hash::murmur32<KM>;
+#elif (pStoreHash == MURMUR32sse)
+  template <typename KM>
+  using StoreHash = fsc::hash::murmur3sse32<KM>;
+#elif (pStoreHash == MURMUR32avx)
+  template <typename KM>
+  using StoreHash = fsc::hash::murmur3avx32<KM>;
 #else //if (pStoreHash == FARM)
   template <typename KM>
   using StoreHash = bliss::kmer::hash::farm<KM, false>;
@@ -1532,6 +1547,7 @@ int main(int argc, char** argv) {
 
   if (fname.compare("") == 0) {
 	  std::cout << "using generated count " << count << " repeat rate " << repeat_rate << " fname [" << fname << "]" << std::endl;
+
 
   if (map == STD_UNORDERED_TYPE) {
 

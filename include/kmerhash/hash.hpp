@@ -108,7 +108,7 @@ namespace fsc {
 
         protected:
           // make static so initialization at beginning of class...
-          const __m256i seed;
+          mutable __m256i seed;
           const __m256i mix_const1;
           const __m256i mix_const2;
           const __m256i c1;
@@ -187,9 +187,9 @@ namespace fsc {
             return h;
           }
 
-        public:
-          Murmur32AVX(uint32_t _seed) :
-            seed(_mm256_set1_epi32(_seed)),
+
+          explicit Murmur32AVX(__m256i _seed) :
+            seed(_seed),
             mix_const1(_mm256_set1_epi32(0x85ebca6b)),
             mix_const2(_mm256_set1_epi32(0xc2b2ae35)),
             c1(_mm256_set1_epi32(0xcc9e2d51)),
@@ -197,16 +197,42 @@ namespace fsc {
             c3(_mm256_set1_epi32(0x5)),
             c4(_mm256_set1_epi32(0xe6546b64)),
             zero(_mm256_setzero_si256()), // SSE2
-			length(_mm256_set1_epi32(bytes)),
+            length(_mm256_set1_epi32(bytes)),
             permute1(_mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7)),
             permute16(_mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7)),
             shuffle1(_mm256_setr_epi8(0x0, 0x80, 0x80, 0x80, 0x1, 0x80, 0x80, 0x80,
                                       0x2, 0x80, 0x80, 0x80, 0x3, 0x80, 0x80, 0x80,
                                       0x0, 0x80, 0x80, 0x80, 0x1, 0x80, 0x80, 0x80,
                                       0x2, 0x80, 0x80, 0x80, 0x3, 0x80, 0x80, 0x80)),
-			offsets(_mm256_setr_epi32(0, bytes, bytes << 1, bytes * 3,
-									  bytes << 2, bytes * 5, bytes * 6, bytes * 7 ))
+            offsets(_mm256_setr_epi32(0, bytes, bytes << 1, bytes * 3,
+                    bytes << 2, bytes * 5, bytes * 6, bytes * 7 ))
         {}
+
+        public:
+
+          explicit Murmur32AVX(uint32_t _seed) :
+            Murmur32AVX(_mm256_set1_epi32(_seed))
+        {}
+
+
+          explicit Murmur32AVX( Murmur32AVX const & other) :
+            Murmur32AVX(other.seed)
+        {}
+
+          explicit Murmur32AVX( Murmur32AVX && other) :
+            Murmur32AVX(other.seed)
+        {}
+
+          Murmur32AVX& operator=( Murmur32AVX const & other) {
+             seed = other.seed;
+
+             return *this;
+          }
+
+          Murmur32AVX& operator=( Murmur32AVX && other) {
+             seed = other.seed;
+             return *this;
+          }
 
 
 
@@ -329,7 +355,7 @@ namespace fsc {
           }
 
 #if 0
-          // USING load, INSERT plus unpack is faster than gather.
+          // USING load, INSERT plus unpack is FASTER than i32gather.
           /// NOTE: multiples of 32.
           template <size_t len = bytes,
               typename std::enable_if<((len & 31) == 0), int>::type = 1>
@@ -357,10 +383,6 @@ namespace fsc {
               k1 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 1, offsets, 1);  // avx2
               k2 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 2, offsets, 1);  // avx2
               k3 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 3, offsets, 1);  // avx2
-//              k4 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 4, offsets, 1);  // avx2
-//              k5 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 5, offsets, 1);  // avx2
-//              k6 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 6, offsets, 1);  // avx2
-//              k7 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 7, offsets, 1);  // avx2
 
               // already at the right places, so just call update32.
               // row 0
@@ -368,10 +390,7 @@ namespace fsc {
               h1 = update32(h1, k1); // transpose 4x2  SSE2
               h1 = update32(h1, k2); // transpose 4x2  SSE2
               h1 = update32(h1, k3); // transpose 4x2  SSE2
-//              h1 = update32(h1, k4); // transpose 4x2  SSE2
-//              h1 = update32(h1, k5); // transpose 4x2  SSE2
-//              h1 = update32(h1, k6); // transpose 4x2  SSE2
-//              h1 = update32(h1, k7); // transpose 4x2  SSE2
+
             }
 
             //----------
@@ -720,7 +739,7 @@ namespace fsc {
 
         protected:
           // make static so initialization at beginning of class...
-          const __m128i seed;
+          mutable __m128i seed;
           const __m128i mix_const1;
           const __m128i mix_const2;
           const __m128i c1;
@@ -795,9 +814,9 @@ namespace fsc {
             return h;
           }
 
-        public:
-          Murmur32SSE(uint32_t _seed) :
-            seed(_mm_set1_epi32(_seed)),
+
+          explicit Murmur32SSE(__m128i _seed) :
+            seed(_seed),
             mix_const1(_mm_set1_epi32(0x85ebca6b)),
             mix_const2(_mm_set1_epi32(0xc2b2ae35)),
             c1(_mm_set1_epi32(0xcc9e2d51)),
@@ -805,9 +824,35 @@ namespace fsc {
             c3(_mm_set1_epi32(0x5)),
             c4(_mm_set1_epi32(0xe6546b64)),
             zero(_mm_setzero_si128()),// SSE2
-			length(_mm_set1_epi32(bytes))
+            length(_mm_set1_epi32(bytes))
         {}
 
+        public:
+
+
+          explicit Murmur32SSE(uint32_t _seed) :
+            Murmur32SSE(_mm_set1_epi32(_seed))
+        {}
+
+          explicit Murmur32SSE( Murmur32SSE const & other) :
+            Murmur32SSE(other.seed)
+        {}
+
+          explicit Murmur32SSE( Murmur32SSE && other) :
+            Murmur32SSE(other.seed)
+        {}
+
+          Murmur32SSE& operator=( Murmur32SSE const & other) {
+             seed = other.seed;
+
+             return *this;
+          }
+
+          Murmur32SSE& operator=( Murmur32SSE && other) {
+             seed = other.seed;
+
+             return *this;
+          }
 
 
           // useful for computing 4 32bit hashes in 1 pass (for hashing into less than 2^32 buckets)
@@ -1308,8 +1353,6 @@ namespace fsc {
           }
 
       };
-
-
 
 
 //      NOTE: no _mm_mullo_epi64 below avx512, so no point in this for Broadwell and earlier.
