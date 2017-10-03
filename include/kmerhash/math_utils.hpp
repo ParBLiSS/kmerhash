@@ -24,7 +24,11 @@
 #ifndef KMERHASH_MATH_UTILS_HPP_
 #define KMERHASH_MATH_UTILS_HPP_
 
-
+#if defined(__INTEL_COMPILER)
+#define CONSTEXPR
+#else
+#define CONSTEXPR constexpr
+#endif
 /*
  * get the next power of 2 for unsigned integer type.  based on http://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
  */
@@ -56,7 +60,7 @@
 #include <x86intrin.h>
 
 template <typename T>
-inline constexpr T next_power_of_2(T x) {
+inline CONSTEXPR T next_power_of_2(T x) {
 
   static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value,
                 "ERROR: can only find power of 2 for unsigned integers.");
@@ -67,7 +71,7 @@ inline constexpr T next_power_of_2(T x) {
 
 template <typename T, typename ::std::enable_if<
 	 (sizeof(T) == 1), int>::type = 1>
-inline constexpr T next_power_of_2(T x) {
+inline CONSTEXPR T next_power_of_2(T x) {
   static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value,
                 "ERROR: can only find power of 2 for unsigned integers.");
 
@@ -75,14 +79,13 @@ inline constexpr T next_power_of_2(T x) {
 		x |= x >> 4;
 		x |= x >> 2;
 		x |= x >> 1;
-	++x;
-	return x;
+	return x + 1;
 }
 
 
 template <typename T, typename ::std::enable_if<
 	 (sizeof(T) == 2), int>::type = 1>
-inline constexpr T next_power_of_2(T x) {
+inline CONSTEXPR T next_power_of_2(T x) {
 
   static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value,
                 "ERROR: can only find power of 2 for unsigned integers.");
@@ -91,13 +94,12 @@ inline constexpr T next_power_of_2(T x) {
 		x |= x >> 4;
 		x |= x >> 2;
 		x |= x >> 1;
-	++x;
-	return x;
+	return x + 1;
 }
 
 template <typename T, typename ::std::enable_if<
 	 (sizeof(T) == 4), int>::type = 1>
-inline constexpr T next_power_of_2(T x) {
+inline CONSTEXPR T next_power_of_2(T x) {
   static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value,
                 "ERROR: can only find power of 2 for unsigned integers.");
 
@@ -107,13 +109,12 @@ inline constexpr T next_power_of_2(T x) {
 		x |= x >> 4;
 		x |= x >> 2;
 		x |= x >> 1;
-	++x;
-	return x;
+	return x + 1;
 }
 
 template <typename T, typename ::std::enable_if<
 	 (sizeof(T) == 8), int>::type = 1 >
-inline constexpr T next_power_of_2(T x) {
+inline CONSTEXPR T next_power_of_2(T x) {
   static_assert(::std::is_integral<T>::value && !::std::is_signed<T>::value,
                 "ERROR: can only find power of 2 for unsigned integers.");
 
@@ -124,8 +125,7 @@ inline constexpr T next_power_of_2(T x) {
 		x |= x >> 4;
 		x |= x >> 2;
 		x |= x >> 1;
-	++x;
-	return x;
+	return x + 1;
 }
 
 #endif
