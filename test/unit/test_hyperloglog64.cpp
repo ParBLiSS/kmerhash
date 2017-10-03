@@ -107,13 +107,22 @@ protected:
 		double est = _hll.estimate();
 		double act = static_cast<double>(_uniq.size());
 
-		std::cout << "iteration " << std::setw(5) << i <<
-				" total count " << std::setw(10) << ((i+1) * step) <<
-				" estimate " << std::setw(10) << est <<
-				" actual " << std::setw(10) << act <<
-				" percent " << std::setw(10) << (100.0 * (est - act) / act) << "%" <<
-				" expected " << std::setw(10) << (100.0 * HLL::est_error_rate) << "%" <<
-				std::endl;
+		double err = fabs((est - act) / act);
+
+
+		// arbitrary bound of 2.5 times est error rate.
+		if (err > 2.5 * HLL::est_error_rate)
+      std::cout << "iteration " << std::setw(5) << i <<
+          " total count " << std::setw(10) << ((i+1) * step) <<
+          " estimate " << std::setw(10) << est <<
+          " actual " << std::setw(10) << act <<
+          " percent " << std::setw(10) << (100.0 * err) << "%" <<
+          " expected " << std::setw(10) << (100.0 * HLL::est_error_rate) << "%" <<
+          std::endl;
+
+
+    EXPECT_LT(err, 2.5 * HLL::est_error_rate);
+
     }
 
 };
@@ -273,7 +282,7 @@ typedef ::testing::Types<
 //		HyperLogLog64TestParam<uint32_t, ::fsc::hash::murmur<uint32_t>, 10 >,
 //		HyperLogLog64TestParam<uint64_t, ::fsc::hash::murmur<uint64_t>, 10 >,
 ////		HyperLogLog64TestParam< uint8_t, ::std::hash<uint8_t>         , 12 >,
-		HyperLogLog64TestParam<uint16_t, ::std::hash<uint16_t>        , 12 >,
+////		HyperLogLog64TestParam<uint16_t, ::std::hash<uint16_t>        , 12 >,  // bad case - only 4 bits left...
 		HyperLogLog64TestParam<uint32_t, ::std::hash<uint32_t>        , 12 >,
 		HyperLogLog64TestParam<uint64_t, ::std::hash<uint64_t>        , 12 >,
 		HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 12 >,
@@ -296,26 +305,31 @@ typedef ::testing::Types<
 		HyperLogLog64TestParam<uint16_t, ::fsc::hash::murmur<uint16_t>, 14 >,
 		HyperLogLog64TestParam<uint32_t, ::fsc::hash::murmur<uint32_t>, 14 >,
 		HyperLogLog64TestParam<uint64_t, ::fsc::hash::murmur<uint64_t>, 14 >,
-		HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 12, 1 >,
-		HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 12, 1 >,
-		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 12, 1 >,
+//		HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 12, 1 >,
+//		HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 12, 1 >,
+//		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 12, 1 >,
 		HyperLogLog64TestParam<uint64_t, ::fsc::hash::farm<uint64_t>  , 12, 1 >,
-		HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 12, 2 >,
-		HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 12, 2 >,
-		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 12, 2 >,
+//		HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 12, 2 >,
+//		HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 12, 2 >,
+//		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 12, 2 >,
 		HyperLogLog64TestParam<uint64_t, ::fsc::hash::farm<uint64_t>  , 12, 2 >,
-		HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 12, 4 >,
-		HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 12, 4 >,
-		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 12, 4 >,
+//		HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 12, 4 >,
+//		HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 12, 4 >,
+//		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 12, 4 >,
 		HyperLogLog64TestParam<uint64_t, ::fsc::hash::farm<uint64_t>  , 12, 4 >,
 		HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 12, 8 >,
-		HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 12, 8 >,
-		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 12, 8 >,
+//		HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 12, 8 >,
+//		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 12, 8 >,
 		HyperLogLog64TestParam<uint64_t, ::fsc::hash::farm<uint64_t>  , 12, 8 >,
 		HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 12, 16 >,
 		HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 12, 16 >,
-		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 12, 16 >,
-		HyperLogLog64TestParam<uint64_t, ::fsc::hash::farm<uint64_t>  , 12, 16 >
+//		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 12, 16 >,
+		HyperLogLog64TestParam<uint64_t, ::fsc::hash::farm<uint64_t>  , 12, 16 >,
+    HyperLogLog64TestParam< uint8_t, ::fsc::hash::murmur32<uint8_t> , 12 >,
+    HyperLogLog64TestParam<uint16_t, ::fsc::hash::murmur32<uint16_t>, 12 >,
+    HyperLogLog64TestParam<uint32_t, ::fsc::hash::murmur32<uint32_t>, 12 >,
+    HyperLogLog64TestParam<uint64_t, ::fsc::hash::murmur32<uint64_t>, 12 >
+
 
 > HyperLogLog64TestTypes;
 INSTANTIATE_TYPED_TEST_CASE_P(Bliss, HyperLogLog64Test, HyperLogLog64TestTypes);

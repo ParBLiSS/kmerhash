@@ -81,7 +81,9 @@
 // results:  google dense hash is fastest.
 // question is how to make google dense hash support multimap style operations?  vector is expensive...
 
-//TODO: [] refactor main function.
+//TODO: [ ] refactor main function.
+//      [ ] estimate for all cases.
+//      [ ] use only insert(iter, iter)
 
 #define STD 21
 #define MURMUR 22

@@ -119,8 +119,8 @@ inline uint8_t leftmost_set_bit(uint64_t x) {
 template <typename T, typename Hash,
 		uint8_t precision = 12U,
 		uint8_t unused_msb = (std::is_same<::std::hash<T>, Hash>::value) ?
-				((sizeof(T) >= 8ULL) ? 0U : (64U - (sizeof(T) * 8ULL))) :
-				0U
+				((sizeof(T) >= 8ULL) ? 0U : (64U - (sizeof(T) * 8ULL))) :   // if std::hash then via input size.
+				(64U - (sizeof(decltype(::std::declval<Hash>().operator()(::std::declval<T>()))) << 3))   // if not, check Hash operator return type.
 		>
 class hyperloglog64 {
 	  static_assert((precision >= 4ULL) && (precision <= 16ULL),
@@ -130,7 +130,7 @@ protected:
 	using REG_T = uint8_t;
 
 	// 64 bit.  0xIIRRVVVVVV  // MSB: ignored bits II,  high bits: reg, RR.  low: values, VVVVVV
-	static constexpr uint8_t value_bits = 64U - precision;  // e.g. 0x00FFFFFF
+	static constexpr uint8_t no_ignore_value_bits = 64U - precision;  // e.g. 0x00FFFFFF
 	static constexpr uint64_t nRegisters = 0x1ULL << precision;   // e.g. 0x00000100
 	mutable double amm;
 
@@ -144,7 +144,7 @@ protected:
 	inline void internal_update(::std::vector<REG_T> & regs, uint64_t const & no_ignore) {
 		// no_ignore has bits 0xRRVVVVVV00, not that the II bits had already been shifted away.
 		// extract RR:      0x0000000000RR
-        uint64_t i = no_ignore >> value_bits;   // first precision bits are for register id
+        uint64_t i = no_ignore >> no_ignore_value_bits;   // first precision bits are for register id
         // next count:  want to count 0xVVVVVV1111.
         // compute lzcnt +1 from VVVVVV
         REG_T rank = leftmost_set_bit((no_ignore << precision) | lzc_mask);  // then find leading 1 in remaining
@@ -156,7 +156,7 @@ protected:
   inline void internal_update(REG_T* regs, uint64_t const & no_ignore) {
     // no_ignore has bits 0xRRVVVVVV00, not that the II bits had already been shifted away.
     // extract RR:      0x0000000000RR
-        uint64_t i = no_ignore >> value_bits;   // first precision bits are for register id
+        uint64_t i = no_ignore >> no_ignore_value_bits;   // first precision bits are for register id
         // next count:  want to count 0xVVVVVV1111.
         // compute lzcnt +1 from VVVVVV
         REG_T rank = leftmost_set_bit((no_ignore << precision) | lzc_mask);  // then find leading 1 in remaining
@@ -272,6 +272,12 @@ public:
                 break;
         }
         amm *= static_cast<double>(0x1ULL << (precision << 1ULL));  // 2^(2*precision)
+
+//        std::cout << "unused msb = " << static_cast<size_t>(64U - (sizeof(decltype(::std::declval<Hash>().operator()(::std::declval<T>()))) << 3)) << std::endl;
+//        std::cout << "unused msb2 = " << static_cast<size_t>(64U - (sizeof(typename std::result_of<Hash&(const T &)>::type) << 3)) << std::endl;
+//        std::cout << "unused msb3 = " << static_cast<size_t>(64U - (sizeof(typename std::result_of<Hash(const T &)>::type) << 3)) << std::endl;
+//        std::cout << "unused msb3 = " << static_cast<size_t>(64U - (sizeof(typename std::result_of<decltype(&Hash::operator())(Hash, const T &)>::type) << 3)) << std::endl;
+
 	}
 
 	hyperloglog64(hyperloglog64 const & other) :
@@ -319,7 +325,7 @@ public:
 
 
 	inline void update(T const & val) {
-      internal_update(this->registers, h(val) << ignored_msb);
+      internal_update(this->registers, static_cast<uint64_t>(h(val)) << ignored_msb);
 	}
 
 	inline void update_via_hashval(uint64_t const & hash) {
