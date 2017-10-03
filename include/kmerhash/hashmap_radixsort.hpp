@@ -365,7 +365,7 @@ public:
             printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
             return;
         }
-        int PFD = 8;
+        int PFD = 16;
         int32_t i;
         coherence = INSERT;
         int32_t bucketIdArray[32];
