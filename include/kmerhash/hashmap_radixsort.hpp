@@ -61,6 +61,7 @@ public:
 
     Equal eq;
     Hash hash;
+	hyperloglog64<Key, Hash, 12> hll;  // precision of 12bits  error rate : 1.04/(2^6)
 
     int32_t radixSort(HashElement *A,
                   int32_t size)
@@ -351,6 +352,132 @@ public:
 	}
 
 
+	void resize(uint32_t _newNumBuckets)
+	{
+        int PFD = 16;
+		HashElement *oldElemArray = (HashElement *)_mm_malloc((totalKeyCount + PFD) * sizeof(HashElement), 64);
+
+	    uint32_t i, j;
+		uint32_t elemCount = 0;
+		for(i = 0; i < numBins; i++)
+		{
+			int count = countArray[i];
+			int y = std::min(count, binSize - 1);
+			for(j = 0; j < y; j++)
+			{
+				oldElemArray[elemCount++] = hashTable[i * binSize + y];
+			}
+            int32_t overflowBufId;
+            overflowBufId = hashTable[i * binSize + binSize - 1].bucketId;
+            for(; j < count; j++)
+            {
+                oldElemArray[elemCount++] = overflowBuf[overflowBufId * binSize + j - (binSize - 1)];
+            }
+		}
+		printf("elemCount = %d\n", elemCount);
+
+        numBuckets = next_power_of_2(_newNumBuckets);
+        bucketMask = numBuckets - 1;
+        numBins = numBuckets * 2 / binSize;
+        binMask = numBins - 1;
+        overflowBufSize = numBins / 8;
+
+		_mm_free(countArray);
+        countArray = (uint16_t *)_mm_malloc(numBins * sizeof(uint16_t), 64);
+        memset(countArray, 0, numBins * sizeof(uint16_t));
+
+		_mm_free(hashTable);
+        hashTable = (HashElement *)_mm_malloc(numBins * binSize * sizeof(HashElement), 64);
+
+		_mm_free(overflowBuf);
+        overflowBuf = (HashElement *)_mm_malloc(overflowBufSize * binSize * sizeof(HashElement), 64);
+        sortBufSize = numBuckets / numBins;
+
+		_mm_free(sortBuf);
+        sortBuf = (HashElement *)_mm_malloc(sortBufSize * binSize * sizeof(HashElement), 64);
+
+		_mm_free(countSortBuf);
+        countSortBuf = (uint16_t *)_mm_malloc(sortBufSize * sizeof(uint16_t), 64);
+        binShift = log2(sortBufSize);
+
+		_mm_free(info_container);
+        info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
+        curOverflowBufId = 0;
+        printf("numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
+                numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
+
+		// insert the elements again
+        coherence = INSERT;
+        int32_t bucketIdArray[32];
+        for(i = 0; i < PFD; i++)
+        {
+            oldElemArray[i].bucketId = hash(oldElemArray[i].key) & bucketMask;
+        }
+        for(i = 0; i < (elemCount); i++)
+        {
+            HashElement he = oldElemArray[i];
+            int binId = he.bucketId >> binShift;
+            int count = countArray[binId];
+            int32_t f_bucketId = oldElemArray[(i + PFD)].bucketId = (hash(oldElemArray[i + PFD].key) & bucketMask);
+            int f_binId = f_bucketId >> binShift;
+            int f_count = countArray[f_binId];
+            _mm_prefetch((const char *)(hashTable + f_binId * binSize + f_count), _MM_HINT_T0);
+            if(count < binSize)
+            {
+                if(count == (binSize - 1))
+                {
+                    count = radixSort(hashTable + binId * binSize,
+                            count);
+                    countArray[binId] = count;
+                }
+
+                if(count == (binSize - 1))
+                {
+                    if(curOverflowBufId == overflowBufSize)
+                    {
+                        printf("ERROR! Ran out of overflowBuf, curOverflowBufId = %d.\n"
+                                "Try increasing numBins, binSize or overflowBufSize\n", 
+                                curOverflowBufId);
+                        exit(1);
+                    }
+                    int32_t overflowBufId = curOverflowBufId;
+                    curOverflowBufId++;
+                    hashTable[binId * binSize + binSize - 1].bucketId = overflowBufId;
+                    overflowBuf[overflowBufId * binSize] = he;
+                }
+                else
+                {
+                    hashTable[binId * binSize + count] = he;                
+                }
+
+                countArray[binId]++;
+            }
+            else
+            {
+                int32_t overflowBufId;
+                overflowBufId = hashTable[binId * binSize + binSize - 1].bucketId;
+                if(count == (2 * binSize - 1))
+                {
+                    int32_t c = radixSort(overflowBuf + overflowBufId * binSize,
+                                          count - (binSize - 1));
+                    count = merge(hashTable + binId * binSize, binSize - 1,
+                          overflowBuf + overflowBufId * binSize, c);
+                    countArray[binId] = count;
+                }
+                if(count == (2 * binSize - 1))
+                {
+                    printf("ERROR! binId = %d, count = 2 * binSize - 1. Please use larger binSize or numBins\n", binId);
+                    exit(1);
+                }
+                overflowBuf[overflowBufId * binSize + count - (binSize - 1)] = he;
+                countArray[binId]++;
+            }
+        }
+		_mm_free(oldElemArray);
+		finalize_insert();
+	}
+
+
     //uint64_t hash(uint64_t x)
     //{
     //    uint64_t y[2];
@@ -388,6 +515,98 @@ public:
             int count = countArray[binId];
             //startTick = __rdtsc();
             int32_t f_bucketId = bucketIdArray[(i + PFD) & 31] = (hash(keyArray[i + PFD]) & bucketMask);
+            //endTick = __rdtsc();
+            //hashTicks += (endTick - startTick);
+            int f_binId = f_bucketId >> binShift;
+            int f_count = countArray[f_binId];
+            //_mm_prefetch((const char *)(hashTable + f_bucketId), _MM_HINT_T0);
+            //_mm_prefetch((const char *)(countArray + f_binId), _MM_HINT_T0);
+            _mm_prefetch((const char *)(hashTable + f_binId * binSize + f_count), _MM_HINT_T0);
+            if(count < binSize)
+            {
+                if(count == (binSize - 1))
+                {
+                    count = radixSort(hashTable + binId * binSize,
+                            count);
+                    countArray[binId] = count;
+                }
+
+                if(count == (binSize - 1))
+                {
+                    if(curOverflowBufId == overflowBufSize)
+                    {
+                        printf("ERROR! Ran out of overflowBuf, curOverflowBufId = %d.\n"
+                                "Try increasing numBins, binSize or overflowBufSize\n", 
+                                curOverflowBufId);
+                        exit(1);
+                    }
+                    int32_t overflowBufId = curOverflowBufId;
+                    curOverflowBufId++;
+                    hashTable[binId * binSize + binSize - 1].bucketId = overflowBufId;
+                    overflowBuf[overflowBufId * binSize] = he;
+                }
+                else
+                {
+                    hashTable[binId * binSize + count] = he;                
+                }
+
+                countArray[binId]++;
+            }
+            else
+            {
+                int32_t overflowBufId;
+                overflowBufId = hashTable[binId * binSize + binSize - 1].bucketId;
+                if(count == (2 * binSize - 1))
+                {
+                    int32_t c = radixSort(overflowBuf + overflowBufId * binSize,
+                                          count - (binSize - 1));
+                    count = merge(hashTable + binId * binSize, binSize - 1,
+                          overflowBuf + overflowBufId * binSize, c);
+                    countArray[binId] = count;
+                }
+                if(count == (2 * binSize - 1))
+                {
+                    printf("ERROR! binId = %d, count = 2 * binSize - 1. Please use larger binSize or numBins\n", binId);
+                    exit(1);
+                }
+                overflowBuf[overflowBufId * binSize + count - (binSize - 1)] = he;
+                countArray[binId]++;
+            }
+        }
+        //printf("hashTicks = %ld\n", hashTicks);
+    }
+
+	template <class HashType>
+    void insert(Key *keyArray, HashType *hashArray, int32_t numKeys)
+    {
+        if((coherence != COHERENT) && (coherence != INSERT))
+        {
+            printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
+            return;
+        }
+        int PFD = 16;
+        int32_t i;
+        coherence = INSERT;
+        int32_t bucketIdArray[32];
+        //int64_t hashTicks = 0;
+        //int64_t startTick, endTick;
+        //startTick = __rdtsc();
+        for(i = 0; i < PFD; i++)
+        {
+            bucketIdArray[i] = hashArray[i] & bucketMask;
+        }
+        //endTick = __rdtsc();
+        //hashTicks += (endTick - startTick);
+        for(i = 0; i < (numKeys); i++)
+        {
+            HashElement he;
+            he.key = keyArray[i];
+            he.val = 1;
+            he.bucketId = bucketIdArray[i & 31];
+            int binId = he.bucketId >> binShift;
+            int count = countArray[binId];
+            //startTick = __rdtsc();
+            int32_t f_bucketId = bucketIdArray[(i + PFD) & 31] = (hashArray[i + PFD] & bucketMask);
             //endTick = __rdtsc();
             //hashTicks += (endTick - startTick);
             int f_binId = f_bucketId >> binShift;
@@ -789,6 +1008,11 @@ public:
     size_t size() const {
         return totalKeyCount;
     }
+
+	inline hyperloglog64<Key, Hash, 12>& get_hll() {
+		return this->hll;
+	}
+
 };
 }  // namespace fsc
 #endif /* KMERHASH_HASHMAP_RADIXSORT_HPP_ */

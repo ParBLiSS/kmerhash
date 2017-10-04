@@ -876,6 +876,7 @@ void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer,
     BL_BENCH_END(map, "generate query", input.size());
 
 
+    ::fsc::hashmap_radixsort<Kmer, StoreHash<Kmer>, ::equal_to<Kmer> > map;
     BL_BENCH_START(map);
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_ESTIMATE)
@@ -885,20 +886,19 @@ void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer,
 	// compute hyperloglog estimate for reference.
 	hyperloglog64<Kmer, StoreHash<Kmer>, 12> hll;
 	for (size_t i = 0; i < input.size(); ++i) {
-		hll.update(input[i].first);
+		map.get_hll().update(input[i].first);
 	}
 
-	double est = hll.estimate();
+	double est = map.get_hll().estimate();
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_ESTIMATE)
         __itt_pause();
 #endif
     BL_BENCH_END(map, "estimate", static_cast<size_t>(est));
-
+	map.resize(static_cast<size_t>(est));
 	std::cout << "insert testing: estimated distinct = " << est << " in " << input.size() << std::endl;
 
 
-    ::fsc::hashmap_radixsort<Kmer, StoreHash<Kmer>, ::equal_to<Kmer> > map(static_cast<size_t>(est));
     std::string insert_type;
     insert_type = "batch_insert";
 
@@ -1813,7 +1813,7 @@ int main(int argc, char** argv) {
 		  }
 
 	} else if (map == RADIXSORT_TYPE) {
-	  //================ my new hashmap Radixsort
+	  //================ new hashmap Radixsort
 		  if (dna == DNA_TYPE) {
 			  if (full) {
 				  BL_BENCH_START(test);
@@ -2148,7 +2148,7 @@ int main(int argc, char** argv) {
 				  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 			  }
 		} else if (map == RADIXSORT_TYPE) {
-		  //================ my new hashmap Radixsort
+		  //================ new hashmap Radixsort
 			  if (dna == DNA_TYPE) {
 				  if (full) {
 					  BL_BENCH_START(test);
