@@ -52,6 +52,14 @@
  *          as stated above, 2 versions for each specialization: hash() and hash_prefix().  the specialization is especially for identity and murmur hashes,
  *          as murmur hash produces 128 bit value, and identity hash uses the original kmer.
  *
+ *
+ *NOTE:
+ *      avx2 state transition when upper 128 bit may not be zero: STATE C:  up to 6x slower.
+ *      	https://software.intel.com/en-us/articles/intel-avx-state-transitions-migrating-sse-code-to-avx
+ *
+ *      	however, clearing all registers would also clear all stored constants, which would then need to be reloaded.
+ *      	this can be done, but will require  some code change.
+ *  TODO: [ ] proper AVX transition that respects avx constants.
  */
 #ifndef HASH_HPP_
 #define HASH_HPP_
@@ -61,6 +69,11 @@
 #include <stdexcept>  //logic error
 #include <stdint.h>  // std int strings
 
+
+#include "utils/filter_utils.hpp"
+#include "utils/transform_utils.hpp"
+#include "kmerhash/mem_utils.hpp"
+#include "kmerhash/math_utils.hpp"
 
 
 // includ the murmurhash code.
@@ -115,12 +128,11 @@ namespace fsc {
           const __m256i c2;
           const __m256i c3;
           const __m256i c4;
-          const __m256i zero;
-          const __m256i length;
           const __m256i permute1;
           const __m256i permute16;
           const __m256i shuffle1;  // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
-          const __m256i offsets;
+          const __m256i length;
+          const __m256i offs;
 
           // input is 4 unsigned ints.
           FSC_FORCE_INLINE __m256i rotl32 ( __m256i x, int8_t r ) const
@@ -190,22 +202,26 @@ namespace fsc {
 
           explicit Murmur32AVX(__m256i _seed) :
             seed(_seed),
-            mix_const1(_mm256_set1_epi32(0x85ebca6b)),
-            mix_const2(_mm256_set1_epi32(0xc2b2ae35)),
-            c1(_mm256_set1_epi32(0xcc9e2d51)),
-            c2(_mm256_set1_epi32(0x1b873593)),
-            c3(_mm256_set1_epi32(0x5)),
-            c4(_mm256_set1_epi32(0xe6546b64)),
-            zero(_mm256_setzero_si256()), // SSE2
-            length(_mm256_set1_epi32(bytes)),
-            permute1(_mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7)),
-            permute16(_mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7)),
-            shuffle1(_mm256_setr_epi8(0x0, 0x80, 0x80, 0x80, 0x1, 0x80, 0x80, 0x80,
-                                      0x2, 0x80, 0x80, 0x80, 0x3, 0x80, 0x80, 0x80,
-                                      0x0, 0x80, 0x80, 0x80, 0x1, 0x80, 0x80, 0x80,
-                                      0x2, 0x80, 0x80, 0x80, 0x3, 0x80, 0x80, 0x80)),
-            offsets(_mm256_setr_epi32(0, bytes, bytes << 1, bytes * 3,
-                    bytes << 2, bytes * 5, bytes * 6, bytes * 7 ))
+            mix_const1(_mm256_set1_epi32(0x85ebca6bU)),
+            mix_const2(_mm256_set1_epi32(0xc2b2ae35U)),
+            c1(_mm256_set1_epi32(0xcc9e2d51U)),
+            c2(_mm256_set1_epi32(0x1b873593U)),
+            c3(_mm256_set1_epi32(0x5U)),
+            c4(_mm256_set1_epi32(0xe6546b64U)),
+            permute1(_mm256_setr_epi32(0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U)),
+            permute16(_mm256_setr_epi32(0U, 4U, 1U, 5U, 2U, 6U, 3U, 7U)),
+            shuffle1(_mm256_setr_epi32(	0x80808000U, 0x80808001U, 0x80808002U, 0x80808003U,
+            							0x80808000U, 0x80808001U, 0x80808002U, 0x80808003U)),
+			length(_mm256_set1_epi32(static_cast<uint32_t>(sizeof(T)))),
+            offs(_mm256_setr_epi32(
+            		static_cast<uint32_t>(0),
+            		static_cast<uint32_t>(sizeof(T)),
+					static_cast<uint32_t>(sizeof(T) * 2),
+            		static_cast<uint32_t>(sizeof(T) * 3),
+            		static_cast<uint32_t>(sizeof(T) * 4),
+					static_cast<uint32_t>(sizeof(T) * 5),
+            		static_cast<uint32_t>(sizeof(T) * 6),
+            		static_cast<uint32_t>(sizeof(T) * 7)))
         {}
 
         public:
@@ -257,20 +273,22 @@ namespace fsc {
             switch (nstreams) {
 			  case 8: _mm256_storeu_si256((__m256i*)out, h1);  // sse
 				break;
-			  case 7: out[6] = _mm256_extract_epi32(h1, 6);   // SSE4.1  2 cycles.  maskmoveu takes 10 (ivybridge)
-			  case 6: *(reinterpret_cast<uint64_t *>(out)) = _mm256_extract_epi64(h1, 0);
-                *(reinterpret_cast<uint64_t *>(out) + 1) = _mm256_extract_epi64(h1, 1);
-                *(reinterpret_cast<uint64_t *>(out) + 2) = _mm256_extract_epi64(h1, 2);
-                break;
-			  case 5: out[4] = _mm256_extract_epi32(h1, 4);
-              case 4: *(reinterpret_cast<uint64_t *>(out)) = _mm256_extract_epi64(h1, 0);
-                *(reinterpret_cast<uint64_t *>(out) + 1) = _mm256_extract_epi64(h1, 1);
-                break;
-              case 3: out[2] = _mm256_extract_epi32(h1, 2);   // SSE4.1  2 cycles.  maskmoveu takes 10 (ivybridge)
-              case 2: *(reinterpret_cast<uint64_t *>(out)) = _mm256_extract_epi64(h1, 0);
-                break;
-              case 1: out[0] = _mm256_extract_epi32(h1, 0);
+//			  case 7: out[6] = _mm256_extract_epi32(h1, 6);   // SSE4.1  2 cycles.  maskmoveu takes 10 (ivybridge)
+//			  case 6: *(reinterpret_cast<uint64_t *>(out)) = _mm256_extract_epi64(h1, 0);
+//                *(reinterpret_cast<uint64_t *>(out) + 1) = _mm256_extract_epi64(h1, 1);
+//                *(reinterpret_cast<uint64_t *>(out) + 2) = _mm256_extract_epi64(h1, 2);
+//                break;
+//			  case 5: out[4] = _mm256_extract_epi32(h1, 4);
+//              case 4: *(reinterpret_cast<uint64_t *>(out)) = _mm256_extract_epi64(h1, 0);
+//                *(reinterpret_cast<uint64_t *>(out) + 1) = _mm256_extract_epi64(h1, 1);
+//                break;
+//              case 3: out[2] = _mm256_extract_epi32(h1, 2);   // SSE4.1  2 cycles.  maskmoveu takes 10 (ivybridge)
+//              case 2: *(reinterpret_cast<uint64_t *>(out)) = _mm256_extract_epi64(h1, 0);
+//                break;
+//              case 1: out[0] = _mm256_extract_epi32(h1, 0);
               default:
+                  uint32_t *tmp = reinterpret_cast<uint32_t*>(&h1);
+                  memcpy(out, tmp, nstreams << 2);   // copy bytes
                 break;;
             }
           }
@@ -311,10 +329,10 @@ namespace fsc {
             // first do blocks of 4 blocks
             int i = 0;
             for (; i < nblocks4; i += 4) {
-              k0 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i, offsets, 1);  // avx2
-              k1 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 1, offsets, 1);  // avx2
-              k2 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 2, offsets, 1);  // avx2
-              k3 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 3, offsets, 1);  // avx2
+              k0 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i, offs, 1);  // avx2
+              k1 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 1, offs, 1);  // avx2
+              k2 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 2, offs, 1);  // avx2
+              k3 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 3, offs, 1);  // avx2
 
               // already at the right places, so just call update32.
               // row 0
@@ -326,9 +344,9 @@ namespace fsc {
 
             // next do the remaining blocks.
             switch (nblocks_rem) {
-				case 3: k2 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 2, offsets, 1);  // avx2
-				case 2: k1 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 1, offsets, 1);  // avx2
-				case 1: k0 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i, offsets, 1);  // avx2
+				case 3: k2 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 2, offs, 1);  // avx2
+				case 2: k1 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 1, offs, 1);  // avx2
+				case 1: k0 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i, offs, 1);  // avx2
 				default:
 					break;
             }
@@ -338,7 +356,7 @@ namespace fsc {
 
             // next do the last bytes
             if (len & 0x3) {
-            	k0 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + nblocks, offsets, 1);  // avx2
+            	k0 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + nblocks, offs, 1);  // avx2
 
             	h1 = update32_zeroing(h1, k0, len & 0x3);
             }
@@ -379,10 +397,10 @@ namespace fsc {
             // gathering 8 keys at a time, 4 bytes each time, so there is 1 gather for each 4 bytes..
             int i = 0;
             for (; i < nblocks; i+=4) {
-              k0 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i    , offsets, 1);  // avx2
-              k1 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 1, offsets, 1);  // avx2
-              k2 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 2, offsets, 1);  // avx2
-              k3 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 3, offsets, 1);  // avx2
+              k0 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i    , offs, 1);  // avx2
+              k1 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 1, offs, 1);  // avx2
+              k2 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 2, offs, 1);  // avx2
+              k3 = _mm256_i32gather_epi32(reinterpret_cast<const int*>(key) + i + 3, offs, 1);  // avx2
 
               // already at the right places, so just call update32.
               // row 0
@@ -653,6 +671,7 @@ namespace fsc {
               typename std::enable_if<(len == 2), int>::type = 1>
           FSC_FORCE_INLINE __m256i hash8(T const *  key) const {
             // process 4 streams at a time.  all should be the same length.
+            __m256i zero = _mm256_setzero_si256();
 
             // example layout, with each dash representing 2 bytes
             //     abcdefgh ijklmnop
@@ -1626,6 +1645,8 @@ namespace fsc {
 
       public:
         static constexpr uint8_t batch_size = 1;
+        using result_type = uint64_t;
+        using argument_type = T;
 
 
         /// operator to compute hash value
@@ -1646,7 +1667,7 @@ namespace fsc {
           }
         }
     };
-
+    template <typename T> constexpr uint8_t identity<T>::batch_size;
 
 
 
@@ -1669,52 +1690,42 @@ namespace fsc {
 
       protected:
         ::fsc::hash::sse::Murmur32AVX<T> hasher;
-        mutable void const * kptrs[8];
         mutable uint32_t temp[8];
 
       public:
         static constexpr uint8_t batch_size = 8;
+        using result_type = uint32_t;
+        using argument_type = T;
 
         murmur3avx32(uint32_t const & _seed = 43 ) : hasher(_seed) {};
 
         inline uint32_t operator()(const T & key) const
         {
-          //          kptrs[0] = &key;
           uint32_t h;
           hasher.hash(&key, 1, &h);
+
           return h;
+        }
+
+        FSC_FORCE_INLINE void operator()(T const * keys, size_t count, uint32_t * results) const
+        {
+          hash(keys, count, results);
         }
 
         // results always 32 bit.
         FSC_FORCE_INLINE void hash(T const * keys, size_t count, uint32_t * results) const {
+
           size_t rem = count & 0x7;
           size_t max = count - rem;
-//          constexpr size_t elem_per_cacheline = (64 + (sizeof(T) - 1)) / sizeof(T);
-//          size_t j = 0;
-//          for (; j < 8; j += elem_per_cacheline) {
-//        	  _mm_prefetch(reinterpret_cast<char const *>(keys + j), _MM_HINT_NTA);
-//          }
           size_t i = 0;
           for (; i < max; i += 8) {
-//            _mm_prefetch(reinterpret_cast<char const *>(keys + i + 8), _MM_HINT_NTA);
-//            if (sizeof(T) > 8) _mm_prefetch(reinterpret_cast<char const *>(keys + i + 12), _MM_HINT_T0);
-//            if (sizeof(T) > 16 ) {
-//              _mm_prefetch(reinterpret_cast<char const *>(keys + i + 10), _MM_HINT_NTA);
-//              _mm_prefetch(reinterpret_cast<char const *>(keys + i + 14), _MM_HINT_NTA);
-//            }
-//            if (sizeof(T) > 32 ) {
-//              _mm_prefetch(reinterpret_cast<char const *>(keys + i +  9), _MM_HINT_NTA);
-//              _mm_prefetch(reinterpret_cast<char const *>(keys + i + 11), _MM_HINT_NTA);
-//              _mm_prefetch(reinterpret_cast<char const *>(keys + i + 13), _MM_HINT_NTA);
-//              _mm_prefetch(reinterpret_cast<char const *>(keys + i + 15), _MM_HINT_NTA);
-//            }
 
             hasher.hash8(&(keys[i]), results + i);
           }
 
-
           if (rem > 0)
             hasher.hash(&(keys[i]), rem, results + i);
+
         }
 
         // assume consecutive memory layout.
@@ -1793,6 +1804,7 @@ namespace fsc {
         // TODO: [ ] add a transform_hash_mod.
 
     };
+    template <typename T> constexpr uint8_t murmur3avx32<T>::batch_size;
 
 #endif
 
@@ -1807,21 +1819,27 @@ namespace fsc {
 
       protected:
         ::fsc::hash::sse::Murmur32SSE<T> hasher;
-        mutable void const * kptrs[4];
         mutable uint32_t temp[4];
 
       public:
         static constexpr uint8_t batch_size = 4;
+        using result_type = uint32_t;
+        using argument_type = T;
 
         murmur3sse32(uint32_t const & _seed = 43 ) : hasher(_seed) {};
 
         inline uint32_t operator()(const T & key) const
         {
-          //          kptrs[0] = &key;
           uint32_t h;
           hasher.hash(&key, 1, &h);
           return h;
         }
+
+        FSC_FORCE_INLINE void operator()(T const * keys, size_t count, uint32_t * results) const
+        {
+          hash(keys, count, results);
+        }
+
 
         // results always 32 bit.
         FSC_FORCE_INLINE void hash(T const * keys, size_t count, uint32_t * results) const {
@@ -1829,23 +1847,11 @@ namespace fsc {
           size_t max = count - rem;
           size_t i = 0;
           for (; i < max; i += 4) {
-            //            kptrs[0] = &(keys[i]);
-            //            kptrs[1] = &(keys[i + 1]);
-            //            kptrs[2] = &(keys[i + 2]);
-            //            kptrs[3] = &(keys[i + 3]);
             hasher.hash4(&(keys[i]), results + i);
           }
 
-          // last part.
-          //          switch(rem) {
-          //            case 3: kptrs[2] = &(keys[i + 2]);
-          //            case 2: kptrs[1] = &(keys[i + 1]);
-          //            case 1: kptrs[0] = &(keys[i]);
           if (rem > 0)
             hasher.hash(&(keys[i]), rem, results + i);
-          //            default:
-          //              break;
-          //          }
         }
 
         // assume consecutive memory layout.
@@ -1855,10 +1861,6 @@ namespace fsc {
           size_t max = count - rem;
           size_t i = 0;
           for (; i < max; i += 4) {
-            //            kptrs[0] = &(keys[i]);
-            //            kptrs[1] = &(keys[i + 1]);
-            //            kptrs[2] = &(keys[i + 2]);
-            //            kptrs[3] = &(keys[i + 3]);
             hasher.hash4(&(keys[i]), temp);
             results[i] = temp[0] % modulus;
             results[i+1] = temp[1] % modulus;
@@ -1867,15 +1869,8 @@ namespace fsc {
           }
 
           // last part.
-          //          switch(rem) {
-          //            case 3: kptrs[2] = &(keys[i + 2]);
-          //            case 2: kptrs[1] = &(keys[i + 1]);
-          //            case 1: kptrs[0] = &(keys[i]);
           if (rem > 0)
             hasher.hash(&(keys[i]), rem, temp);
-          //            default:
-          //              break;
-          //          }
           switch(rem) {
             case 3: results[i+2] = temp[2] % modulus;
             case 2: results[i+1] = temp[1] % modulus;
@@ -1896,10 +1891,6 @@ namespace fsc {
           size_t max = count - rem;
           size_t i = 0;
           for (; i < max; i += 4) {
-            //            kptrs[0] = &(keys[i]);
-            //            kptrs[1] = &(keys[i + 1]);
-            //            kptrs[2] = &(keys[i + 2]);
-            //            kptrs[3] = &(keys[i + 3]);
             hasher.hash4(&(keys[i]), temp);
             results[i]   = temp[0] & modulus;
             results[i+1] = temp[1] & modulus;
@@ -1908,15 +1899,8 @@ namespace fsc {
           }
 
           // last part.
-          //          switch(rem) {
-          //            case 3: kptrs[2] = &(keys[i + 2]);
-          //            case 2: kptrs[1] = &(keys[i + 1]);
-          //            case 1: kptrs[0] = &(keys[i]);
           if (rem > 0)
             hasher.hash(&(keys[i]), rem, temp);
-          //            default:
-          //              break;
-          //          }
           switch(rem) {
             case 3: results[i+2] = temp[2] & modulus;
             case 2: results[i+1] = temp[1] & modulus;
@@ -1928,8 +1912,8 @@ namespace fsc {
 
 
         // TODO: [ ] add a transform_hash_mod.
-
     };
+    template <typename T> constexpr uint8_t murmur3sse32<T>::batch_size;
 
 
 
@@ -2031,6 +2015,8 @@ namespace fsc {
 
       public:
         static constexpr uint8_t batch_size = 1;
+        using result_type = uint32_t;
+        using argument_type = T;
 
         murmur32(uint32_t const & _seed = 43 ) : seed(_seed) {};
 
@@ -2046,6 +2032,7 @@ namespace fsc {
         }
 
     };
+    template <typename T> constexpr uint8_t murmur32<T>::batch_size;
 
 
     /**
@@ -2061,6 +2048,8 @@ namespace fsc {
 
       public:
         static constexpr uint8_t batch_size = 1;
+        using result_type = uint64_t;
+        using argument_type = T;
 
 
         murmur(uint32_t const & _seed = 43 ) : seed(_seed) {};
@@ -2082,6 +2071,7 @@ namespace fsc {
         }
 
     };
+    template <typename T> constexpr uint8_t murmur<T>::batch_size;
 
 
 
@@ -2104,6 +2094,7 @@ namespace fsc {
         static constexpr size_t blocks = sizeof(T) >> 3;   // divide by 8
         static constexpr size_t rem = sizeof(T) & 0x7;  // remainder.
         static constexpr size_t offset = (sizeof(T) >> 3) << 3;
+        uint32_t temp[4];
 
         uint32_t hash1(const T & key) const {
 
@@ -2197,6 +2188,8 @@ namespace fsc {
 
       public:
         static constexpr uint8_t batch_size = 4;
+        using result_type = uint32_t;
+        using argument_type = T;
 
         crc32c(uint32_t const & _seed = 37 ) : seed(_seed) {};
 
@@ -2206,12 +2199,17 @@ namespace fsc {
           return hash1(key);
         }
 
+        FSC_FORCE_INLINE void operator()(T const * keys, size_t count, uint32_t * results) const
+        {
+          hash(keys, count, results);
+        }
+
         // results always 32 bit.
         // do 3 at the same time.  since latency of crc32 is 3 cycles.
         // however, to limit the modulus, do 4 at a time.
         FSC_FORCE_INLINE void hash(T const * keys, size_t count, uint32_t * results) const {
           // loop over 3 keys at a time
-          size_t max = count - 3;
+          size_t max = count - (count & 3);
           size_t i = 0;
           for (; i < max; i += 4) {
             hash4(keys + i, results + i);
@@ -2226,9 +2224,8 @@ namespace fsc {
         // do 3 at the same time.  since latency of crc32 is 3 cycles.
         template <typename OT>
         FSC_FORCE_INLINE void hash_and_mod(T const * keys, size_t count, OT * results, uint32_t modulus) const {
-          uint32_t temp[4];
           // loop over 3 keys at a time
-          size_t max = count - 3;
+          size_t max = count - (count & 3);
           size_t i = 0;
           for (; i < max; i += 4) {
             hash4(keys + i, temp);
@@ -2250,11 +2247,10 @@ namespace fsc {
         FSC_FORCE_INLINE void hash_and_mod_pow2(T const * keys, size_t count, OT * results, uint32_t modulus) const {
           assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
 
-          uint32_t temp[4];
           --modulus;  // convert to mask.
 
           // loop over 3 keys at a time
-          size_t max = count - 3;
+          size_t max = count - (count & 3);
           size_t i = 0;
           for (; i < max; i += 4) {
             hash4(keys + i, temp);
@@ -2271,6 +2267,8 @@ namespace fsc {
           }
         }
     };
+    template <typename T> constexpr uint8_t crc32c<T>::batch_size;
+
 #endif
 
 
@@ -2288,6 +2286,8 @@ namespace fsc {
 
       public:
         static constexpr uint8_t batch_size = 1;
+        using result_type = uint64_t;
+        using argument_type = T;
 
         farm(uint64_t const & _seed = 43 ) : seed(_seed) {};
 
@@ -2296,6 +2296,7 @@ namespace fsc {
           return ::util::Hash64WithSeed(reinterpret_cast<const char*>(&key), sizeof(T), seed);
         }
     };
+    template <typename T> constexpr uint8_t farm<T>::batch_size;
 
     template <typename T>
     class farm32 {
@@ -2305,6 +2306,8 @@ namespace fsc {
 
       public:
         static constexpr uint8_t batch_size = 1;
+        using result_type = uint32_t;
+        using argument_type = T;
 
         farm32(uint32_t const & _seed = 43 ) : seed(_seed) {};
 
@@ -2313,9 +2316,527 @@ namespace fsc {
           return ::util::Hash32WithSeed(reinterpret_cast<const char*>(&key), sizeof(T), seed);
         }
     };
+    template <typename T> constexpr uint8_t farm32<T>::batch_size;
+
+
+
+
+
+  /// custom version of transformed hash that does a few things:
+  ///    1. potentially bypass transform if it is identity.
+  ///    2. provide batch mode operation, if not supported by transform and hash then do those one by one.
+  ///    3. simplify the implementation of distributed hash map.
+  /// require that batch operation to be defined.
+  // TODO:
+  //     [ ] extend to support non-batching hash and transforms.
+  //
+  template <typename Key, template <typename> class Hash,
+  	  template <typename> class PreTransform = ::bliss::transform::identity,
+  	  template <typename> class PostTransform = ::bliss::transform::identity>
+  class TransformedHash {
+
+  protected:
+      using PRETRANS_T = PreTransform<Key>;
+
+      // determine output type of PreTransform.
+      using PRETRANS_VAL_TYPE =
+    		  decltype(::std::declval<PRETRANS_T>().operator()(::std::declval<Key>()));
+
+      using HASH_T = Hash<PRETRANS_VAL_TYPE>;
+
+  public:
+      // determine output type of hash.  could be 64 bit or 32 bit.
+      using HASH_VAL_TYPE =
+    		  decltype(::std::declval<Hash<PRETRANS_VAL_TYPE> >().operator()(::std::declval<PRETRANS_VAL_TYPE>()));
+
+      // determine output type of return value.
+      using result_type =
+    		  decltype(::std::declval<PostTransform<HASH_VAL_TYPE> >().operator()(::std::declval<HASH_VAL_TYPE>()));
+      using argument_type = Key;
+
+////      TODO: [ ] make below fallback to 1 if batch_size is not defined.
+//      constexpr size_t pretrans_batch_size = PRETRANS_T::batch_size;
+//      constexpr size_t hash_batch_size = 	 HASH_T::batch_size;
+//      constexpr size_t postrans_batch_size = POSTTRANS_T::batch_size;
+
+	  // lowest common multiple of the three.  default to 64byte/sizeof(HASH_VAL_TYPE) for now (cacheline multiple)
+      static constexpr uint8_t batch_size = HASH_T::batch_size; //(sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
+
+      static_assert((batch_size & (batch_size - 1)) == 0, "ERROR: batch_size should be a power of 2.");
+
+  protected:
+      using POSTTRANS_T = PostTransform<HASH_VAL_TYPE>;
+
+      // need some buffers
+      mutable Key * key_buf;
+      mutable PRETRANS_VAL_TYPE * trans_buf;
+      mutable HASH_VAL_TYPE * hash_buf;
+
+  public:
+      PRETRANS_T trans;
+      HASH_T h;
+      POSTTRANS_T posttrans;
+
+      TransformedHash(HASH_T const & _hash = HASH_T(),
+                      PRETRANS_T const & pre_trans = PRETRANS_T(),
+                      POSTTRANS_T const & post_trans = POSTTRANS_T()) :
+				//batch_size(lcm(lcm(pretrans_batch_size, hash_batch_size), postrans_batch_size)),
+				key_buf(nullptr), trans_buf(nullptr), hash_buf(nullptr),
+				trans(pre_trans), h(_hash), posttrans(post_trans) {
+    	  key_buf = ::utils::mem::aligned_alloc<Key>(batch_size);
+    	  trans_buf = ::utils::mem::aligned_alloc<PRETRANS_VAL_TYPE>(batch_size);
+    	  hash_buf = ::utils::mem::aligned_alloc<HASH_VAL_TYPE>(batch_size);
+      };
+
+      ~TransformedHash() {
+    	  free(key_buf);
+    	  free(trans_buf);
+    	  free(hash_buf);
+      }
+
+      // conditionally defined, there should be just 1 defined methods after compiler resolves all this.
+      // note that the compiler may do the same if it notices no-op....
+      template <typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  ::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline result_type operator()(Key const& k) const {
+        //std::cout << "op 1.1" << std::endl;
+        return h(k);
+      }
+      template <typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline result_type operator()(Key const& k) const {
+        //std::cout << "op 1.2" << std::endl;
+        return h(trans(k));
+      }
+      template <typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  ::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline result_type operator()(Key const& k) const {
+        //std::cout << "op 1.3" << std::endl;
+        return posttrans(h(k));
+      }
+      template <typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline result_type operator()(Key const& k) const {
+        //std::cout << "op 1.4" << std::endl;
+        return posttrans(h(trans(k)));
+      }
+
+      template<typename V>
+      inline result_type operator()(::std::pair<Key, V> const& x) const {
+        //std::cout << "op 2.1" << std::endl;
+        return this->operator()(x.first);
+      }
+      template<typename V>
+      inline result_type operator()(::std::pair<const Key, V> const& x) const {
+        //std::cout << "op 2.2" << std::endl;
+        return this->operator()(x.first);
+      }
+
+      //======= now for batched hash version.
+  protected:
+      // use construct from
+      //  https://stackoverflow.com/questions/257288/is-it-possible-to-write-a-template-to-check-for-a-functions-existence
+      // namely to use auto and -> to check the presense of the function that we'd be calling.
+      // if none of them have batch mode, then fall back to sequential.
+      // use 3 dummy vars to indicate that batch mode is prefered if both apis are defined.
+
+      // case when both transforms are identity.  last param is dummy.
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  ::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value, // &&
+//					::std::is_same<size_t,
+//					 decltype(std::declval<HT>().operator()(
+//							 std::declval<PRETRANS_VAL_TYPE const *>(),
+//							 std::declval<size_t>(),
+//							 std::declval<HASH_VAL_TYPE *>()))>::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, int) const
+      -> decltype(::std::declval<HT>()(k, count, out), size_t())
+      {
+        //std::cout << "op 3.1" << std::endl;
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0;
+    	  for (; i < max; i += batch_size ) {
+        	  h(k+i, batch_size, out+i);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  ::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, int) const
+      -> decltype(::std::declval<HT>()(*k), size_t()) {
+        //std::cout << "op 3.2" << std::endl;
+    	  return 0;
+      }
+      // pretrans is not identity, post is identity.
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, int) const
+      -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(trans_buf, count, out), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.3" << std::endl;
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  trans(k + i, batch_size, trans_buf);
+    		  h(trans_buf, batch_size, out + i);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, int) const
+      -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(*trans_buf), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.4" << std::endl;
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  trans(k + i, batch_size, trans_buf);
+    		  for (j = 0; j < batch_size; ++j) out[i+j] = h(trans_buf[j]);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, int, int) const
+      -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(trans_buf, count, out), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.5" << std::endl;
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  for (j = 0; j < batch_size; ++j) trans_buf[j] = trans(k[i+j]);
+    		  h(trans_buf, batch_size, out + i);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, long, int) const
+      -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(*trans_buf), size_t()) {
+        //std::cout << "op 3.6" << std::endl;
+
+    	  return 0;
+      }
+      // posttrans is not identity, post is identity.
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  ::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, int) const
+      -> decltype(::std::declval<HT>()(k, count, hash_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.7" << std::endl;
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  h(k + i, batch_size, hash_buf);
+    		  posttrans(hash_buf, batch_size, out + i);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  ::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, int) const
+      -> decltype(::std::declval<HT>()(*k), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.8" << std::endl;
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  for (j = 0; j < batch_size; ++j) hash_buf[j] = h(k[i+j]);
+    		  posttrans(hash_buf, batch_size, out + i);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  ::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, long) const
+      -> decltype(::std::declval<HT>()(k, count, hash_buf), ::std::declval<PoT>()(*hash_buf), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.9" << std::endl;
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  h(k + i, batch_size, hash_buf);
+    		  for (j = 0; j < batch_size; ++j) out[i+j] = posttrans(hash_buf[j]);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  ::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, long) const
+      -> decltype(::std::declval<HT>()(*k), ::std::declval<PoT>()(*hash_buf), size_t()) {
+
+        //std::cout << "op 3.10" << std::endl;
+
+    	  return 0;
+      }
+      // ==== none are identity
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, int) const
+      -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(trans_buf, count, hash_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.11" << std::endl;
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  trans(k + i, batch_size, trans_buf);
+    		  h(trans_buf, batch_size, hash_buf);
+    		  posttrans(hash_buf, batch_size, out+i);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, int) const
+      -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(*trans_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.12" << std::endl;
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  trans(k + i, batch_size, trans_buf);
+    		  for (j = 0; j < batch_size; ++j) hash_buf[j] = h(trans_buf[j]);
+    		  posttrans(hash_buf, batch_size, out+i);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, int, int) const
+      -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(trans_buf, count, hash_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.13" << std::endl;
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  for (j = 0; j < batch_size; ++j) trans_buf[j] = trans(k[i+j]);
+    		  h(trans_buf, batch_size, hash_buf);
+    		  posttrans(hash_buf, batch_size, out+i);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, long, int) const
+      -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(*trans_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
+
+        //std::cout << "op 3.14" << std::endl;
+
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  for (j = 0; j < batch_size; ++j) hash_buf[j] = h(trans(k[i+j]));
+    		  posttrans(hash_buf, batch_size, out+i);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, long) const
+      -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(trans_buf, count, hash_buf),  ::std::declval<PoT>()(*hash_buf), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.15" << std::endl;
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  trans(k + i, batch_size, trans_buf);
+    		  h(trans_buf, batch_size, hash_buf);
+    		  for (j = 0; j < batch_size; ++j) out[i+j] = posttrans(hash_buf[j]);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, long) const
+      -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(*trans_buf),  ::std::declval<PoT>()(*hash_buf), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.16" << std::endl;
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  trans(k + i, batch_size, trans_buf);
+    		  for (j = 0; j < batch_size; ++j) out[i+j] = posttrans(h(trans_buf[j]));
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, int, long) const
+      -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(trans_buf, count, hash_buf),  ::std::declval<PoT>()(*hash_buf), size_t()) {
+    	  // first part.
+        //std::cout << "op 3.17" << std::endl;
+
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  for (j = 0; j < batch_size; ++j) trans_buf[j] = trans(k[i+j]);
+    		  h(trans_buf, batch_size, hash_buf);
+    		  for (j = 0; j < batch_size; ++j) out[i+j] = posttrans(hash_buf[j]);
+    	  }
+    	  // no last part
+    	  return max;
+      }
+      template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
+    		  typename ::std::enable_if<
+			  	  !::std::is_same<PrT, ::bliss::transform::identity<Key> >::value &&
+				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
+					int>::type = 1>
+      inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, long, long) const
+      -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(*trans_buf), ::std::declval<PoT>()(*hash_buf), size_t()) {
+
+        //std::cout << "op 3.18" << std::endl;
+
+    	 return 0;
+      }
+
+  public:
+
+      inline void operator()(Key const * k, size_t const & count, result_type* out) const {
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  max = this->batch_op(k, max, out, 0, 0, 0);  // 0 has type int....
+    	  // last part
+        //std::cout << "op 3" << std::endl;
+
+    	  for (size_t i = max; i < count; ++i) {
+    		  out[i] = this->operator()(k[i]);
+    	  }
+      }
+
+
+      template<typename V>
+      inline void operator()(::std::pair<Key, V> const * x, size_t const & count, result_type * out) const {
+        //std::cout << "op 4.1" << std::endl;
+
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  for (j = 0; j < batch_size; ++j) key_buf[j] = x[i+j].first;
+    		  this->batch_op(key_buf, batch_size, out + i, 0, 0, 0);
+    	  }
+    	  // last part
+    	  for (; i < count; ++i) {
+    		  out[i] = this->operator()(x[i].first);
+    	  }
+      }
+
+      template<typename V>
+      inline void operator()(::std::pair<const Key, V> const * x, size_t const & count, result_type * out) const {
+        //std::cout << "op 4.2" << std::endl;
+
+    	  size_t max = count - (count & (batch_size - 1) );
+    	  size_t i = 0, j = 0;
+    	  for (; i < max; i += batch_size ) {
+    		  for (j = 0; j < batch_size; ++j) key_buf[j] = x[i+j].first;
+    		  this->batch_op(key_buf, batch_size, out + i, 0, 0, 0);
+    	  }
+    	  // last part
+    	  for (; i < count; ++i) {
+    		  out[i] = this->operator()(x[i].first);
+    	  }
+      }
+
+  };
+  template <typename Key, template <typename> class Hash,
+  	  template <typename> class PreTransform,
+  	  template <typename> class PostTransform>
+  constexpr uint8_t TransformedHash<Key, Hash, PreTransform, PostTransform>::batch_size;
+
+  // TODO:  [ ] batch mode transformed_predicate
+  //		[ ] batch mode transformed_comparator
 
 
   } // namespace hash
+
+
 } // namespace fsc
 
 
