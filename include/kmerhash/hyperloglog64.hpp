@@ -55,6 +55,8 @@
 #include <iostream> // std::cout
 #include <cmath>
 
+#include "kmerhash/mem_utils.hpp"
+
 #ifdef USE_MPI
 #include <mxx/comm.hpp>
 #include <mxx/collective.hpp>
@@ -116,30 +118,34 @@ inline uint8_t leftmost_set_bit(uint64_t x) {
 //     empty slots.  instead, we treat the top bits used for distribution as "ignored.", and
 //     use next smallest bits as register index.
 //   64 bit.  0xIIRRVVVVVV  // MSB: ignored bits II;  high bits: register index RR;  low: values VVVVVV
-template <typename T, typename Hash,
-		uint8_t precision = 12U,
-		uint8_t unused_msb = (std::is_same<::std::hash<T>, Hash>::value) ?
-				((sizeof(T) >= 8ULL) ? 0U : (64U - (sizeof(T) * 8ULL))) :   // if std::hash then via input size.
-				(64U - (sizeof(decltype(::std::declval<Hash>().operator()(::std::declval<T>()))) << 3))   // if not, check Hash operator return type.
-		>
+template <typename T, typename Hash, uint8_t precision = 12U>
 class hyperloglog64 {
 	  static_assert((precision >= 4ULL) && (precision <= 16ULL),
 			  "ERROR: precision for hyperloglog should be in [4, 16].");
 
+public:
+		using REG_T = uint8_t;
+		using HVT = decltype(::std::declval<Hash>().operator()(::std::declval<T>()));
+
 protected:
-	using REG_T = uint8_t;
 
 	// 64 bit.  0xIIRRVVVVVV  // MSB: ignored bits II,  high bits: reg, RR.  low: values, VVVVVV
 	static constexpr uint8_t no_ignore_value_bits = 64U - precision;  // e.g. 0x00FFFFFF
-	static constexpr uint64_t nRegisters = 0x1ULL << precision;   // e.g. 0x00000100
-	mutable double amm;
 
-	mutable uint8_t ignored_msb; // MSB to ignore.
+	mutable double amm;
 	mutable uint64_t lzc_mask;   // lowest bits set to 1 to prevent counting into that region.
 
-	::std::vector<REG_T> registers;  // stores count of leading zeros
+	static constexpr uint64_t nRegisters = 0x1ULL << precision;   // e.g. 0x00000100
+	static constexpr uint8_t unused_msb =
+			(std::is_same<::std::hash<T>, Hash>::value) ?
+			((sizeof(T) >= 8ULL) ? 0U : (64U - (sizeof(T) * 8ULL))) :   // if std::hash then via input size.
+			(64U - (sizeof(decltype(::std::declval<Hash>().operator()(::std::declval<T>()))) << 3));   // if not, check Hash operator return type.
+
+	mutable uint8_t ignored_msb; // MSB to ignore.
 
 	Hash h;
+
+	mutable ::std::vector<REG_T> registers;  // stores count of leading zeros
 
 	inline void internal_update(::std::vector<REG_T> & regs, uint64_t const & no_ignore) {
 		// no_ignore has bits 0xRRVVVVVV00, not that the II bits had already been shifted away.
@@ -151,6 +157,7 @@ protected:
         if (rank > regs[i]) {
             regs[i] = rank;
         }
+		//::std::cout << "v=" << std::hex << no_ignore << std::endl;
 	}
 
   inline void internal_update(REG_T* regs, uint64_t const & no_ignore) {
@@ -163,6 +170,7 @@ protected:
         if (rank > regs[i]) {
             regs[i] = rank;
         }
+		//::std::cout << "v=" << std::hex << no_ignore << std::endl;
   }
 
   inline void internal_merge(REG_T* target, const REG_T* src) {
@@ -254,8 +262,10 @@ public:
   	/// constructor.  ignore_leading does not count the leading bits.  ignore_trailing does not count the trailing bits.
   	  /// these are for use when the leading and/or trailing bits are identical in an input set.
 	hyperloglog64(uint8_t const & ignore_msb = 0) :
-		ignored_msb(ignore_msb + unused_msb), lzc_mask( ~(0x0ULL) >> (64 - precision - ignore_msb - unused_msb)),
-		registers(nRegisters, static_cast<REG_T>(0)) {
+		lzc_mask( ~(0x0ULL) >> (64 - precision - ignore_msb - unused_msb)),
+		ignored_msb(ignore_msb + unused_msb),
+		registers(nRegisters)
+		{
 
         switch (precision) {
             case 4:
@@ -281,11 +291,11 @@ public:
 	}
 
 	hyperloglog64(hyperloglog64 const & other) :
-		amm(other.amm), ignored_msb(other.ignored_msb), lzc_mask(other.lzc_mask), registers(other.registers) {
+		amm(other.amm), lzc_mask(other.lzc_mask), ignored_msb(other.ignored_msb), registers(other.registers) {
 	}
 
 	hyperloglog64(hyperloglog64 && other) :
-		amm(other.amm), ignored_msb(other.ignored_msb), lzc_mask(other.lzc_mask), registers(std::move(other.registers)) {
+		amm(other.amm), lzc_mask(other.lzc_mask), ignored_msb(other.ignored_msb), registers(std::move(other.registers)) {
 	}
 
 	hyperloglog64& operator=(hyperloglog64 const & other) {
@@ -299,12 +309,14 @@ public:
 
 	hyperloglog64& operator=(hyperloglog64 && other) {
 		amm = other.amm;
+		//registers.swap(other.registers);
 		registers.swap(other.registers);
 		ignored_msb = other.ignored_msb;
 		lzc_mask = other.lzc_mask;
 
 		return *this;
 	}
+
 
 	void swap(hyperloglog64 & other) {
 		std::swap(amm, other.amm);
@@ -320,7 +332,10 @@ public:
 		return this->ignored_msb;
 	}
 	hyperloglog64 make_empty_copy() {
-		return hyperloglog64(this->ignored_msb);
+		return hyperloglog64(this->ignored_msb - unused_msb);
+	}
+	hyperloglog64 make_copy() {
+		return hyperloglog64(*this);
 	}
 
 
@@ -328,9 +343,59 @@ public:
       internal_update(this->registers, static_cast<uint64_t>(h(val)) << ignored_msb);
 	}
 
-	inline void update_via_hashval(uint64_t const & hash) {
-      internal_update(this->registers, hash << ignored_msb);
+	inline void update_via_hashval(HVT const & hval) {
+      internal_update(this->registers, static_cast<uint64_t>(hval) << ignored_msb);
 	}
+
+
+  template <typename H = Hash, typename TT>
+  inline auto update_impl(TT const * vals, size_t const & count, long)
+  -> decltype(::std::declval<H>()(::std::declval<TT>()), void()) {
+    for (size_t i = 0; i < count; ++i) {
+      internal_update(this->registers, static_cast<uint64_t>(h(vals[i])) << ignored_msb);
+    }
+  }
+
+  template <typename H = Hash, typename HTT = HVT, typename TT>
+  inline auto update_impl(TT const * vals, size_t const & count, int)
+  -> decltype(::std::declval<H>()(vals, count, ::std::declval<HTT*>()), void()) {
+
+    assert(((h.batch_size & (h.batch_size - 1)) == 0) && "batch size should be power of 2.");
+
+    size_t max = count - (count & (h.batch_size - 1) );
+    size_t i = 0, j = 0;
+
+    HVT* buf = ::utils::mem::aligned_alloc<HVT>(h.batch_size);  // 64 byte alignment.
+
+    for (; i < max; i += h.batch_size ) {
+      h(vals + i, h.batch_size, buf);
+
+      for (j = 0; j < h.batch_size; ++j) {
+        internal_update(this->registers, static_cast<uint64_t>(buf[j]) << ignored_msb);
+      }
+    }
+    // last part, do linearly.
+    for (; i < count; ++i) {
+      internal_update(this->registers, static_cast<uint64_t>(h(vals[i])) << ignored_msb);
+    }
+
+    free(buf);
+  }
+
+  template <typename TT>
+  inline auto update(TT const * vals, size_t const & count)
+  -> decltype(update_impl(vals, count, 0), void()) {
+    update_impl(vals, count, 0);
+  }
+
+  inline void update_via_hashval(HVT const * hashes, size_t const & count) {
+//  	std::cout << "h0: " << hashes[0] << std::endl;
+    for (size_t i = 0; i < count; ++i) {
+      internal_update(this->registers, static_cast<uint64_t>(hashes[i]) << ignored_msb);
+    }
+  }
+
+
 
 	double estimate() const {
 	  return internal_estimate(this->registers);
@@ -347,14 +412,14 @@ public:
 
 #ifdef USE_MPI
 	// distributed merge, for estimating globally
-	::std::vector<REG_T> merge_distributed(::mxx::comm const & comm) {
+	::std::vector<REG_T> merge_distributed(::mxx::comm const & comm) const {
 	  return ::mxx::allreduce(registers, ::mxx::max<REG_T>(), comm);
 	}
 
 
 	// global estimate for the current object
   inline double estimate_global(::mxx::comm const & comm) const {
-    return estimate(merge_distributed(comm));
+    return internal_estimate(merge_distributed(comm));
   }
 
   /// estimate per node, assuming that the hash values and original input values are uniformly randomly distributed (good balance)
@@ -365,14 +430,14 @@ public:
 
   // global estimate for new data.
   template <typename SIZE>
-  inline double estimate_local_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+  inline double estimate_local_by_hashval(HVT* first, HVT* last, std::vector<SIZE> const & send_counts,
                                            ::mxx::comm const & comm) {
     // create the registers
     ::std::vector<REG_T> regs(nRegisters, static_cast<REG_T>(0));
 
     // perform updates on the registers.
     for (; first != last; ++first) {
-      internal_update(regs, (*first) << ignored_msb);
+      internal_update(regs, static_cast<uint64_t>(*first) << ignored_msb);
     }
 
     // now merge distributed and estimate
@@ -381,14 +446,14 @@ public:
 
   // global estimate for new data.
   template <typename SIZE>
-  inline double estimate_global_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+  inline double estimate_global_by_hashval(HVT* first, HVT* last, std::vector<SIZE> const & send_counts,
                                            ::mxx::comm const & comm) {
     // create the registers
     ::std::vector<REG_T> regs(nRegisters, static_cast<REG_T>(0));
 
     // perform updates on the registers.
     for (; first != last; ++first) {
-      internal_update(regs, (*first) << ignored_msb);
+      internal_update(regs, static_cast<uint64_t>(*first) << ignored_msb);
     }
 
     // now merge distributed and estimate
@@ -399,7 +464,7 @@ public:
   // uniformly randomly distributed (good balance)
   // NOTE: inexact estimate.  does not require permutation.  PREFERRED.   uses Allreduce, with log(p) iterations (likely).
   template <typename SIZE>
-  inline double estimate_average_per_rank_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+  inline double estimate_average_per_rank_by_hashval(HVT* first, HVT* last, std::vector<SIZE> const & send_counts,
                                           ::mxx::comm const & comm) {
     return estimate_global_by_hashval(first, last, send_counts, comm) / static_cast<double>(comm.size());
   }
@@ -415,7 +480,7 @@ public:
   // NOTE: exact, but requires permuting the hash values.  also, P iterations of merge, so slower for high P.
   // assumes accumulating has the correct data.
   template <typename SIZE>
-  void update_per_rank_by_hashval_internal(REG_T* accumulating, size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+  void update_per_rank_by_hashval_internal(REG_T* accumulating, HVT* first, HVT* last, std::vector<SIZE> const & send_counts,
                                       ::mxx::comm const & comm) {
 
     size_t input_size = ::std::distance(first, last);
@@ -434,7 +499,7 @@ public:
     if (comm.size() == 1) {
       // perform updates on the registers.
       for (; first != last; ++first) {
-        internal_update(accumulating, (*first) << ignored_msb);
+        internal_update(accumulating, static_cast<uint64_t>(*first) << ignored_msb);
       }
       return;
     }
@@ -475,7 +540,7 @@ public:
     auto max = first + send_displs[prev_peer + 1];
     memset(recved, 0, nRegisters * sizeof(REG_T));
     for (auto it = first + send_displs[prev_peer]; it != max; ++it) {
-      internal_update(recved, (*it) << ignored_msb);
+      internal_update(recved,  static_cast<uint64_t>(*it) << ignored_msb);
     }
 
     //=== for curr_peer:
@@ -488,7 +553,7 @@ public:
     max = first + send_displs[curr_peer + 1];
     memset(sending, 0, nRegisters * sizeof(REG_T));
     for (auto it = first + send_displs[curr_peer]; it != max; ++it) {
-      internal_update(sending, (*it) << ignored_msb);
+      internal_update(sending,  static_cast<uint64_t>(*it) << ignored_msb);
     }
 
     size_t step;
@@ -521,7 +586,7 @@ public:
       memset(updating, 0, nRegisters * sizeof(REG_T));
       max = first + send_displs[next_peer + 1];
       for (auto it = first + send_displs[next_peer]; it != max; ++it) {
-        internal_update(updating, (*it) << ignored_msb);
+        internal_update(updating,  static_cast<uint64_t>(*it) << ignored_msb);
       }
 
       //=== and accumulate
@@ -575,7 +640,7 @@ public:
   // NOT using MPI_reduce per bucket: (2^precision)*log(p) for each of p iterations. in time and space.  the above is (2^precision)*p
 
   template <typename SIZE>
-  void update_per_rank_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+  void update_per_rank_by_hashval(HVT* first, HVT* last, std::vector<SIZE> const & send_counts,
                                       ::mxx::comm const & comm) {
     update_per_rank_by_hashval_internal(this->registers.data(), first, last, send_counts, comm);
   }
@@ -591,7 +656,7 @@ public:
   // and they are excluded, so we'd need some way to properly assign the bins.
   // NOTE: OVERESTIMATES BY NEARLY DOUBLE FOR Fvesca.  DO NOT USE.
   template <typename SIZE>
-  ::std::vector<REG_T> update_per_rank_experimental_by_hashval(size_t* first, size_t* last, std::vector<SIZE> const & send_counts,
+  ::std::vector<REG_T> update_per_rank_experimental_by_hashval(HVT* first, HVT* last, std::vector<SIZE> const & send_counts,
                                         ::mxx::comm const & comm) {
     // first compute the local estimates
     // create the registers
@@ -599,7 +664,7 @@ public:
 
     // perform updates on the registers.
     for (; first != last; ++first) {
-      internal_update(regs, (*first) << ignored_msb);
+      internal_update(regs,  static_cast<uint64_t>(*first) << ignored_msb);
     }
 
     // now compute send counts.  each rank ends up with 2^precision number of entries.
@@ -628,6 +693,14 @@ public:
 
 
 };
+template <typename T, typename Hash, uint8_t precision>
+constexpr size_t hyperloglog64<T, Hash, precision>::nRegisters;
+template <typename T, typename Hash, uint8_t precision>
+constexpr uint8_t hyperloglog64<T, Hash, precision>::no_ignore_value_bits;
+template <typename T, typename Hash, uint8_t precision>
+constexpr uint8_t hyperloglog64<T, Hash, precision>::unused_msb;
+template <typename T, typename Hash, uint8_t precision>
+constexpr double hyperloglog64<T, Hash, precision>::est_error_rate;
 
 
 
