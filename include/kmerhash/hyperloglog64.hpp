@@ -384,7 +384,7 @@ public:
 
   template <typename TT>
   inline auto update(TT const * vals, size_t const & count)
-  -> decltype(update_impl(vals, count, 0), void()) {
+  -> decltype(this->update_impl(vals, count, 0), void()) {
     update_impl(vals, count, 0);
   }
 

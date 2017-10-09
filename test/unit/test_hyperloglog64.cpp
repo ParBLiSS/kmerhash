@@ -62,7 +62,7 @@ public:
 protected:
     // values chosen for speed...
     static constexpr size_t iterations = 100ULL;
-	static constexpr size_t step = 1024ULL;
+	static constexpr size_t step = 1001ULL;
 
     std::default_random_engine generator;
     std::uniform_int_distribution<TT> distribution;
