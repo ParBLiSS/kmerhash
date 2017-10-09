@@ -23,8 +23,8 @@
  *
  */
 
-#ifndef IO_UTILS_HPP
-#define IO_UTILS_HPP
+#ifndef KMERHASH_IO_UTILS_HPP
+#define KMERHASH_IO_UTILS_HPP
 
 #include <iostream>
 #include <fstream>
