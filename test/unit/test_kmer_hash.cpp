@@ -56,7 +56,7 @@ class KmerHashTest : public ::testing::Test {
     static std::vector<T> kmers;
     static std::set<T> unique_kmers;   // using set, since we are testing hash functions.
 
-    static constexpr size_t iterations = 100000;
+    static constexpr size_t iterations = 100001;
 
   public:
     static void SetUpTestCase()
@@ -109,6 +109,36 @@ class KmerHashTest : public ::testing::Test {
       ASSERT_TRUE(same);
 
     }
+
+    template <template <typename> class H>
+    void hash_vector32(std::string name) {
+    	std::unordered_set<uint32_t> hashes;
+
+       H<T> op;
+
+      bool same = true;
+
+      for (size_t i = 0; i < this->iterations; ++i) {
+        hashes.emplace(op(this->kmers[i]));
+      }
+
+      //double limit = this->iterations;
+      //double max_uniq_kmers = std::pow(static_cast<double>(T::KmerAlphabet::SIZE), static_cast<double>(T::size));
+      //limit = (limit < max_uniq_kmers) ? limit : max_uniq_kmers;
+
+//      same = (limit - hashes.size()) < (limit * 0.2);
+      same = (hashes.size() == this->unique_kmers.size());
+      //printf(" hash size: %lu, unique_kmers %lu, maxUnique %f, iterations %lu\n", hashes.size(), this->unique_kmers.size(), max_uniq_kmers, this->iterations);
+      if (!same)
+//    	  BL_DEBUGF("ERROR: hash %s unique hashes %lu is not same as unique element count: %lu.  input size %lu",
+//    	            name.c_str(), hashes.size(), this->unique_kmers.size(), this->kmers.size());
+    	  printf("ERROR: hash %s unique hashes %lu is not same as unique element count: %lu.  input size %lu",
+    	            name.c_str(), hashes.size(), this->unique_kmers.size(), this->kmers.size());
+
+      ASSERT_TRUE(same);
+
+    }
+
     template <template <typename> class B, template <typename> class H, typename OT = uint32_t>
     void hash_vector_vs_sse(std::string name) {
 
@@ -240,6 +270,18 @@ TYPED_TEST_P(KmerHashTest, farm)
 	this->template hash_vector64<bliss::kmer::hash::farm    >(std::string("farm"));
 }
 
+// these are NOT going to be the same when compared to a 64 bit hash...
+//TYPED_TEST_P(KmerHashTest, murmur32)
+//{
+//	this->template hash_vector32<fsc::hash::murmur32  >(std::string("murmur32"));
+//}
+//
+//TYPED_TEST_P(KmerHashTest, farm32)
+//{
+//	this->template hash_vector32<fsc::hash::farm32    >(std::string("farm32"));
+//}
+
+
 #if defined(__SSE4_1__)
 
 TYPED_TEST_P(KmerHashTest, murmur32sse)
@@ -282,6 +324,7 @@ TYPED_TEST_P(KmerHashTest, murmur32avx_batch)
 
 
 REGISTER_TYPED_TEST_CASE_P(KmerHashTest, iden, murmur, farm,
+//							murmur32, farm32,
 #if defined(__SSE4_1__)
                            murmur32sse, murmur32sse_batch,
 //                           murmur64sse, murmur64sse_batch,   unimplemented.
