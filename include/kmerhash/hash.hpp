@@ -121,7 +121,6 @@ namespace fsc {
 
         protected:
           // make static so initialization at beginning of class...
-          mutable __m256i seed;
           const __m256i mix_const1;
           const __m256i mix_const2;
           const __m256i c1;
@@ -133,6 +132,7 @@ namespace fsc {
           const __m256i shuffle1;  // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
           const __m256i length;
           const __m256i offs;
+          mutable __m256i seed;
 
           // input is 4 unsigned ints.
           FSC_FORCE_INLINE __m256i rotl32 ( __m256i x, int8_t r ) const
@@ -201,7 +201,6 @@ namespace fsc {
 
 
           explicit Murmur32AVX(__m256i _seed) :
-            seed(_seed),
             mix_const1(_mm256_set1_epi32(0x85ebca6bU)),
             mix_const2(_mm256_set1_epi32(0xc2b2ae35U)),
             c1(_mm256_set1_epi32(0xcc9e2d51U)),
@@ -221,7 +220,9 @@ namespace fsc {
             		static_cast<uint32_t>(sizeof(T) * 4),
 					static_cast<uint32_t>(sizeof(T) * 5),
             		static_cast<uint32_t>(sizeof(T) * 6),
-            		static_cast<uint32_t>(sizeof(T) * 7)))
+            		static_cast<uint32_t>(sizeof(T) * 7))),
+		    seed(_seed)
+
         {}
 
         public:
