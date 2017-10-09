@@ -137,7 +137,6 @@ protected:
 	void update_via_hash(HLL & _hll, std::unordered_set<TT> & _uniq) {
 		TT val;
 		HH hash;
-		typename HLL::HVT hval;
 
 		for (size_t s = 0; s < step; ++s) {
 			val = distribution(generator);
