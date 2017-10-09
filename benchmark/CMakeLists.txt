@@ -48,6 +48,11 @@ if (BUILD_BENCHMARKS)
      "-DpStoreHash=MURMUR32avx")
 	target_link_libraries(benchmark_hashtables_MURMUR32avx ${EXTRA_LIBS})
 
+	add_executable(benchmark_hashtables_CRC32C BenchmarkHashTables.cpp)
+	SET_TARGET_PROPERTIES(benchmark_hashtables_CRC32C
+     PROPERTIES COMPILE_FLAGS 
+     "-DpStoreHash=CRC32c")
+	target_link_libraries(benchmark_hashtables_CRC32C ${EXTRA_LIBS})
 
 
 	# distributed benchmarks, FARM
@@ -196,6 +201,7 @@ if (ENABLE_VTUNE_PROFILING)
 	target_link_libraries(benchmark_hashtables_MURMUR32 ittnotify dl)
 	target_link_libraries(benchmark_hashtables_MURMUR32sse ittnotify dl)
 	target_link_libraries(benchmark_hashtables_MURMUR32avx ittnotify dl)
+	target_link_libraries(benchmark_hashtables_CRC32C ittnotify dl)
 	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-ROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)
 	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)
 	target_link_libraries(testKmerIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhFARM-shFARM ittnotify dl)

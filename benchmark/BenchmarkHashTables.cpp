@@ -92,6 +92,7 @@
 #define MURMUR32 25
 #define MURMUR32sse 26
 #define MURMUR32avx 27
+#define CRC32c 28
 
 
 #define LOOK_AHEAD 16
@@ -116,6 +117,9 @@
 #elif (pStoreHash == MURMUR32avx)
   template <typename KM>
   using StoreHash = fsc::hash::murmur3avx32<KM>;
+#elif (pStoreHash == CRC32c)
+  template <typename KM>
+  using StoreHash = fsc::hash::crc32c<KM>;
 #else //if (pStoreHash == FARM)
   template <typename KM>
   using StoreHash = bliss::kmer::hash::farm<KM, false>;
@@ -588,16 +592,19 @@ void benchmark_hashmap_insert_mode(std::string name, std::vector<::std::pair<Kme
 #endif
 
 	// compute hyperloglog estimate for reference.
+    Kmer * keys = (Kmer*)_mm_malloc(input.size() * sizeof(Kmer), 64);
 	hyperloglog64<Kmer, StoreHash<Kmer>, 12> hll;
 	for (size_t i = 0; i < input.size(); ++i) {
-		hll.update(input[i].first);
+		keys[i] = input[i].first;
 	}
+	hll.update(keys, input.size());
 
 	double est = hll.estimate();
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_ESTIMATE)
         __itt_pause();
 #endif
+    _mm_free(keys);
     BL_BENCH_END(map, "estimate", static_cast<size_t>(est));
 
 	std::cout << "insert testing: estimated distinct = " << est << " in " << input.size() << std::endl;
@@ -744,16 +751,19 @@ void benchmark_hashmap_insert_mode(std::string name, std::vector<::std::pair<Kme
 #endif
 
 	// compute hyperloglog estimate for reference.
+    Kmer * keys = (Kmer*)_mm_malloc(input.size() * sizeof(Kmer), 64);
 	hyperloglog64<Kmer, StoreHash<Kmer>, 12> hll;
 	for (size_t i = 0; i < input.size(); ++i) {
-		hll.update(input[i].first);
+		keys[i] = input[i].first;
 	}
+	hll.update(keys, input.size());
 
 	double est = hll.estimate();
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_ESTIMATE)
         __itt_pause();
 #endif
+    _mm_free(keys);
     BL_BENCH_END(map, "estimate", static_cast<size_t>(est));
 
 	std::cout << "insert testing: estimated distinct = " << est << " in " << input.size() << std::endl;
@@ -876,7 +886,7 @@ void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer,
     BL_BENCH_END(map, "generate query", input.size());
 
 
-    ::fsc::hashmap_radixsort<Kmer, StoreHash<Kmer>, ::equal_to<Kmer> > map;
+    ::fsc::hashmap_radixsort<Kmer, StoreHash, ::equal_to > map;
     BL_BENCH_START(map);
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_ESTIMATE)
@@ -884,10 +894,13 @@ void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer,
 #endif
 
 	// compute hyperloglog estimate for reference.
-	hyperloglog64<Kmer, StoreHash<Kmer>, 12> hll;
-	for (size_t i = 0; i < input.size(); ++i) {
-		map.get_hll().update(input[i].first);
-	}
+    Kmer *keyArray = (Kmer *)_mm_malloc(input.size() * sizeof(Kmer), 64);
+    size_t i;
+    for(i = 0; i < input.size(); i++)
+    {
+        keyArray[i] = input[i].first;
+    }
+	map.get_hll().update(keyArray, input.size());
 
 	double est = map.get_hll().estimate();
 #ifdef VTUNE_ANALYSIS
@@ -895,19 +908,12 @@ void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer,
         __itt_pause();
 #endif
     BL_BENCH_END(map, "estimate", static_cast<size_t>(est));
-	map.resize(static_cast<size_t>(est));
 	std::cout << "insert testing: estimated distinct = " << est << " in " << input.size() << std::endl;
-
+	map.resize(static_cast<size_t>(est));
 
     std::string insert_type;
     insert_type = "batch_insert";
 
-    Kmer *keyArray = (Kmer *)_mm_malloc(input.size() * sizeof(Kmer), 64);
-    size_t i;
-    for(i = 0; i < input.size(); i++)
-    {
-        keyArray[i] = input[i].first;
-    }
     BL_BENCH_START(map);
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_INSERT)
@@ -922,6 +928,7 @@ void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer,
         __itt_pause();
 #endif
     BL_BENCH_END(map, insert_type, map.size());
+    _mm_free(keyArray);
     cout << "insert ticks = " << (endTick - startTick) << endl;
 
   map.sanity_check();
@@ -942,6 +949,7 @@ void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer,
         __itt_pause();
 #endif
   BL_BENCH_END(map, "find", foundCount);
+  _mm_free(findResult);
 
   uint8_t *countResult = (uint8_t *)_mm_malloc(query.size() * sizeof(uint8_t), 64);
   BL_BENCH_START(map);
@@ -985,7 +993,9 @@ void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer,
 #endif
   BL_BENCH_END(map, "count2", foundCount);
 #endif
+  _mm_free(countResult);
 
+  _mm_free(queryArray);
   BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
 }
 
@@ -1039,18 +1049,19 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
 #endif
 
 	// compute hyperloglog estimate for reference.
-    hyperloglog64<Kmer, StoreHash<Kmer>, 12> hll;
-    ::std::pair<Kmer, Value> val __attribute__ ((aligned (16)));
-    for (size_t i = 0; i < input.size(); ++i) {
-//    	*(reinterpret_cast<__m128i*>(&val)) = _mm_stream_load_si128(reinterpret_cast<__m128i*>(input_ptr + i));
-		hll.update(input[i].first);
+    Kmer * keys = (Kmer*)_mm_malloc(input.size() * sizeof(Kmer), 64);
+	hyperloglog64<Kmer, StoreHash<Kmer>, 12> hll;
+	for (size_t i = 0; i < input.size(); ++i) {
+		keys[i] = input[i].first;
 	}
+	hll.update(keys, input.size());
 
 	double est = hll.estimate();
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_ESTIMATE)
         __itt_pause();
 #endif
+    _mm_free(keys);
     BL_BENCH_END(map, "estimate_w_mmstreamload", static_cast<size_t>(est));
 
     free(input_ptr);
@@ -1144,8 +1155,8 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
 
 
 
-
-template <template <typename, typename, typename, typename, typename> class MAP,
+// for robinhood offset with prefetch.
+template <template <typename, typename, template <typename> class, template <typename> class, typename> class MAP,
 typename Kmer, typename Value>
 void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > const & input, size_t const query_frac, int vector_mode, int measure_mode,
     double const max_load, double const min_load, unsigned char const insert_prefetch, unsigned char const query_prefetch, ::mxx::comm const & comm) {
@@ -1155,7 +1166,7 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
 
   BL_BENCH_START(map);
   // no transform involved.
-  using MAP_TYPE = MAP<Kmer, Value, StoreHash<Kmer>, ::equal_to<Kmer>, ::std::allocator<std::pair<Kmer, Value> > >;
+  using MAP_TYPE = MAP<Kmer, Value, StoreHash, ::equal_to, ::std::allocator<std::pair<Kmer, Value> > >;
 
   std::cout << " tuple size " << sizeof(typename MAP_TYPE::value_type) << std::endl;
 
@@ -1173,7 +1184,7 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
   {
     BL_BENCH_START(map);
     query.resize(input.size() / query_frac);
-    std::transform(input.begin(), input.begin() + input.size() / query_frac, query.begin(),
+    std::transform(input.begin(), input.begin() + query.size(), query.begin(),
                    [](::std::pair<Kmer, Value> const & x){
       return x.first;
     });
@@ -1187,20 +1198,22 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
 #endif
 
   // compute hyperloglog estimate for reference.
-  hyperloglog64<Kmer, StoreHash<Kmer>, 12> hll;
-  for (size_t i = 0; i < input.size(); ++i) {
-    hll.update(input[i].first);
-  }
+    Kmer * keys = (Kmer*)_mm_malloc(input.size() * sizeof(Kmer), 64);
+	for (size_t i = 0; i < input.size(); ++i) {
+		keys[i] = input[i].first;
+	}
+	map.get_hll().update(keys, input.size());
 
-  double est = hll.estimate();
+	double est = map.get_hll().estimate();
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_ESTIMATE)
         __itt_pause();
 #endif
+    _mm_free(keys);
     BL_BENCH_END(map, "estimate", static_cast<size_t>(est));
 
   std::cout << "insert testing: estimated distinct = " << est << " in " << input.size() << std::endl;
-
+  map.reserve(est);
 
     std::string insert_type;
     if (vector_mode == ITER_MODE) {
@@ -1217,11 +1230,11 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
         __itt_resume();
 #endif
     if (vector_mode == ITER_MODE) {
-      map.insert(input.begin(), input.end());
+      map.insert_no_resize(input.data(), input.data() + input.size());
     } else if (vector_mode == INDEX_MODE) {
-      map.insert(input);
+      map.insert_no_resize(input);
     } else {
-      map.insert(input.begin(), input.end());
+      map.insert_no_resize(input.data(), input.data() + input.size());
     }
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_INSERT)
@@ -1230,24 +1243,57 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
     BL_BENCH_END(map, insert_type, map.size());
   }
 
+
+  {
   BL_BENCH_START(map);
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_FIND)
         __itt_resume();
 #endif
-  auto finds = map.find(query.begin(), query.end());
+      auto finds = map.template find<typename MAP_TYPE::value_type>(query.data(), query.data() + query.size());
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_FIND)
         __itt_pause();
 #endif
-  BL_BENCH_END(map, "find", finds.size());
+  BL_BENCH_END(map, "find_pair", finds.size());
+    }
+
+  {
+  BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_resume();
+#endif
+      auto finds = map.template find<Value>(query.data(), query.data() + query.size());
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_pause();
+#endif
+  BL_BENCH_END(map, "find_value", finds.size());
+    }
+
+
+
+  {
+  BL_BENCH_START(map);
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_resume();
+#endif
+      auto finds = map.find_existing(query.data(), query.data() + query.size());
+#ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_FIND)
+        __itt_pause();
+#endif
+  BL_BENCH_END(map, "find_existing", finds.size());
+  }
 
   BL_BENCH_START(map);
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_COUNT)
         __itt_resume();
 #endif
-  auto counts = map.count(query.begin(), query.end());
+  auto counts = map.count(query.data(), query.data() + query.size());
   //result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_COUNT)
@@ -1260,7 +1306,7 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
     if (measure_mode == MEASURE_ERASE)
         __itt_resume();
 #endif
-  size_t result = map.erase(query.begin(), query.end());
+  size_t result = map.erase(query.data(), query.data() + query.size());
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_ERASE)
         __itt_pause();
@@ -1273,7 +1319,7 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
     if (measure_mode == MEASURE_COUNT2)
         __itt_resume();
 #endif
-  counts = map.count(query.begin(), query.end());
+  counts = map.count(query.data(), query.data() + query.size());
   //result = std::accumulate(counts.begin(), counts.end(), static_cast<size_t>(0));
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_COUNT2)
