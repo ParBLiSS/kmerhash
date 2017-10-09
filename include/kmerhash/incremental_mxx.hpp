@@ -901,7 +901,6 @@ namespace khmxx
 
       static_assert(::std::is_integral<ASSIGN_TYPE>::value, "ASSIGN_TYPE should be integral, preferably unsigned");
 
-      static_assert(decltype(declval<decltype(declval<Func>().proc_trans_hash)>().h)::batch_size > 1, "Func hash function must have batch size greater than 1");
 
       bucket_sizes.clear();
 
@@ -1052,11 +1051,10 @@ namespace khmxx
     }
 
 
-
 #if 0
     // DO NOT USE.  testing for streaming store.  NOT FASTER.
     // writes into separate array of results..  similar to bucketing_impl
-    // TODO: [ ] speed up hash and count.  for 95M 31-mers, hash and count takes 2.6s, permute takes 1.6 sec.
+    // TODO: [ ] spenbed up hash and count.  for 95M 31-mers, hash and count takes 2.6s, permute takes 1.6 sec.
     template <uint8_t prefetch_dist = 8, typename IT, typename Func, typename OT,
     typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
                                              ::std::random_access_iterator_tag >::value, int>::type = 1  >
@@ -2114,11 +2112,10 @@ namespace khmxx
      * @param i2o			mapping.  only the part between first and last is used.  values should be between first and last.
      * @param results		bucketed output, only processed between first and last.
      */
-    template <typename IT, typename OT, typename MT>
+    template <uint8_t prefetch_dist = 8, typename IT, typename OT, typename MT>
     void permute(IT unbucketed, IT unbucketed_end,
     		MT i2o, OT bucketed,
-    		size_t const & bucketed_pos_offset,
-    		uint8_t prefetch_dist = 8) {
+    		size_t const & bucketed_pos_offset) {
 
     	static_assert(std::is_same<typename std::iterator_traits<IT>::value_type,
     			typename std::iterator_traits<OT>::value_type>::value,
