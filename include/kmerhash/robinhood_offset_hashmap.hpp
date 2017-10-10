@@ -1077,8 +1077,7 @@ protected:
 	 */
 	void copy_upsize(container_type & target, info_container_type & target_info,
 			size_type const & target_buckets) {
-		size_type m = target_buckets - 1;
-		assert((target_buckets & m) == 0);   // assert this is a power of 2.
+		assert((target_buckets & (target_buckets - 1)) == 0);   // assert this is a power of 2.
 
 		uint8_t log_buckets = std::log2(buckets);  // should always be power of 2
 
@@ -1519,7 +1518,9 @@ protected:
 
 		size_t ii;
 
-		std::cout << " mask " << mask << " first " << hashes[0] << " buckets " << buckets << " hash " << hashes[buckets-1] << " input_size " << input_size << " hash " << hashes[input_size -1 ] << std::endl;
+//		std::cout << " mask " << mask << " first " << hashes[0] << " buckets " << buckets
+//				<< " input_size " << input_size << " hash " << hashes[input_size -1 ] << std::endl;
+
 //		for (size_t ii = 0; ii < input_size; ++ii) {
 //			std::cout << (hashes[ii] & mask) << ", ";
 //		}
@@ -2431,6 +2432,7 @@ protected:
 		max = total - (total & lookahead2_mask);
 		bucket_id_type found;
 		size_t j, k, jmax;
+		size_t rem = 0;
 
 		for (it = begin, i = 0; i < max; i += lookahead) {
 
@@ -2457,9 +2459,11 @@ protected:
 
 			// prefetch info container, for entries just vacated.
 			// it already advanced by lookahead.
-			if ((i + lookahead) < max) {
-				hash_mod2(it + lookahead, lookahead, bids + (i & lookahead2_mask));
-				for (j = (i & lookahead2_mask), jmax = ((i + lookahead - 1) & lookahead2_mask);
+			if (total > (i + lookahead2) ) {
+				rem = std::min(lookahead, total - (i + lookahead2));
+				
+				hash_mod2(it + lookahead, rem, bids + (i & lookahead2_mask));
+				for (j = (i & lookahead2_mask), jmax = ((i + rem - 1) & lookahead2_mask);
 						j <= jmax; ++j) {
 					KH_PREFETCH((const char *)(info_container.data() + bids[j]), _MM_HINT_T0);
 				}
@@ -2475,6 +2479,7 @@ protected:
 			cnt += eval(out, *it, found);  // out is incremented here
 
 			// prefetch the container in this loop too.
+			if (total > (i + lookahead) ) {
 			bid = bids[k];
 			if (is_normal(info_container[bid])) {
 				bid1 = bid + 1 + get_offset(info_container[bid + 1]);
@@ -2483,6 +2488,7 @@ protected:
 				KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
 				if (bid1 > (bid + value_per_cacheline))
 					KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+			}
 			}
 		}
 
@@ -2865,8 +2871,9 @@ public:
 
 		size_t batch_size = InternalHash::batch_size; // static_cast<size_t>(QUERY_LOOKAHEAD));
 
-		std::cout << "ROBINHOOD erase_no_resize. batch size: " << InternalHash::batch_size << " query lookahead: " << static_cast<size_t>(QUERY_LOOKAHEAD) <<
-		    " total count: " << total << std::endl;
+//		std::cout << "ROBINHOOD erase_no_resize. batch size: " << static_cast<size_t>(InternalHash::batch_size) <<
+//				" query lookahead: " << static_cast<size_t>(QUERY_LOOKAHEAD) <<
+//		    " total count: " << total << std::endl;
 
 
 		assert(((batch_size & (batch_size - 1) ) == 0) && "batch_size should be a power of 2.");
@@ -2888,6 +2895,7 @@ public:
 		key_type const * it = begin;
 		hash_mod2(it, max, bids);
 		for (i = 0; i < max; ++it, ++i) {
+
 			h =  bids[i];
 			// prefetch the info_container entry for ii.
 			KH_PREFETCH((const char *)(info_container.data() + h), _MM_HINT_T0);
@@ -2895,14 +2903,21 @@ public:
 			// prefetch container as well - would be NEAR but may not be exact.
 			KH_PREFETCH((const char *)(container.data() + h), _MM_HINT_T0);
 		}
-
+//		std::cout << "hashed and prefetched [0, " << i << ")" << std::endl;
 
 		size_t bid, bid1;
 		max = total - (total & lookahead2_mask);
-		bucket_id_type found;
+		//max = total - lookahead2_mask;
 		size_t j, k, jmax;
 
+		size_t rem = 0;
+
 		for (it = begin, i = 0; i < max; i += lookahead) {
+
+//			std::cout <<
+//					" erased [ <" << std::distance(begin, it) << "," << (i & lookahead2_mask) << "," << ((i+lookahead) & lookahead2_mask) <<
+//					"> .. ";
+
 
 			// first get the bucket id
 			// note that we should be accessing the lower and upper halves of the lookahead.
@@ -2911,7 +2926,6 @@ public:
 					j <= jmax; ++j, ++k, ++it ) {
 
 				erase_and_compact(*it, bids[j], out_pred, in_pred);
-
 
 				// prefetch the container in this loop too.
 				bid = bids[k];
@@ -2925,16 +2939,32 @@ public:
 				}
 			}
 
+//			std::cout << "< " << std::distance(begin, it) << ", " << j << ", " << k << "> )";
+
 			// prefetch info container, for entries just vacated.
-			// it already advanced by lookahead.
-			if ((i + lookahead) < max) {
-				hash_mod2(it + lookahead, lookahead, bids + (i & lookahead2_mask));
-				for (j = (i & lookahead2_mask), jmax = ((i + lookahead - 1) & lookahead2_mask);
+			if (total > (i + lookahead2) ) {
+				rem = std::min(lookahead, total - (i + lookahead2));
+
+//				std::cout << ", hashed [ <" << (std::distance(begin, it) + lookahead) << ", " <<
+//						(i & lookahead2_mask) << "> .. ";
+
+				// it already advanced by lookahead.
+				hash_mod2(it + lookahead, rem, bids + (i & lookahead2_mask));
+				for (j = (i & lookahead2_mask), jmax = ((i + rem - 1) & lookahead2_mask);
 						j <= jmax; ++j) {
 					KH_PREFETCH((const char *)(info_container.data() + bids[j]), _MM_HINT_T0);
 				}
+
+//				std::cout << "<" << (std::distance(begin, it) + lookahead + rem) << ", " << j << "> )" <<
+//						std::endl;
+			} else {
+//				std::cout << std::endl;
 			}
 		}
+
+//		std::cout <<
+//				"LAST erased [ <" << std::distance(begin, it) << "," << (i & lookahead2_mask) << "," << ((i+lookahead) & lookahead2_mask) <<
+//				"> .. ";
 
 		// i is at max. now do another iteration
 		max = total - (total & (lookahead-1));
@@ -2944,22 +2974,31 @@ public:
 			erase_and_compact(*it, bids[j], out_pred, in_pred);
 
 			// prefetch the container in this loop too.
-			bid = bids[k];
-			if (is_normal(info_container[bid])) {
-				bid1 = bid + 1 + get_offset(info_container[bid + 1]);
-				bid += get_offset(info_container[bid]);
+			if (total > (i + lookahead) ) {
+				bid = bids[k];
+				if (is_normal(info_container[bid])) {
+					bid1 = bid + 1 + get_offset(info_container[bid + 1]);
+					bid += get_offset(info_container[bid]);
 
-				KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
-				if (bid1 > (bid + value_per_cacheline))
-					KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+					KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
+					if (bid1 > (bid + value_per_cacheline))
+						KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+				}
 			}
 		}
+//		std::cout << "< " << std::distance(begin, it) << ", " << j << ", " << k << "> )" << std::endl;
+//
+//
+//		std::cout <<
+//				"FINAL erased [ <" << std::distance(begin, it) << "," << (i & lookahead2_mask) <<
+//				"> .. ";
 
-		for (j = (i & lookahead2_mask);
-				i < total; ++i, ++j, ++it) {
+		for (j = (i & lookahead2_mask); i < total; ++i, ++j, ++it) {
 
 			erase_and_compact(*it, bids[j], out_pred, in_pred);
 		}
+//		std::cout << "< " << std::distance(begin, it) << ", " << j << "> )"  << std::endl;
+
 
 		free(bids);
 

@@ -2361,7 +2361,8 @@ namespace fsc {
 //      constexpr size_t postrans_batch_size = POSTTRANS_T::batch_size;
 
 	  // lowest common multiple of the three.  default to 64byte/sizeof(HASH_VAL_TYPE) for now (cacheline multiple)
-      static constexpr uint8_t batch_size = HASH_T::batch_size; //(sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
+      static constexpr uint8_t batch_size = (sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
+      	  // HASH_T::batch_size; //(sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
 
       static_assert((batch_size & (batch_size - 1)) == 0, "ERROR: batch_size should be a power of 2.");
 

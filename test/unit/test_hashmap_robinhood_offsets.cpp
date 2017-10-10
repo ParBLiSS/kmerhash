@@ -104,11 +104,11 @@ class Hashtable_OARHDO_PrefixTest : public ::testing::Test
 
     	  switch (type) {
     	  case ITER:
-    		  test.insert(this->temp.begin(), this->temp.end());
+    		  test.insert(this->temp.data(), this->temp.data() + this->temp.size());
     		  break;
-    	  case INTEGRATED:
-    		  test.insert_integrated(this->temp);
-    		  break;
+//    	  case INTEGRATED:
+//    		  test.insert_integrated(this->temp);
+//    		  break;
 //    	  case SORT:
 //    		  test.insert_sort(this->temp);
 //    		  break;
@@ -264,7 +264,7 @@ TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, count)
 
 	  MAP test;
    //MAP test(this->iters);
-   test.insert(this->temp.begin(), this->temp.end());
+   test.insert(this->temp.data(), this->temp.data() + this->temp.size());
 
 
    ::std::vector<::std::pair<TypeParam, TypeParam> > test_vals(test.to_vector());
@@ -421,11 +421,11 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 
 	  switch (type) {
 	  case ITER:
-		  test.insert(entries.begin(), entries.end());
+		  test.insert(entries.data(), entries.data() + entries.size());
 		  break;
-	  case INTEGRATED:
-		  test.insert_integrated(entries);
-		  break;
+//	  case INTEGRATED:
+//		  test.insert_integrated(entries);
+//		  break;
 //	  case SORT:
 //      test.template insert_sort<Less>(entries);
 //		  break;
@@ -490,7 +490,8 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 //    }
 
     template <typename Kmer = T, bool canonical,
-			typename Hash, typename Equal>
+			template <typename> class Hash,
+			template <typename> class Equal>
     ::fsc::hashmap_robinhood_offsets<Kmer, uint32_t, Hash, Equal>
     make_kmer_map() {
 //    	::bliss::kmer::hash::sparsehash::special_keys<Kmer, canonical> specials;
@@ -564,23 +565,18 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 
     template <int type, typename Kmer = T, bool canonical = false,
     		template <typename> class Transform = ::bliss::transform::identity,
-			template <typename> class Hash = std::hash,
-			template <typename> class Equal = std::equal_to,
-			template <typename> class Less = std::less
+			template <typename> class THash = std::hash,
+			template <typename> class TEqual = std::equal_to,
+			template <typename> class TLess = std::less
 			>
     void test_map_insert() {
 
-    	using THash = ::fsc::TransformedHash<Kmer, Hash, Transform>;
-    	using TLess = ::fsc::TransformedComparator<Kmer, Less, Transform>;
-    	using Equal1 = ::fsc::TransformedComparator<Kmer, Equal, Transform>;
-//    	using Equal2 = ::fsc::sparsehash::compare<Kmer, Equal, Transform>;
 
-
-    	auto test = make_kmer_map<Kmer, canonical, THash, Equal1>();
-		::std::unordered_map<Kmer, uint32_t, THash, Equal1> gold;
+    	auto test = make_kmer_map<Kmer, canonical, THash, TEqual>();
+		::std::unordered_map<Kmer, uint32_t, THash<Kmer>, TEqual<Kmer>> gold;
 		::std::vector<std::pair<Kmer, uint32_t> > entries;
 
-		this->map_insert<type, canonical, TLess>(test, gold, entries);
+		this->map_insert<type, canonical, TLess<Kmer>>(test, gold, entries);
 
 
 		::std::vector<::std::pair<Kmer, uint32_t> > test_vals = test.to_vector();
@@ -696,29 +692,25 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 
     template <typename Kmer = T, bool canonical = false,
     		template <typename> class Transform = ::bliss::transform::identity,
-			template <typename> class Hash = std::hash,
-			template <typename> class Equal = std::equal_to,
-			template <typename> class Less = std::less
+			template <typename> class THash = std::hash,
+			template <typename> class TEqual = std::equal_to,
+			template <typename> class TLess = std::less
 			>
     void test_map_count() {
 
 
-    	using THash = ::fsc::TransformedHash<Kmer, Hash, Transform>;
-    	using TLess = ::fsc::TransformedComparator<Kmer, Less, Transform>;
-    	using Equal1 = ::fsc::TransformedComparator<Kmer, Equal, Transform>;
-    	//using Equal2 = ::fsc::sparsehash::compare<Kmer, Equal, Transform>;
 
-    	auto test = make_kmer_map<Kmer, canonical, THash, Equal1>();
-		::std::unordered_map<Kmer, uint32_t, THash, Equal1> gold;
+    	auto test = make_kmer_map<Kmer, canonical, THash, TEqual>();
+		::std::unordered_map<Kmer, uint32_t, THash<Kmer>, TEqual<Kmer>> gold;
 		::std::vector<std::pair<Kmer, uint32_t> > entries;
 
-		this->map_insert<VEC, canonical, TLess>(test, gold, entries);
+		this->map_insert<VEC, canonical, TLess<Kmer>>(test, gold, entries);
 
 		// get list of unique k-mers
 		std::vector<Kmer> keys = test.keys();
 
 		// assert that there are no duplicates
-		std::unordered_set<Kmer, THash, Equal1> testset(keys.begin(), keys.end());
+		std::unordered_set<Kmer, THash<Kmer>, TEqual<Kmer>> testset(keys.begin(), keys.end());
 		ASSERT_EQ(testset.size(), keys.size());
 
 		// assert that all entries are unique
@@ -733,39 +725,36 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 
     template <typename Kmer = T, bool canonical = false,
     		template <typename> class Transform = ::bliss::transform::identity,
-			template <typename> class Hash = std::hash,
-			template <typename> class Equal = std::equal_to,
-			template <typename> class Less = std::less
+			template <typename> class THash = std::hash,
+			template <typename> class TEqual = std::equal_to,
+			template <typename> class TLess = std::less
 			>
     void test_map_erase() {
 
 
-    	using THash = ::fsc::TransformedHash<Kmer, Hash, Transform>;
-    	using TLess = ::fsc::TransformedComparator<Kmer, Less, Transform>;
-    	using Equal1 = ::fsc::TransformedComparator<Kmer, Equal, Transform>;
-    	//using Equal2 = ::fsc::sparsehash::compare<Kmer, Equal, Transform>;
 
-    	auto test = make_kmer_map<Kmer, canonical, THash, Equal1>();
-    	//test.reserve(this->iters);
-		::std::unordered_map<Kmer, uint32_t, THash, Equal1> gold;
+    	auto test = make_kmer_map<Kmer, canonical, THash, TEqual>();
+		::std::unordered_map<Kmer, uint32_t, THash<Kmer>, TEqual<Kmer>> gold;
 		::std::vector<std::pair<Kmer, uint32_t> > entries;
+		::std::vector<Kmer > entries2;
 
-		this->map_insert<VEC, canonical, TLess>(test, gold, entries);
+		this->map_insert<VEC, canonical, TLess<Kmer>>(test, gold, entries);
 
-		std::cout << "BEFORE ERASE.  size= " << test.size() << " capacity= " << test.capacity() << std::endl;
+//		std::cout << "BEFORE ERASE.  size= " << test.size() << " capacity= " << test.capacity() << std::endl;
 // debug		test.print();
 
 		// now erase half of the entries.
-		test.erase(entries.begin(), entries.begin() + entries.size() / 2);
-		for (auto it = entries.begin(); it != entries.begin() + entries.size() / 2; ++it) {
+		for (auto it = entries.begin(); it != entries.begin() + (entries.size() / 2); ++it) {
 			gold.erase((*it).first);
 
+			entries2.emplace_back((*it).first);
 			//std::cout << "erased " << (*it).first << std::endl;
 		}
+		test.erase(entries2.data(), entries2.data() + entries2.size());
 
 
 
-		std::cout << "AFTER ERASE.  size= " << test.size() << " capacity= " << test.capacity() << std::endl;
+//		std::cout << "AFTER ERASE.  size= " << test.size() << " capacity= " << test.capacity() << std::endl;
 // debug		test.print();
 
 		ASSERT_EQ(test.size(), gold.size());
@@ -774,7 +763,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 		std::vector<Kmer> keys = test.keys();
 
 		// assert that there are no duplicates
-		std::unordered_set<Kmer, THash, Equal1> testset(keys.begin(), keys.end());
+		std::unordered_set<Kmer, THash<Kmer>, TEqual<Kmer>> testset(keys.begin(), keys.end());
 		ASSERT_EQ(testset.size(), keys.size());
 
 		// assert that all entries are unique
@@ -971,25 +960,38 @@ TYPED_TEST_CASE_P(Hashmap_OA_RHDO_Prefix_KmerTest);
 template<typename K>
 using HASH_K = ::bliss::kmer::hash::farm<K, false>;
 
+template <typename K>
+using IdenFarmHash = ::fsc::TransformedHash<K, HASH_K, ::bliss::transform::identity>;
+template <typename K>
+using IdenStdLess = ::fsc::TransformedComparator<K, std::less, ::bliss::transform::identity>;
+template <typename K>
+using IdenStdEqual = ::fsc::TransformedComparator<K, std::equal_to, ::bliss::transform::identity>;
+template <typename K>
+using LexFarmHash = ::fsc::TransformedHash<K, HASH_K, ::bliss::kmer::transform::lex_less>;
+template <typename K>
+using LexStdLess = ::fsc::TransformedComparator<K, std::less, ::bliss::kmer::transform::lex_less>;
+template <typename K>
+using LexStdEqual = ::fsc::TransformedComparator<K, std::equal_to, ::bliss::kmer::transform::lex_less>;
+
 
 TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert_vec)
 {
 	this->template test_map_insert<VEC, TypeParam, false,
 									  ::bliss::transform::identity,
-									  HASH_K, std::equal_to, std::less>();
+									  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert_iterator)
 {
 	this->template test_map_insert<ITER, TypeParam, false,
 									  ::bliss::transform::identity,
-									  HASH_K, std::equal_to, std::less>();
+										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 
 TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert_integrated)
 {
 	this->template test_map_insert<INTEGRATED, TypeParam, false,
 									  ::bliss::transform::identity,
-									  HASH_K, std::equal_to, std::less>();
+										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 //TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert_sort)
 //{
@@ -1017,25 +1019,25 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_count)
 {
   this->template test_map_count<TypeParam, false,
 								  ::bliss::transform::identity,
-								  HASH_K, std::equal_to, std::less>();
+									  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_erase)
 {
 	  this->template test_map_erase<TypeParam, false,
 	  ::bliss::transform::identity,
-	  									  HASH_K, std::equal_to, std::less>();
+		  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert_vec)
 {
 	this->template test_map_insert<VEC, TypeParam, true,
 									  ::bliss::transform::identity,
-									  HASH_K, std::equal_to, std::less>();
+										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert_iterator)
 {
 	this->template test_map_insert<ITER, TypeParam, true,
 									  ::bliss::transform::identity,
-									  HASH_K, std::equal_to, std::less>();
+										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 
 
@@ -1043,7 +1045,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert_integrated)
 {
 	this->template test_map_insert<INTEGRATED, TypeParam, true,
 									  ::bliss::transform::identity,
-									  HASH_K, std::equal_to, std::less>();
+										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 //TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert_sort)
 //{
@@ -1071,21 +1073,21 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_count)
 {
 	  this->template test_map_count<TypeParam, true,
 									  ::bliss::transform::identity,
-									  HASH_K, std::equal_to, std::less>();
+										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 
 }
 TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_erase)
 {
 	  this->template test_map_erase<TypeParam, true,
 	  ::bliss::transform::identity,
-	  									  HASH_K, std::equal_to, std::less>();
+		  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 
 TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_vec)
 {
 	this->template test_map_insert<VEC, TypeParam, false,
 									  ::bliss::kmer::transform::lex_less,
-									  HASH_K, std::equal_to, std::less>();
+									  LexFarmHash, LexStdEqual, LexStdLess>();
 
 	//  using SPLITTER = typename std::conditional<((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) > 1),
 //		  ::bliss::filter::TruePredicate,
@@ -1103,7 +1105,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_iterator)
 {
 	this->template test_map_insert<ITER, TypeParam, false,
 									  ::bliss::kmer::transform::lex_less,
-									  HASH_K, std::equal_to, std::less>();
+										  LexFarmHash, LexStdEqual, LexStdLess>();
 
 	//  using SPLITTER = typename std::conditional<((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) > 1),
 //		  ::bliss::filter::TruePredicate,
@@ -1122,7 +1124,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_integrated)
 {
 	this->template test_map_insert<INTEGRATED, TypeParam, false,
 									  ::bliss::kmer::transform::lex_less,
-									  HASH_K, std::equal_to, std::less>();
+										  LexFarmHash, LexStdEqual, LexStdLess>();
 }
 //TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_sort)
 //{
@@ -1161,7 +1163,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_count)
 {
 	  this->template test_map_count<TypeParam, false,
 	  ::bliss::kmer::transform::lex_less,
-	  									  HASH_K, std::equal_to, std::less>();
+		  LexFarmHash, LexStdEqual, LexStdLess>();
 
 //  using SPLITTER = typename std::conditional<((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) > 1),
 //      ::bliss::filter::TruePredicate,
@@ -1179,7 +1181,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_erase)
 {
 	  this->template test_map_erase<TypeParam, false,
 	  ::bliss::kmer::transform::lex_less,
-	  									  HASH_K, std::equal_to, std::less>();
+		  LexFarmHash, LexStdEqual, LexStdLess>();
 }
 //TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_multimap_insert)
 //{
