@@ -2566,7 +2566,7 @@ public:
 	}
 
 protected:
-	inline value_type const & get_tuple(key_type const & key, mapped_type const & default_val = mapped_type()) const {
+	inline value_type get_tuple(key_type const & key, mapped_type const & default_val = mapped_type()) const {
 		return ::std::make_pair(key, default_val);
 	}
 	inline value_type const & get_tuple(value_type const & val, mapped_type const & default_val = mapped_type()) const {

@@ -675,7 +675,7 @@ namespace dsc  // distributed std container
 
         //local_container_type().swap(temp);   // doing the swap to clear helps?
 
-        BL_BENCH_REPORT_MPI_NAMED(reduce_tuple, "reduction_hashmap:local_reduce", this->comm);
+        BL_BENCH_REPORT_NAMED(reduce_tuple, "reduction_hashmap:local_reduce");
       }
 
       // CASES FOR PERMUTE:
@@ -719,7 +719,9 @@ namespace dsc  // distributed std container
           // no bucket.
           if (num_buckets == 0) throw std::invalid_argument("ERROR: number of buckets is 0");
 
-          if (_begin == _end) return;  // no data in question.
+          if (_begin == _end) {
+        	  return;  // no data in question.
+          }
 
           if (num_buckets == 1) {
         	  // copy input to output and be done.
@@ -822,9 +824,14 @@ namespace dsc  // distributed std container
 
         bucket_sizes.clear();
 
-        if (_begin == _end) return;  // no data in question.
-
         BL_BENCH_INIT(permute_est);
+        size_t input_size = std::distance(_begin, _end);
+
+        if (_begin == _end) {
+
+        	return;  // no data in question.
+        }
+
 
         constexpr size_t batch_size = InternalHash::batch_size;
 
@@ -838,7 +845,6 @@ namespace dsc  // distributed std container
         bucket_sizes.resize(num_buckets, 0);
         BL_BENCH_END(permute_est, "alloc_count", num_buckets);
 
-        size_t input_size = std::distance(_begin, _end);
 
         // single bucket.  still need to estimate.
         if (num_buckets == 1) {
@@ -890,7 +896,7 @@ namespace dsc  // distributed std container
           }
           BL_BENCH_END(permute_est, "est_permute", input_size);
 
-          BL_BENCH_REPORT_MPI_NAMED(permute_est, "count_permute", this->comm);
+          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
 
           return;
         }
@@ -1025,7 +1031,7 @@ namespace dsc  // distributed std container
           free(bucketIds);
           BL_BENCH_END(permute_est, "free", input_size);
 
-          BL_BENCH_REPORT_MPI_NAMED(permute_est, "count_permute", this->comm);
+          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
 
 
       }  // end of assign_count_estimate_permute
@@ -1073,7 +1079,7 @@ namespace dsc  // distributed std container
           std::copy(_begin, _end, output);
           BL_BENCH_END(permute_est, "permute", input_size);
 
-          BL_BENCH_REPORT_MPI_NAMED(permute_est, "count_permute", this->comm);
+          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
 
           return;
         }
@@ -1134,7 +1140,7 @@ namespace dsc  // distributed std container
           free(bucketIds);
           BL_BENCH_END(permute_est, "free", input_size);
 
-          BL_BENCH_REPORT_MPI_NAMED(permute_est, "count_permute", this->comm);
+          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
 
       }  // end of assign_estimate_count
 
