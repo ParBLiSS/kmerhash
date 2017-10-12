@@ -3319,8 +3319,8 @@ namespace khmxx
       void ialltoallv_and_modify(IT permuted, IT permuted_end,
     		  	  	  	  	  	  ::std::vector<SIZE> const & send_counts,
 								  OP compute,
-								  ::mxx::comm const &_comm,
-								   size_t batch_size = 1) {
+								  ::mxx::comm const &_comm) {//,
+//								   size_t batch_size = 1) {
 
 //      BL_BENCH_INIT(idist);
 
@@ -3637,9 +3637,9 @@ namespace khmxx
 
         BL_BENCH_INIT(idist);
 
-        size_t input_size = permuted.size();
+        size_t input_size = std::distance(permuted, permuted_end);
 
-        assert((send_counts.size() == _comm.size()) && "send_count size not same as _comm size.");
+        assert((send_counts.size() == static_cast<size_t>(_comm.size())) && "send_count size not same as _comm size.");
 
         // make sure tehre is something to do.
         BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
