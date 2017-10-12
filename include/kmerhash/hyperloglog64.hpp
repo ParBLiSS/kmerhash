@@ -128,24 +128,22 @@ public:
 		using HVT = decltype(::std::declval<Hash>().operator()(::std::declval<T>()));
 
 protected:
+		static constexpr uint64_t nRegisters = 0x1ULL << precision;   // e.g. 0x00000100
+		static constexpr uint8_t unused_msb =
+				(std::is_same<::std::hash<T>, Hash>::value) ?
+				((sizeof(T) >= 8ULL) ? 0U : (64U - (sizeof(T) * 8ULL))) :   // if std::hash then via input size.
+				(64U - (sizeof(decltype(::std::declval<Hash>().operator()(::std::declval<T>()))) << 3));   // if not, check Hash operator return type.
+		// 64 bit.  0xIIRRVVVVVV  // MSB: ignored bits II,  high bits: reg, RR.  low: values, VVVVVV
+		static constexpr uint8_t no_ignore_value_bits = 64U - precision;  // e.g. 0x00FFFFFF
 
-	// 64 bit.  0xIIRRVVVVVV  // MSB: ignored bits II,  high bits: reg, RR.  low: values, VVVVVV
-	static constexpr uint8_t no_ignore_value_bits = 64U - precision;  // e.g. 0x00FFFFFF
+		mutable ::std::vector<REG_T> registers;  // stores count of leading zeros
 
 	mutable double amm;
 	mutable uint64_t lzc_mask;   // lowest bits set to 1 to prevent counting into that region.
 
-	static constexpr uint64_t nRegisters = 0x1ULL << precision;   // e.g. 0x00000100
-	static constexpr uint8_t unused_msb =
-			(std::is_same<::std::hash<T>, Hash>::value) ?
-			((sizeof(T) >= 8ULL) ? 0U : (64U - (sizeof(T) * 8ULL))) :   // if std::hash then via input size.
-			(64U - (sizeof(decltype(::std::declval<Hash>().operator()(::std::declval<T>()))) << 3));   // if not, check Hash operator return type.
-
 	mutable uint8_t ignored_msb; // MSB to ignore.
 
 	Hash h;
-
-	mutable ::std::vector<REG_T> registers;  // stores count of leading zeros
 
 	inline void internal_update(::std::vector<REG_T> & regs, uint64_t const & no_ignore) {
 		// no_ignore has bits 0xRRVVVVVV00, not that the II bits had already been shifted away.
@@ -262,9 +260,9 @@ public:
   	/// constructor.  ignore_leading does not count the leading bits.  ignore_trailing does not count the trailing bits.
   	  /// these are for use when the leading and/or trailing bits are identical in an input set.
 	hyperloglog64(uint8_t const & ignore_msb = 0) :
+		registers(nRegisters),
 		lzc_mask( ~(0x0ULL) >> (64 - precision - ignore_msb - unused_msb)),
-		ignored_msb(ignore_msb + unused_msb),
-		registers(nRegisters)
+		ignored_msb(ignore_msb + unused_msb)
 		{
 
         switch (precision) {
@@ -283,6 +281,8 @@ public:
         }
         amm *= static_cast<double>(0x1ULL << (precision << 1ULL));  // 2^(2*precision)
 
+//        std::cout << " ignore msb = " << static_cast<size_t>(ignore_msb) <<
+//        		" unused_msb = " << static_cast<size_t>(unused_msb) << std::endl;
 //        std::cout << "unused msb = " << static_cast<size_t>(64U - (sizeof(decltype(::std::declval<Hash>().operator()(::std::declval<T>()))) << 3)) << std::endl;
 //        std::cout << "unused msb2 = " << static_cast<size_t>(64U - (sizeof(typename std::result_of<Hash&(const T &)>::type) << 3)) << std::endl;
 //        std::cout << "unused msb3 = " << static_cast<size_t>(64U - (sizeof(typename std::result_of<Hash(const T &)>::type) << 3)) << std::endl;
@@ -291,16 +291,16 @@ public:
 	}
 
 	hyperloglog64(hyperloglog64 const & other) :
-		amm(other.amm), lzc_mask(other.lzc_mask), ignored_msb(other.ignored_msb), registers(other.registers) {
+		registers(other.registers), amm(other.amm), lzc_mask(other.lzc_mask), ignored_msb(other.ignored_msb) {
 	}
 
 	hyperloglog64(hyperloglog64 && other) :
-		amm(other.amm), lzc_mask(other.lzc_mask), ignored_msb(other.ignored_msb), registers(std::move(other.registers)) {
+		registers(std::move(other.registers)), amm(other.amm), lzc_mask(other.lzc_mask), ignored_msb(other.ignored_msb)  {
 	}
 
 	hyperloglog64& operator=(hyperloglog64 const & other) {
-		amm = other.amm;
 		registers = other.registers;
+		amm = other.amm;
 		ignored_msb = other.ignored_msb;
 		lzc_mask = other.lzc_mask;
 
@@ -308,9 +308,9 @@ public:
 	}
 
 	hyperloglog64& operator=(hyperloglog64 && other) {
+		registers.swap(other.registers);
 		amm = other.amm;
 		//registers.swap(other.registers);
-		registers.swap(other.registers);
 		ignored_msb = other.ignored_msb;
 		lzc_mask = other.lzc_mask;
 
@@ -319,17 +319,17 @@ public:
 
 
 	void swap(hyperloglog64 & other) {
-		std::swap(amm, other.amm);
 		std::swap(registers, other.registers);
+		std::swap(amm, other.amm);
 		std::swap(ignored_msb, other.ignored_msb);
 		std::swap(lzc_mask, other.lzc_mask);
 	}
 
-	inline void set_ignored_msb(uint8_t const & ignored_msb) {
-		this->ignored_msb = ignored_msb;
+	inline void set_ignored_msb(uint8_t const & ignore_msb) {
+		this->ignored_msb = ignore_msb + unused_msb;
 	}
 	inline uint8_t get_ignored_msb() {
-		return this->ignored_msb;
+		return this->ignored_msb - unused_msb;
 	}
 	hyperloglog64 make_empty_copy() {
 		return hyperloglog64(this->ignored_msb - unused_msb);
@@ -344,6 +344,7 @@ public:
 	}
 
 	inline void update_via_hashval(HVT const & hval) {
+	//	::std::cout << ::std::hex << static_cast<uint64_t>(hval) << ", unused msb " << static_cast<size_t>(unused_msb) << " ignored msb  " << static_cast<size_t>(ignored_msb) << " val " <<  (static_cast<uint64_t>(hval) << ignored_msb) << std::endl;
       internal_update(this->registers, static_cast<uint64_t>(hval) << ignored_msb);
 	}
 
