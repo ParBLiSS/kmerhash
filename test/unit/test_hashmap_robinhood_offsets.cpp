@@ -43,8 +43,8 @@
 #include "containers/fsc_container_utils.hpp"
 
 
-#define VEC 1
-#define ITER 2
+#define NO_RESIZE 1
+#define RESIZE 2
 #define INTEGRATED 3
 //#define SORT 4
 //#define SHUFFLE 5
@@ -103,7 +103,7 @@ class Hashtable_OARHDO_PrefixTest : public ::testing::Test
     	  // test.reserve(this->temp.size() * 2);
 
     	  switch (type) {
-    	  case ITER:
+    	  case RESIZE:
     		  test.insert(this->temp.data(), this->temp.data() + this->temp.size());
     		  break;
 //    	  case INTEGRATED:
@@ -116,7 +116,7 @@ class Hashtable_OARHDO_PrefixTest : public ::testing::Test
 //    		  test.insert_shuffled(this->temp);
 //    		  break;
     	  default:
-    		  test.insert(this->temp);
+    		  test.insert_no_estimate(this->temp.data(), this->temp.data() + this->temp.size());
     		  break;
     	  }
 
@@ -174,20 +174,20 @@ class Hashtable_OARHDO_PrefixTest : public ::testing::Test
 // indicate this is a typed test
 TYPED_TEST_CASE_P(Hashtable_OARHDO_PrefixTest);
 
-TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert_vec)
+TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert_no_estimate)
 {
-	this->test_insert(VEC);
+	this->test_insert(NO_RESIZE);
 }
 
 TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert_iterator)
 {
-	this->test_insert(ITER);
+	this->test_insert(RESIZE);
 }
 
-TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert_integrated)
-{
-	this->test_insert(INTEGRATED);
-}
+//TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert_integrated)
+//{
+//	this->test_insert(INTEGRATED);
+//}
 
 //TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, insert_sort)
 //{
@@ -336,9 +336,9 @@ TYPED_TEST_P(Hashtable_OARHDO_PrefixTest, count)
 
 // now register the test cases
 REGISTER_TYPED_TEST_CASE_P(Hashtable_OARHDO_PrefixTest,
-		insert_vec,
+		insert_no_estimate,
 		insert_iterator,
-		insert_integrated,
+//		insert_integrated,
 //		insert_sort,
 //		insert_shuffle,
 //		equal_range,
@@ -420,7 +420,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
       gold.insert(entries.begin(), entries.end());
 
 	  switch (type) {
-	  case ITER:
+	  case RESIZE:
 		  test.insert(entries.data(), entries.data() + entries.size());
 		  break;
 //	  case INTEGRATED:
@@ -433,7 +433,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 //		  test.insert_shuffled(entries);
 //		  break;
 	  default:
-		  test.insert(entries);
+		  test.insert_no_estimate(entries.data(), entries.data() + entries.size());
 		  break;
 	  }
 
@@ -636,7 +636,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 //		::std::unordered_map<Kmer, uint32_t, THash, Equal1> gold;
 //		::std::vector<std::pair<Kmer, uint32_t> > entries;
 //
-//		this->map_insert<VEC, canonical, TLess>(test, gold, entries);
+//		this->map_insert<NO_RESIZE, canonical, TLess>(test, gold, entries);
 //
 //
 //		// get list of unique k-mers
@@ -704,7 +704,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 		::std::unordered_map<Kmer, uint32_t, THash<Kmer>, TEqual<Kmer>> gold;
 		::std::vector<std::pair<Kmer, uint32_t> > entries;
 
-		this->map_insert<VEC, canonical, TLess<Kmer>>(test, gold, entries);
+		this->map_insert<NO_RESIZE, canonical, TLess<Kmer>>(test, gold, entries);
 
 		// get list of unique k-mers
 		std::vector<Kmer> keys = test.keys();
@@ -738,7 +738,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 		::std::vector<std::pair<Kmer, uint32_t> > entries;
 		::std::vector<Kmer > entries2;
 
-		this->map_insert<VEC, canonical, TLess<Kmer>>(test, gold, entries);
+		this->map_insert<NO_RESIZE, canonical, TLess<Kmer>>(test, gold, entries);
 
 //		std::cout << "BEFORE ERASE.  size= " << test.size() << " capacity= " << test.capacity() << std::endl;
 // debug		test.print();
@@ -803,7 +803,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 //		::std::unordered_multimap<Kmer, uint32_t, THash, Equal1> gold;
 //		::std::vector<std::pair<Kmer, uint32_t> > entries;
 //
-//		this->multimap_insert<VEC, canonical, TLess>(test, gold, entries);
+//		this->multimap_insert<NO_RESIZE, canonical, TLess>(test, gold, entries);
 //
 //
 //		::std::vector<::std::pair<Kmer, uint32_t> > test_vals = test.to_vector();
@@ -856,7 +856,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 //		::std::unordered_multimap<Kmer, uint32_t, THash, Equal1> gold;
 //		::std::vector<std::pair<Kmer, uint32_t> > entries;
 //
-//		this->multimap_insert<VEC, canonical, TLess>(test, gold, entries);
+//		this->multimap_insert<NO_RESIZE, canonical, TLess>(test, gold, entries);
 //
 //
 //		// get list of unique k-mers
@@ -930,7 +930,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
 //		::std::unordered_multimap<Kmer, uint32_t, THash, Equal1> gold;
 //		::std::vector<std::pair<Kmer, uint32_t> > entries;
 //
-//		this->multimap_insert<VEC, canonical, TLess>(test, gold, entries);
+//		this->multimap_insert<NO_RESIZE, canonical, TLess>(test, gold, entries);
 //
 //		// get list of unique k-mers
 //		std::vector<Kmer> keys = test.keys();
@@ -974,25 +974,25 @@ template <typename K>
 using LexStdEqual = ::fsc::TransformedComparator<K, std::equal_to, ::bliss::kmer::transform::lex_less>;
 
 
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert_vec)
+TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert_no_estimate)
 {
-	this->template test_map_insert<VEC, TypeParam, false,
+	this->template test_map_insert<NO_RESIZE, TypeParam, false,
 									  ::bliss::transform::identity,
 									  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert_iterator)
 {
-	this->template test_map_insert<ITER, TypeParam, false,
+	this->template test_map_insert<RESIZE, TypeParam, false,
 									  ::bliss::transform::identity,
 										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert_integrated)
-{
-	this->template test_map_insert<INTEGRATED, TypeParam, false,
-									  ::bliss::transform::identity,
-										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
-}
+//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert_integrated)
+//{
+//	this->template test_map_insert<INTEGRATED, TypeParam, false,
+//									  ::bliss::transform::identity,
+//										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
+//}
 //TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_insert_sort)
 //{
 //	this->template test_map_insert<SORT, TypeParam, false,
@@ -1027,26 +1027,26 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, single_map_erase)
 	  ::bliss::transform::identity,
 		  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert_vec)
+TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert_no_estimate)
 {
-	this->template test_map_insert<VEC, TypeParam, true,
+	this->template test_map_insert<NO_RESIZE, TypeParam, true,
 									  ::bliss::transform::identity,
 										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert_iterator)
 {
-	this->template test_map_insert<ITER, TypeParam, true,
+	this->template test_map_insert<RESIZE, TypeParam, true,
 									  ::bliss::transform::identity,
 										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 
 
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert_integrated)
-{
-	this->template test_map_insert<INTEGRATED, TypeParam, true,
-									  ::bliss::transform::identity,
-										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
-}
+//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert_integrated)
+//{
+//	this->template test_map_insert<INTEGRATED, TypeParam, true,
+//									  ::bliss::transform::identity,
+//										  IdenFarmHash, IdenStdEqual, IdenStdLess>();
+//}
 //TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_insert_sort)
 //{
 //	this->template test_map_insert<SORT, TypeParam, true,
@@ -1083,9 +1083,9 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, canonical_map_erase)
 		  IdenFarmHash, IdenStdEqual, IdenStdLess>();
 }
 
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_vec)
+TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_no_estimate)
 {
-	this->template test_map_insert<VEC, TypeParam, false,
+	this->template test_map_insert<NO_RESIZE, TypeParam, false,
 									  ::bliss::kmer::transform::lex_less,
 									  LexFarmHash, LexStdEqual, LexStdLess>();
 
@@ -1103,7 +1103,7 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_vec)
 }
 TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_iterator)
 {
-	this->template test_map_insert<ITER, TypeParam, false,
+	this->template test_map_insert<RESIZE, TypeParam, false,
 									  ::bliss::kmer::transform::lex_less,
 										  LexFarmHash, LexStdEqual, LexStdLess>();
 
@@ -1120,12 +1120,12 @@ TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_iterator)
 //  this->template test_map_insert<TypeParam, false, ((TypeParam::nWords * sizeof(typename TypeParam::KmerWordType) * 8 - TypeParam::nBits) <= 1), THASH, EQUAL, LESS>();
 }
 
-TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_integrated)
-{
-	this->template test_map_insert<INTEGRATED, TypeParam, false,
-									  ::bliss::kmer::transform::lex_less,
-										  LexFarmHash, LexStdEqual, LexStdLess>();
-}
+//TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_integrated)
+//{
+//	this->template test_map_insert<INTEGRATED, TypeParam, false,
+//									  ::bliss::kmer::transform::lex_less,
+//										  LexFarmHash, LexStdEqual, LexStdLess>();
+//}
 //TYPED_TEST_P(Hashmap_OA_RHDO_Prefix_KmerTest, bimolecule_map_insert_sort)
 //{
 //	this->template test_map_insert<SORT, TypeParam, false,
@@ -1289,25 +1289,25 @@ REGISTER_TYPED_TEST_CASE_P(Hashmap_OA_RHDO_Prefix_KmerTest,
 		//                           bimolecule_multimap_insert,
 		//						   bimolecule_multimap_equal_range,
 		//						   bimolecule_multimap_count,
-		                           single_map_insert_vec,
+		                           single_map_insert_no_estimate,
 		                           single_map_insert_iterator,
-		                           single_map_insert_integrated,
+//		                           single_map_insert_integrated,
 //		                           single_map_insert_sort,
 //		                           single_map_insert_shuffle,
 		//						   single_map_equal_range,
 								   single_map_count,
 								   single_map_erase,
-		                           canonical_map_insert_vec,
+		                           canonical_map_insert_no_estimate,
 		                           canonical_map_insert_iterator,
-		                           canonical_map_insert_integrated,
+//		                           canonical_map_insert_integrated,
 //								   canonical_map_insert_sort,
 //								   canonical_map_insert_shuffle,
 		//						   canonical_map_equal_range,
 								   canonical_map_count,
 								   canonical_map_erase,
-		                           bimolecule_map_insert_vec,
+		                           bimolecule_map_insert_no_estimate,
 		                           bimolecule_map_insert_iterator,
-		                           bimolecule_map_insert_integrated,
+//		                           bimolecule_map_insert_integrated,
 //		                           bimolecule_map_insert_sort,
 //		                           bimolecule_map_insert_shuffle,
 		//						   bimolecule_map_equal_range,
