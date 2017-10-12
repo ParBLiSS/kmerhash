@@ -93,7 +93,7 @@
 #define MURMUR32 26
 #define MURMUR32sse 27
 #define MURMUR32avx 28
-#define CRC32c 29
+#define CRC32C 29
 
 
 #define LOOK_AHEAD 16
@@ -105,10 +105,10 @@
   using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
 #elif (pStoreHash == IDEN)
   template <typename KM>
-  using StoreHash = bliss::kmer::hash::identity<KM, false>;
+  using StoreHash = fsc::hash::identity<KM>;
 #elif (pStoreHash == MURMUR)
   template <typename KM>
-  using StoreHash = bliss::kmer::hash::murmur<KM, false>;
+  using StoreHash = fsc::hash::murmur<KM>;
 #elif (pStoreHash == MURMUR32)
   template <typename KM>
   using StoreHash = fsc::hash::murmur32<KM>;
@@ -118,15 +118,18 @@
 #elif (pStoreHash == MURMUR32avx)
   template <typename KM>
   using StoreHash = fsc::hash::murmur3avx32<KM>;
-#elif (pStoreHash == CRC32c)
+#elif (pStoreHash == CRC32C)
   template <typename KM>
   using StoreHash = fsc::hash::crc32c<KM>;
 #elif (pStoreHash == FARM32)
   template <typename KM>
   using StoreHash = fsc::hash::farm32<KM>;
+#elif (pStoreHash == FARM)
+  template <typename KM>
+  using StoreHash = fsc::hash::farm<KM>;
 #else //if (pStoreHash == FARM)
   template <typename KM>
-  using StoreHash = bliss::kmer::hash::farm<KM, false>;
+  using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
 #endif
 
 
@@ -1246,7 +1249,7 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
         __itt_resume();
 #endif
     if (vector_mode == ITER_MODE) {
-      map.insert_no_estimate(input.data(), input.data() + input.size());
+      map.insert_no_estimate(input.data(), input.data() + input.size() );
     } else if (vector_mode == INDEX_MODE) {
       map.insert_no_estimate(input);
     } else {

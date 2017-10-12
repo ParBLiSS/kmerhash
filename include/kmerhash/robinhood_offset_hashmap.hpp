@@ -1630,6 +1630,8 @@ protected:
 
 		size_type before = lsize;
 #endif
+		if (input_size == 0) return 0;
+
 		bucket_id_type id, bid1, bid;
 
 		size_t ii;
@@ -1814,6 +1816,279 @@ protected:
 	}
 
 
+
+  // batch insert, minimizing number of loop conditionals and rehash checks.
+  // provide a set of precomputed hash values.  Also allows resize in case any estimation is not accurate.
+	template <typename KV>
+	size_t insert_batch(KV const * input, size_t input_size, mapped_type const & default_val) {
+
+
+#if defined(REPROBE_STAT)
+    if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+      std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+    } else {
+      std::cout << "STATUS: container alignment on value boundary" << std::endl;
+    }
+
+    size_type before = lsize;
+#endif
+	if (input_size == 0) return 0;
+
+    // buffer size is larger of 2x insert_lookahead and 2x hash batch_size.
+    const size_t lookahead2 = static_cast<size_t>(INSERT_LOOKAHEAD) << 1;
+
+    // up to 512 x 4 (4 bytes for offsets.  note we may need to copy the keys too...
+    const size_t batch_size =
+    		(::std::is_same<key_type, KV>::value) ? 1024 : 512; //InternalHash::batch_size * lookahead2;
+
+    // intermediate storage for hash values.
+    using HT = decltype(hash_mod2.operator()(::std::declval<KV>()));
+    HT* hashes = ::utils::mem::aligned_alloc<HT>(batch_size);
+
+    if (max_load < batch_size)  {
+    	reserve(batch_size);
+
+#if defined(REPROBE_STAT)
+      std::cout << "rehashed.  size = " << buckets << std::endl;
+      if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type))  > 0) {
+        std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+      } else {
+        std::cout << "STATUS: container alignment on value boundary" << std::endl;
+      }
+#endif
+    }
+
+    size_t j;
+
+    // compute the first part of the hashes
+    size_t max_prefetch = std::min(input_size, lookahead2);
+    //compute hash and prefetch a little.
+    hash_mod2(input, max_prefetch, hashes);
+    for (j = 0; j < max_prefetch; ++j) {
+      // prefetch the info_container entry for ii.
+      KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + hashes[j]), _MM_HINT_T0);
+      // prefetch container as well - would be NEAR but may not be exact.
+      KH_PREFETCH((const char *)(container.data() + hashes[j]), _MM_HINT_T0);
+    }
+
+    size_t i = 0, k, kmax;   // j is index fo hashes array
+    size_t max = input_size - (input_size & (batch_size - 1));
+    size_t insert_bid;
+    size_t bid, bid1;
+
+    value_type val;
+
+    // do blocks of batch_size
+    for (; i < max; ) {
+    	// now hash a bunch
+    	hash_mod2(input + i + j, batch_size - j, hashes + j);
+
+    	// and loop and insert.
+    	for (k = 0, kmax = batch_size - lookahead2; k < kmax; ++k, ++i) {
+
+    		// process current
+    		val = get_tuple(input[i], default_val);
+            insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            if (insert_bid == insert_failed) {
+            	// start over from current position
+            	free(hashes);
+            	return i;
+//              rehash(buckets << 1);  // resize.
+//              insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            }
+            if (missing(insert_bid))
+              ++lsize;
+
+            // intention is to write, so should prefetch for empty entries too.
+            // prefetch container
+            bid = hashes[k + INSERT_LOOKAHEAD];
+            bid1 = bid + 1;
+            bid += get_offset(info_container[bid]);
+            bid1 += get_offset(info_container[bid1]);
+
+            KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
+            // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
+            // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
+            if (bid1 > (bid + value_per_cacheline))
+              KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+
+            // prefetch info container.
+            bid = hashes[k + lookahead2];
+            KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + bid), _MM_HINT_T0);
+    	}
+
+    	// exhasuted indices for prefetching.  fetch some more.
+        hash_mod2(input + i + lookahead2, lookahead2, hashes);
+        for (j = 0; j < lookahead2; ++j) {
+          // prefetch the info_container entry for ii.
+          KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + hashes[j]), _MM_HINT_T0);
+          // prefetch container as well - would be NEAR but may not be exact.
+          KH_PREFETCH((const char *)(container.data() + hashes[j]), _MM_HINT_T0);
+        }
+
+    	// now finish the current section with limited prefetching.
+    	// and loop and insert.
+    	for (kmax = batch_size - INSERT_LOOKAHEAD; k < kmax; ++k, ++i) {
+
+    		// process current
+    		val = get_tuple(input[i], default_val);
+            insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            if (insert_bid == insert_failed) {
+            	// start over from current position
+            	free(hashes);
+            	return i;
+//              rehash(buckets << 1);  // resize.
+//              insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            }
+            if (missing(insert_bid))
+              ++lsize;
+
+            // intention is to write, so should prefetch for empty entries too.
+            // prefetch container
+            bid = hashes[k + INSERT_LOOKAHEAD];
+            bid1 = bid + 1;
+            bid += get_offset(info_container[bid]);
+            bid1 += get_offset(info_container[bid1]);
+
+            KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
+            // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
+            // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
+            if (bid1 > (bid + value_per_cacheline))
+              KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+    	}
+
+    	for (; k < batch_size; ++k, ++i) {
+    		// process current
+    		val = get_tuple(input[i], default_val);
+            insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            if (insert_bid == insert_failed) {
+            	// start over from current position
+            	free(hashes);
+            	return i;
+//              rehash(buckets << 1);  // resize.
+//              insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            }
+            if (missing(insert_bid))
+              ++lsize;
+    	}
+
+
+        // first check if we need to resize.  within 1% of
+        if (static_cast<size_t>(static_cast<double>(lsize) * 1.01) >= max_load) {
+        	// start over from current position
+        	free(hashes);
+        	return i;
+//          rehash(buckets << 1);
+
+//    #if defined(REPROBE_STAT)
+//          std::cout << "rehashed.  size = " << buckets << std::endl;
+//          if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type))  > 0) {
+//            std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//          } else {
+//            std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//          }
+//    #endif
+        }
+
+    }
+
+    // do the remainder (less than blocks of batch_size.
+    	// has the remainder
+    	kmax = ((input_size - max) > j) ? (input_size - max) - j : 0;
+    	if (kmax > 0)
+    		hash_mod2(input + i + j, kmax, hashes + j);
+
+    	// and loop and insert.
+    	for (k = 0; k < kmax; ++k, ++i) {
+
+    		// process current
+    		val = get_tuple(input[i], default_val);
+            insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            if (insert_bid == insert_failed) {
+            	// start over from current position
+            	free(hashes);
+            	return i;
+
+//              rehash(buckets << 1);  // resize.
+//              insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            }
+            if (missing(insert_bid))
+              ++lsize;
+
+            // intention is to write, so should prefetch for empty entries too.
+            // prefetch container
+            bid = hashes[k + INSERT_LOOKAHEAD];
+            bid1 = bid + 1;
+            bid += get_offset(info_container[bid]);
+            bid1 += get_offset(info_container[bid1]);
+
+            KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
+            // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
+            // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
+            if (bid1 > (bid + value_per_cacheline))
+              KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+
+            // prefetch info container.
+            bid = hashes[k + lookahead2];
+            KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + bid), _MM_HINT_T0);
+    	}
+
+    	// now finish the current section with limited prefetching.
+    	// and loop and insert.
+    	kmax = ((input_size - max) > INSERT_LOOKAHEAD) ? ((input_size - max) - INSERT_LOOKAHEAD) : 0;
+    	for (; k < kmax; ++k, ++i) {
+
+    		// process current
+    		val = get_tuple(input[i], default_val);
+            insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            if (insert_bid == insert_failed) {
+            	// start over from current position
+            	free(hashes);
+            	return i;
+//              rehash(buckets << 1);  // resize.
+//              insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            }
+            if (missing(insert_bid))
+              ++lsize;
+
+            // intention is to write, so should prefetch for empty entries too.
+            // prefetch container
+            bid = hashes[k + INSERT_LOOKAHEAD];
+            bid1 = bid + 1;
+            bid += get_offset(info_container[bid]);
+            bid1 += get_offset(info_container[bid1]);
+
+            KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
+            // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
+            // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
+            if (bid1 > (bid + value_per_cacheline))
+              KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+    	}
+
+    	kmax = (input_size - max);
+    	for (; k < kmax; ++k, ++i) {
+    		// process current
+    		val = get_tuple(input[i], default_val);
+            insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            if (insert_bid == insert_failed) {
+            	// start over from current position
+            	free(hashes);
+            	return i;
+
+//              rehash(buckets << 1);  // resize.
+//              insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+            }
+            if (missing(insert_bid))
+              ++lsize;
+    	}
+
+    	free(hashes);
+
+    	return input_size;
+    }
+
+
+
 #if defined(REPROBE_STAT)
 	void reset_reprobe_stats() const {
 		this->reprobes = 0;
@@ -1922,35 +2197,50 @@ protected:
 		size_t i = 0, j = 0;
 
 		IT it = begin;
-		for (; i < max; i += hash.batch_size) {
-			for (j = 0; j < hash.batch_size; ++j, ++it) {
-				keys[j] = (*it).first;
+		if (estimate) {
+			for (; i < max; i += hash.batch_size) {
+				for (j = 0; j < hash.batch_size; ++j, ++it) {
+					keys[j] = (*it).first;
+				}
+
+				// compute hash
+				hash(keys, hash.batch_size, hash_vals + i);
+				this->hll.update_via_hashval(hash_vals + i, hash.batch_size);
 			}
 
-		  // compute hash	  
-		  hash(keys, hash.batch_size, hash_vals + i);
-		  if (estimate) this->hll.update_via_hashval(hash_vals + i, hash.batch_size);
+			for (; i < input_size; ++i, ++it) {
+				hash_vals[i] = hash((*it).first);
+				this->hll.update_via_hashval(hash_vals[i]);
+			}
+
+			// estimate the number of unique entries in input.
+			//#if defined(REPROBE_STAT)
+			std::cout << " batch estimate cardinality as " << this->hll.estimate() << std::endl;
+			//#endif
+			// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
+			this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));   // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
+		} else {
+			for (; i < max; i += hash.batch_size) {
+				for (j = 0; j < hash.batch_size; ++j, ++it) {
+					keys[j] = (*it).first;
+				}
+				// compute hash
+				hash(keys, hash.batch_size, hash_vals + i);
+			}
+
+			for (; i < input_size; ++i, ++it) {
+				hash_vals[i] = hash((*it).first);
+			}
 		}
 		free(keys);
-
-
-		for (; i < input_size; ++i, ++it) {
-			hash_vals[i] = hash((*it).first);
-			if (estimate) this->hll.update_via_hashval(hash_vals[i]);
-		}
-
-		// estimate the number of unique entries in input.
-//#if defined(REPROBE_STAT)
-		if (estimate) std::cout << " batch estimate cardinality as " << this->hll.estimate() << std::endl;
-//#endif
-		// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
-		if (estimate) this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));   // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
-
 		// now try to insert.  hashing done already.  also, no need to hash vals again after rehash().
 		size_t finished = 0;
 		do {
 		  finished += insert_batch_by_hash(begin + finished, hash_vals + finished, input_size - finished);
-		  if (finished < input_size)  rehash(buckets << 1);  // failed to completely insert (overflow, or max_load).  need to rehash.
+	        if (finished < input_size)  {
+	        	std::cout << "rehashing to "  << (buckets <<1) << std::endl;
+	        	rehash(buckets << 1);  // failed to completely insert (overflow, or max_load).  need to rehash.
+	        }
 		} while (finished < input_size);
 
 		// finally, update the hyperloglog estimator.  just swap.
@@ -2016,7 +2306,10 @@ protected:
 	      size_t finished = 0;
 	      do {
 	        finished += insert_batch_by_hash(local_start + finished, hash_vals + finished, input_size - finished);
-	        if (finished < input_size)  rehash(buckets << 1);  // failed to completely insert (overflow, or max_load).  need to rehash.
+	        if (finished < input_size)  {
+	        	std::cout << "rehashing to "  << (buckets <<1) << std::endl;
+	        	rehash(buckets << 1);  // failed to completely insert (overflow, or max_load).  need to rehash.
+	        }
 	      } while (finished < input_size);
 
 		// finally, update the hyperloglog estimator.  just swap.
@@ -2057,24 +2350,32 @@ protected:
 
 		size_t i = 0;
 		IT it = begin;
-		for (; i < input_size; ++i, ++it) {
-			hash_vals[i] = hash((*it).first);
-      if (estimate) this->hll.update_via_hashval(hash_vals[i]);
-    }
+		if (estimate) {
+			for (; i < input_size; ++i, ++it) {
+				hash_vals[i] = hash((*it).first);
+				this->hll.update_via_hashval(hash_vals[i]);
+			}
 
-    // estimate the number of unique entries in input.
-//#if defined(REPROBE_STAT)
-    if (estimate) std::cout << " estimate cardinality as " << this->hll.estimate() << std::endl;
-//#endif
-    // assume one element per bucket as ideal, resize now.  should not resize if don't need to.
-    if (estimate) this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));
-    // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
-
+			// estimate the number of unique entries in input.
+			//#if defined(REPROBE_STAT)
+			std::cout << " estimate cardinality as " << this->hll.estimate() << std::endl;
+			//#endif
+			// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
+			this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));
+			// this updates the bucket counts also.  overestimate by 10 percent just to be sure.
+		} else {
+			for (; i < input_size; ++i, ++it) {
+				hash_vals[i] = hash((*it).first);
+			}
+		}
 		// now try to insert.  hashing done already.
     size_t finished = 0;
     do {
       finished += insert_batch_by_hash(begin + finished, hash_vals + finished, input_size - finished);
-      if (finished < input_size)  rehash(buckets << 1);  // failed to completely insert (overflow, or max_load).  need to rehash.
+      if (finished < input_size)  {
+      	std::cout << "rehashing to "  << (buckets <<1) << std::endl;
+      	rehash(buckets << 1);  // failed to completely insert (overflow, or max_load).  need to rehash.
+      }
     } while (finished < input_size);
 
 		// finally, update the hyperloglog estimator.  just swap.
@@ -2114,21 +2415,26 @@ protected:
 
 		size_t i = 0;
 		IT it = begin;
-		for (; i < input_size; ++i, ++it) {
-			hash_vals[i] = hash(*it);
 
-			if (estimate) this->hll.update_via_hashval(hash_vals[i]);
+		if (estimate) {
+			for (; i < input_size; ++i, ++it) {
+				hash_vals[i] = hash(*it);
+				this->hll.update_via_hashval(hash_vals[i]);
+			}
+
+			// estimate the number of unique entries in input.
+	//#if defined(REPROBE_STAT)
+			std::cout << " estimate cardinality as " << this->hll.estimate() << std::endl;
+	//#endif
+
+			// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
+			this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));
+			// this updates the bucket counts also.  overestimate by 10 percent just to be sure.
+		} else {
+			for (; i < input_size; ++i, ++it) {
+				hash_vals[i] = hash(*it);
+			}
 		}
-
-		// estimate the number of unique entries in input.
-//#if defined(REPROBE_STAT)
-		if (estimate) std::cout << " estimate cardinality as " << this->hll.estimate() << std::endl;
-//#endif
-
-		// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
-		if (estimate) this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));
-		// this updates the bucket counts also.  overestimate by 10 percent just to be sure.
-
       auto converter = [&default_val](key_type const & x) {
         return ::std::make_pair(x, default_val);
       };
@@ -2139,7 +2445,11 @@ protected:
       size_t finished = 0;
       do {
         finished += insert_batch_by_hash(local_start + finished, hash_vals + finished, input_size - finished);
-        if (finished < input_size)  rehash(buckets << 1);  // failed to completely insert (overflow, or max_load).  need to rehash.
+        if (finished < input_size)  {
+        	std::cout << "rehashing to "  << (buckets <<1) << std::endl;
+        	rehash(buckets << 1);  // failed to completely insert (overflow, or max_load).  need to rehash.
+        }
+
       } while (finished < input_size);
 
 		// finally, update the hyperloglog estimator.  just swap.
@@ -2165,23 +2475,79 @@ public:
 	void insert(IT begin, IT end, mapped_type const & default_val) {
 		insert_impl<true>(begin, end, default_val, 0);
 	}
-	// insert without estimates.  follow same logic as one with estimate, because we might still resize and therefore calculating
-	// the hash is better than calculating the positions.
-  template <typename IT,
-    typename std::enable_if<::std::is_constructible<value_type,
-    typename ::std::iterator_traits<IT>::value_type>::value,
-    int>::type = 1>
-  void insert_no_estimate(IT begin, IT end) {
-    insert_impl<false>(begin, end, 0);
-  }
-  template <typename IT,
-    typename std::enable_if<::std::is_constructible<key_type,
-    typename ::std::iterator_traits<IT>::value_type>::value,
-    int>::type = 1>
-  void insert_no_estimate(IT begin, IT end, mapped_type const & default_val) {
-    insert_impl<false>(begin, end, default_val, 0);
-  }
+	// insert without estimates.
+	// when rehash is needed, the insertion is restarted.
+	// uses insert_batch and calculate the hashes internally using hash_mod2.
+	//   insert_batch is faster because the hashes can fit in cache..
+	//   restart because the cache is invalidated anyways.
+  void insert_no_estimate(key_type const * begin, key_type const * end, mapped_type const & default_val) {
+    //insert_impl<false>(begin, end, default_val, 0);
 
+#if defined(REPROBE_STAT)
+		std::cout << "INSERT ITER" << std::endl;
+
+		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+		} else {
+			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+		}
+
+		reset_reprobe_stats();
+		size_type before = lsize;
+#endif
+
+		size_t input_size = std::distance(begin, end);
+
+		if (input_size == 0) return;
+
+      size_t finished = 0;
+      do {
+        finished += insert_batch(begin + finished, input_size - finished, default_val);
+        if (finished < input_size)  {
+        	std::cout << "rehashing to "  << (buckets <<1) << std::endl;
+        	rehash(buckets << 1);  // failed to completely insert (overflow, or max_load).  need to rehash.
+        }
+      } while (finished < input_size);
+
+		// finally, update the hyperloglog estimator.  just swap.
+#if defined(REPROBE_STAT)
+		print_reprobe_stats("INSERT ITER", input_size, (lsize - before));
+#endif
+  }
+  void insert_no_estimate(value_type const * begin, value_type const * end) {
+    //insert_impl<false>(begin, end, default_val, 0);
+
+#if defined(REPROBE_STAT)
+		std::cout << "INSERT ITER" << std::endl;
+
+		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+		} else {
+			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+		}
+
+		reset_reprobe_stats();
+		size_type before = lsize;
+#endif
+
+		size_t input_size = std::distance(begin, end);
+
+		if (input_size == 0) return;
+
+      size_t finished = 0;
+      do {
+        finished += insert_batch(begin + finished, input_size - finished, mapped_type());
+        if (finished < input_size)  {
+        	std::cout << "rehashing to "  << (buckets <<1) << std::endl;
+        	rehash(buckets << 1);  // failed to completely insert (overflow, or max_load).  need to rehash.
+        }
+      } while (finished < input_size);
+
+		// finally, update the hyperloglog estimator.  just swap.
+#if defined(REPROBE_STAT)
+		print_reprobe_stats("INSERT ITER", input_size, (lsize - before));
+#endif
+  }
 
 	/// insert with estimated size to avoid resizing.  uses more memory because of the hash?
 	// similar to insert with iterator in structure.  prefetch stuff is delegated to insert_with_hint_no_resize.
@@ -2200,6 +2566,13 @@ public:
 	}
 
 protected:
+	inline value_type const & get_tuple(key_type const & key, mapped_type const & default_val = mapped_type()) const {
+		return ::std::make_pair(key, default_val);
+	}
+	inline value_type const & get_tuple(value_type const & val, mapped_type const & default_val = mapped_type()) const {
+		return val;
+	}
+
 	template <typename Iter, typename std::enable_if<
 	std::is_constructible<
 	value_type,

@@ -2370,6 +2370,9 @@ namespace fsc {
       using POSTTRANS_T = PostTransform<HASH_VAL_TYPE>;
 
       // need some buffers
+      // use local static array instead of dynamic ones so when
+      // default copy construction/assignment happens, 
+      // we are not copying pointers that later gets freed by multiple objects.
       mutable Key key_buf[batch_size] __attribute__((aligned(64)));
       mutable PRETRANS_VAL_TYPE trans_buf[batch_size] __attribute__((aligned(64)));
       mutable HASH_VAL_TYPE hash_buf[batch_size] __attribute__((aligned(64)));

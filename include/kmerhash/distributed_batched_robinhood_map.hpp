@@ -613,7 +613,7 @@ namespace dsc  // distributed std container
 //      template <typename K>
 //      using TransHash = typename MapParams<K>::template StoreTransFuncTemplate<K>;
 
-    // own hyperloglog definition.  separate from the local container's.
+    // own hyperloglog definition.  separate from the local container's.  this estimates using the transformed distribute hash.
     hyperloglog64<Key, InternalHash, 12> hll;
 
 
@@ -625,11 +625,11 @@ namespace dsc  // distributed std container
 
     template <typename K>
     using StoreTransHash = ::fsc::hash::TransformedHash<K, StoreHash, StoreTrans, ::bliss::transform::identity>;
-
     template <typename K>
     using StoreTransEqual = typename MapParams<K>::template StoreTransEqualTemplate<K>;
 
     public:
+    	// NOTE: if there is a hyperloglog estimator in local container, it is usign the transformed storage hash.
       using local_container_type = Container<Key, T,
     		  StoreTransHash,
     		  StoreTransEqual,
