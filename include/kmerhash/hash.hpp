@@ -2095,7 +2095,7 @@ namespace fsc {
         static constexpr size_t blocks = sizeof(T) >> 3;   // divide by 8
         static constexpr size_t rem = sizeof(T) & 0x7;  // remainder.
         static constexpr size_t offset = (sizeof(T) >> 3) << 3;
-        uint32_t temp[4];
+        mutable uint32_t temp[4];
 
         uint32_t hash1(const T & key) const {
 
@@ -2370,11 +2370,12 @@ namespace fsc {
       using POSTTRANS_T = PostTransform<HASH_VAL_TYPE>;
 
       // need some buffers
-      mutable Key * key_buf;
-      mutable PRETRANS_VAL_TYPE * trans_buf;
-      mutable HASH_VAL_TYPE * hash_buf;
+      mutable Key key_buf[batch_size] __attribute__((aligned(64)));
+      mutable PRETRANS_VAL_TYPE trans_buf[batch_size] __attribute__((aligned(64)));
+      mutable HASH_VAL_TYPE hash_buf[batch_size] __attribute__((aligned(64)));
 
   public:
+      // potentially runs into double free issue when the pointers are copied.
       PRETRANS_T trans;
       HASH_T h;
       POSTTRANS_T posttrans;
@@ -2383,17 +2384,17 @@ namespace fsc {
                       PRETRANS_T const & pre_trans = PRETRANS_T(),
                       POSTTRANS_T const & post_trans = POSTTRANS_T()) :
 				//batch_size(lcm(lcm(pretrans_batch_size, hash_batch_size), postrans_batch_size)),
-				key_buf(nullptr), trans_buf(nullptr), hash_buf(nullptr),
+//				key_buf(nullptr), trans_buf(nullptr), hash_buf(nullptr),
 				trans(pre_trans), h(_hash), posttrans(post_trans) {
-    	  key_buf = ::utils::mem::aligned_alloc<Key>(batch_size);
-    	  trans_buf = ::utils::mem::aligned_alloc<PRETRANS_VAL_TYPE>(batch_size);
-    	  hash_buf = ::utils::mem::aligned_alloc<HASH_VAL_TYPE>(batch_size);
+//    	  key_buf = ::utils::mem::aligned_alloc<Key>(batch_size);
+//    	  trans_buf = ::utils::mem::aligned_alloc<PRETRANS_VAL_TYPE>(batch_size);
+//    	  hash_buf = ::utils::mem::aligned_alloc<HASH_VAL_TYPE>(batch_size);
       };
 
       ~TransformedHash() {
-    	  free(key_buf);
-    	  free(trans_buf);
-    	  free(hash_buf);
+//    	  free(key_buf);
+//    	  free(trans_buf);
+//    	  free(hash_buf);
       }
 
       // conditionally defined, there should be just 1 defined methods after compiler resolves all this.
@@ -2469,13 +2470,15 @@ namespace fsc {
       -> decltype(::std::declval<HT>()(k, count, out), size_t())
       {
         //std::cout << "op 3.1" << std::endl;
-    	  size_t max = count - (count & (batch_size - 1) );
-    	  size_t i = 0;
-    	  for (; i < max; i += batch_size ) {
-        	  h(k+i, batch_size, out+i);
-    	  }
+//    	  size_t max = count - (count & (batch_size - 1) );
+//    	  size_t i = 0;
+//    	  for (; i < max; i += batch_size ) {
+//        	  h(k+i, batch_size, out+i);
+//    	  }
+    	  h(k, count, out);
+    	  return count;
     	  // no last part
-    	  return max;
+    	  //return max;
       }
       template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
     		  typename ::std::enable_if<
@@ -2483,8 +2486,9 @@ namespace fsc {
 				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
 					int>::type = 1>
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, int) const
-      -> decltype(::std::declval<HT>()(*k), size_t()) {
+      -> decltype(::std::declval<HT>()(::std::declval<Key>()), size_t()) {
         //std::cout << "op 3.2" << std::endl;
+    	  // no batched part.
     	  return 0;
       }
       // pretrans is not identity, post is identity.
@@ -2550,9 +2554,9 @@ namespace fsc {
 				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
 					int>::type = 1>
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, long, int) const
-      -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(*trans_buf), size_t()) {
+      -> decltype(::std::declval<PrT>()(::std::declval<Key>()), ::std::declval<HT>()(::std::declval<PRETRANS_VAL_TYPE>()), size_t()) {
         //std::cout << "op 3.6" << std::endl;
-
+    	  // no batched part.
     	  return 0;
       }
       // posttrans is not identity, post is identity.
@@ -2619,10 +2623,10 @@ namespace fsc {
 				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
 					int>::type = 1>
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, long) const
-      -> decltype(::std::declval<HT>()(*k), ::std::declval<PoT>()(*hash_buf), size_t()) {
+      -> decltype(::std::declval<HT>()(::std::declval<Key>()), ::std::declval<PoT>()(::std::declval<HASH_VAL_TYPE>()), size_t()) {
 
         //std::cout << "op 3.10" << std::endl;
-
+    	  // no batched part.
     	  return 0;
       }
       // ==== none are identity
@@ -2772,10 +2776,12 @@ namespace fsc {
 				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
 					int>::type = 1>
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, long, long) const
-      -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(*trans_buf), ::std::declval<PoT>()(*hash_buf), size_t()) {
+      -> decltype(::std::declval<PrT>()(::std::declval<Key>()),
+    		  ::std::declval<HT>()(::std::declval<PRETRANS_VAL_TYPE>()),
+    		  ::std::declval<PoT>()(::std::declval<HASH_VAL_TYPE>()), size_t()) {
 
         //std::cout << "op 3.18" << std::endl;
-
+    	  // no batched part.
     	 return 0;
       }
 
