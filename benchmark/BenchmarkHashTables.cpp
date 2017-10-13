@@ -127,9 +127,8 @@
 #elif (pStoreHash == FARM)
   template <typename KM>
   using StoreHash = fsc::hash::farm<KM>;
-#else //if (pStoreHash == FARM)
-  template <typename KM>
-  using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
+//  template <typename KM>
+//  using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
 #endif
 
 
@@ -905,7 +904,7 @@ void benchmark_hashmap_radixsort(std::string name, std::vector<::std::pair<Kmer,
     BL_BENCH_END(map, "generate query", input.size());
 
 
-    ::fsc::hashmap_radixsort<Kmer, StoreHash, ::equal_to > map;
+    ::fsc::hashmap_radixsort<Kmer, int32_t, StoreHash, ::equal_to > map;
     BL_BENCH_START(map);
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_ESTIMATE)

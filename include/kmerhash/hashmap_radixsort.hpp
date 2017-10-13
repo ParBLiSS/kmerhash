@@ -17,21 +17,27 @@
 //#define min(x,y) (((x) < (y)) ? (x):(y))
 
 namespace fsc {
-template <class Key, template <typename> class Hash = ::std::hash,
+template <class Key, class V = int32_t, template <typename> class Hash = ::std::hash,
           template <typename> class Equal = ::std::equal_to
          >
 class hashmap_radixsort {
 
+    static_assert(::std::is_same<int32_t, V>::value, "currently only support value of type int32_t");
+
 public:
 
-//    using key_type              = Key;
-//    using hasher                = Hash;
-//    using key_equal             = Equal;
+    using key_type              = Key;
+    using mapped_type           = V;
+    using value_type            = ::std::pair<const Key, V>;
+    using hasher                = Hash<Key>;
+    using key_equal             = Equal<Key>;
+    using size_type             = size_t;
+    using difference_type       = ptrdiff_t;
 
     typedef struct elem
     {
         Key key;
-        int32_t val;
+        V val;
         int32_t bucketId;
     }HashElement;
 
@@ -49,7 +55,7 @@ public:
     int32_t overflowBufSize;
     int32_t curOverflowBufId;
     int32_t sortBufSize;
-    int32_t noValue;
+    V noValue;
     int8_t  coherence;
     int32_t seed;
     int32_t totalKeyCount;
@@ -338,7 +344,7 @@ public:
     public:
     hashmap_radixsort(uint32_t _numBuckets = 1048576,
             uint32_t _binSize = 1024,
-            int32_t _noValue = 0) :
+            V _noValue = 0) :
             	numBuckets(next_power_of_2(_numBuckets)),
 				bucketMask(numBuckets - 1),
 				hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(bucketMask))
@@ -374,6 +380,8 @@ public:
 		_mm_free(countSortBuf);
 		_mm_free(info_container);
 	}
+
+	void set_novalue(V _noValue) { noValue = _noValue; }
 
 
 	void resize(uint32_t _newNumBuckets)
