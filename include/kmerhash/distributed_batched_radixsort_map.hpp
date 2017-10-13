@@ -2246,6 +2246,26 @@ if (measure_mode == MEASURE_A2A)
     		  return erase_p(input, sorted_input, pred);
     	  }
       }
+      template <typename Predicate = ::bliss::filter::TruePredicate>
+      size_t erase_no_finish(std::vector<Key>& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
+
+          BL_BENCH_INIT(erase);
+
+          size_t res = 0;
+    	  if (this->comm.size() == 1) {
+    		  res =  erase_1(input, sorted_input, pred);
+    	  } else {
+    		  res =  erase_p(input, sorted_input, pred);
+    	  }
+
+    	  BL_BENCH_START(erase);
+          this->c.finalize_erase();
+          BL_BENCH_END(erase, "finalize erase", 0);
+
+          BL_BENCH_REPORT_MPI_NAMED(erase, "hashmap:finalize_erase", this->comm);
+
+          return res;
+      }
 
 
       void finalize_erase() {
