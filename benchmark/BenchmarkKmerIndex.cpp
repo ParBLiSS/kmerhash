@@ -114,7 +114,7 @@ static int measure_mode = MEASURE_DISABLED;
 #define MURMUR32 26
 #define MURMUR32sse 27
 #define MURMUR32avx 28
-#define CRC32c 29
+#define CRC32C 29
 
 #define POS 31
 #define POSQUAL 32
