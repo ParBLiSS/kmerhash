@@ -121,17 +121,18 @@ static int measure_mode = MEASURE_DISABLED;
 
 #define SORTED 41
 #define ORDERED 42
-#define VEC 43
-#define COMPACTVEC 44
-#define HASHEDVEC 45
+//#define VEC 43
+//#define COMPACTVEC 44
+//#define HASHEDVEC 45
 #define UNORDERED 46
 #define DENSEHASH 47
 #define ROBINHOOD 48
 #define BROBINHOOD 49
+#define RADIXSORT 50
 
-#define SINGLE 51
-#define CANONICAL 52
-#define BIMOLECULE 53
+#define SINGLE 61
+#define CANONICAL 62
+#define BIMOLECULE 63
 
 
 
@@ -193,7 +194,7 @@ using CountType = uint32_t;
 #elif (pDistTrans == XOR)
 	template <typename KM>
 	using DistTrans = bliss::kmer::transform::xor_rev_comp<KM>;
-#else //if (pDistTrans == IDEN)
+#elif (pDistTrans == IDEN) //if (pDistTrans == IDEN)
 	template <typename KM>
 	using DistTrans = bliss::transform::identity<KM>;
 #endif
@@ -214,7 +215,7 @@ using CountType = uint32_t;
 #elif (pDistHash == MURMUR32sse)
   template <typename KM>
   using DistHash = ::fsc::hash::murmur3sse32<KM>;
-#elif (pDistHash == MURMUR3avx)
+#elif (pDistHash == MURMUR32avx)
   template <typename KM>
   using DistHash = ::fsc::hash::murmur3avx32<KM>;
 #elif (pDistHash == CRC32C)
@@ -223,29 +224,29 @@ using CountType = uint32_t;
 #elif (pDistHash == FARM32)
 	template <typename KM>
 	using DistHash = ::fsc::hash::farm32<KM>;
-#else // if (pDistHash == FARM)
-	template <typename KM>
-	using DistHash = bliss::kmer::hash::farm<KM, true>;
+#elif (pDistHash == FARM)
+  template <typename KM>
+  using DistHash = bliss::kmer::hash::farm<KM, true>;
 #endif
 
 
 // storage hash type
 #if (pStoreHash == STD)
 	template <typename KM>
-	using StoreHash = bliss::kmer::hash::cpp_std<KM, true>;
+	using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
 #elif (pStoreHash == IDEN)
 	template <typename KM>
-	using StoreHash = bliss::kmer::hash::identity<KM, true>;
+	using StoreHash = bliss::kmer::hash::identity<KM, false>;
 #elif (pStoreHash == MURMUR)
 	template <typename KM>
-	using StoreHash = bliss::kmer::hash::murmur<KM, true>;
+	using StoreHash = bliss::kmer::hash::murmur<KM, false>;
 #elif (pStoreHash == MURMUR32)
 	template <typename KM>
 	using StoreHash = ::fsc::hash::murmur32<KM>;
 #elif (pStoreHash == MURMUR32sse)
   template <typename KM>
   using StoreHash = ::fsc::hash::murmur3sse32<KM>;
-#elif (pStoreHash == MURMUR3avx)
+#elif (pStoreHash == MURMUR32avx)
   template <typename KM>
   using StoreHash = ::fsc::hash::murmur3avx32<KM>;
 #elif (pStoreHash == CRC32C)
@@ -254,9 +255,9 @@ using CountType = uint32_t;
 #elif (pStoreHash == FARM32)
 	template <typename KM>
 	using StoreHash = ::fsc::hash::farm32<KM>;
-#else // if (pStoreHash == FARM)
-	template <typename KM>
-	using StoreHash = bliss::kmer::hash::farm<KM, true>;
+#elif (pStoreHash == FARM)
+  template <typename KM>
+  using StoreHash = bliss::kmer::hash::farm<KM, false>;
 #endif
 
 
@@ -356,6 +357,9 @@ using CountType = uint32_t;
     #elif (pMAP == BROBINHOOD)
       using MapType = ::dsc::counting_batched_robinhood_map<
           KmerType, ValType, MapParams>;
+#elif (pMAP == RADIXSORT)
+  using MapType = ::dsc::counting_batched_radixsort_map<
+      KmerType, ValType, MapParams>;
     #else
       using MapType = ::dsc::counting_unordered_map<
         KmerType, ValType, MapParams>;
