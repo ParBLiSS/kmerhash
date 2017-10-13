@@ -83,6 +83,7 @@ static int measure_mode = MEASURE_DISABLED;
 #include "kmerhash/hash.hpp"
 #include "kmerhash/distributed_robinhood_map.hpp"
 #include "kmerhash/distributed_batched_robinhood_map.hpp"
+#include "kmerhash/distributed_batched_radixsort_map.hpp"
 
 
 #include "index/kmer_index.hpp"
@@ -357,10 +358,10 @@ using CountType = uint32_t;
     #elif (pMAP == BROBINHOOD)
       using MapType = ::dsc::counting_batched_robinhood_map<
           KmerType, ValType, MapParams>;
-#elif (pMAP == RADIXSORT)
-  using MapType = ::dsc::counting_batched_radixsort_map<
-      KmerType, ValType, MapParams>;
-    #else
+	#elif (pMAP == RADIXSORT)
+      using MapType = ::dsc::counting_batched_radixsort_map<
+    		  KmerType, ValType, MapParams>;
+    #elif (pMAP == UNORDERED)
       using MapType = ::dsc::counting_unordered_map<
         KmerType, ValType, MapParams>;
     #endif
@@ -387,6 +388,7 @@ using CountType = uint32_t;
 #else
 	using IndexType = bliss::index::kmer::CountIndex2<MapType>;
 #endif
+
 #endif
 
 

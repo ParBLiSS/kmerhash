@@ -62,7 +62,7 @@ if (BUILD_BENCHMARKS)
 			add_dist_hashmap_target(testKmerIndex ${map} ${hash} ${hash} KH_DUMMY)
 		endforeach(hash)
 	endforeach(map)
-	foreach(map BROBINHOOD)
+	foreach(map BROBINHOOD RADIXSORT)
 		foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
 			add_dist_hashmap_target(testKmerIndex ${map} ${hash} ${hash} KH_DUMMY)
 		endforeach(hash)
@@ -70,14 +70,14 @@ if (BUILD_BENCHMARKS)
 	
 	
 	# lz4 distributed benchmarks.
-	foreach(map BROBINHOOD)
+	foreach(map BROBINHOOD RADIXSORT)
 		foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
 			add_dist_hashmap_target(testLZ4KmerIndex ${map} ${hash} ${hash} ENABLE_LZ4_RESULT)
 		endforeach(hash)
 	endforeach(map)
 
 	#overlapped comm and insert/find/count/erase.
-	foreach(map BROBINHOOD)
+	foreach(map BROBINHOOD RADIXSORT)
 		foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
 			add_dist_hashmap_target(overlap-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM)
 		endforeach(hash)
@@ -88,7 +88,7 @@ if (BUILD_BENCHMARKS)
   add_executable(testKmerPairIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
   SET_TARGET_PROPERTIES(testKmerPairIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
      PROPERTIES COMPILE_FLAGS 
-     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=ROBINHOOD_BATCHED -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DINSERT_KMER_COUNT_PAIR")
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=BROBINHOOD -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DINSERT_KMER_COUNT_PAIR")
   target_link_libraries(testKmerPairIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
    ${EXTRA_LIBS})
 if (ENABLE_VTUNE_PROFILING)
@@ -99,7 +99,7 @@ endif(ENABLE_VTUNE_PROFILING)
   add_executable(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
   SET_TARGET_PROPERTIES(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
      PROPERTIES COMPILE_FLAGS 
-     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=ROBINHOOD_BATCHED -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DDUMP_DISTRIBUTED_INPUT")
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=BROBINHOOD -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DDUMP_DISTRIBUTED_INPUT")
   target_link_libraries(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
    ${EXTRA_LIBS})
 if (ENABLE_VTUNE_PROFILING)
@@ -110,7 +110,7 @@ endif(ENABLE_VTUNE_PROFILING)
   add_executable(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
   SET_TARGET_PROPERTIES(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
      PROPERTIES COMPILE_FLAGS 
-     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=ROBINHOOD_BATCHED -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DINSERT_KMER_COUNT_PAIR -DDUMP_DISTRIBUTED_INPUT")
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=BROBINHOOD -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DINSERT_KMER_COUNT_PAIR -DDUMP_DISTRIBUTED_INPUT")
   target_link_libraries(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
    ${EXTRA_LIBS})
 if (ENABLE_VTUNE_PROFILING)
