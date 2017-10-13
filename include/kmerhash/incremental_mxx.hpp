@@ -3393,27 +3393,29 @@ namespace khmxx
       const int ialltoallv_tag = 1773;
 
       // local (step 0) - skip the send recv, just directly process.
-      size_t comm_size = _comm.size();
-      size_t comm_rank = _comm.rank();
-      size_t curr_peer;
+      int comm_size = _comm.size();
+      int comm_rank = _comm.rank();
+      int curr_peer = comm_rank;
 
       mxx::datatype dt = mxx::get_datatype<V>();
       std::vector<MPI_Request> reqs(_comm.size() - 1);
 
-      // copy self data into computing.
-      std::memcpy(computing, &(*(permuted + send_displs[comm_rank])), sizeof(V) * send_counts[comm_rank]);
+      // process self data
+      compute(&(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
+
       bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
-      size_t step;
+      int step;
+
 
       if (is_pow2) {
           for (step = 1; step < comm_size; ++step) {
             //====  first setup send and recv.
 
             // target rank
-		  curr_peer = comm_rank ^ step;
+            curr_peer = comm_rank ^ step;
 
             // issend all, avoids buffering.
-            MPI_Isend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], dt.type(),
+            MPI_Issend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], dt.type(),
             			curr_peer, ialltoallv_tag, _comm, &reqs[step - 1] );
           }
       } else {
@@ -3424,15 +3426,22 @@ namespace khmxx
               curr_peer = (comm_rank + step) % comm_size;
 
             // issend all, avoids buffering.
-            MPI_Isend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], dt.type(),
+            MPI_Issend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], dt.type(),
             			curr_peer, ialltoallv_tag, _comm, &reqs[step - 1] );
           }
 
       }
-      int completed;
+//
+
+//      int prev_peer = comm_rank;
+
+
       // kick start send.
+#if 0
+      int completed;
       MPI_Testall(comm_size - 1, reqs.data(), &completed, MPI_STATUSES_IGNORE);
-//      BL_BENCH_END(idist, "a2av_isend", comm_size);
+#endif
+      //      BL_BENCH_END(idist, "a2av_isend", comm_size);
 
 
 
@@ -3442,11 +3451,64 @@ namespace khmxx
 //      BL_BENCH_LOOP_START(idist, 1);
 //      BL_BENCH_LOOP_START(idist, 2);
 
-      size_t prev_peer = comm_rank;
+      int prev_peer = comm_rank;
       MPI_Request req;
-      size_t total = 0;
+      int step2;
 
-#if 1
+      for (step = 1, step2 = 0; step2 < comm_size; ++step, ++step2) {
+        //====  first setup send and recv.
+//          BL_BENCH_INIT(idist_loop);
+
+        // target rank
+        if ( is_pow2 )  {  // power of 2
+          curr_peer = comm_rank ^ step;
+        } else {
+          curr_peer = (comm_rank + step) % comm_size;
+        }
+
+//        BL_BENCH_LOOP_RESUME(idist, 0);
+//        BL_BENCH_START(idist_loop);
+
+        // send and recv next.  post recv first.
+        if ((step > 0) && (step < comm_size)) {
+        	MPI_Irecv(recving, recv_counts[curr_peer], dt.type(),
+                  curr_peer, ialltoallv_tag, _comm, &req );
+        }
+
+        //        BL_BENCH_LOOP_PAUSE(idist, 0);
+//        BL_BENCH_END(idist_loop, "irecv", curr_peer);
+
+//        BL_BENCH_LOOP_RESUME(idist, 1);
+//        BL_BENCH_START(idist_loop);
+        // process previously received.
+        if ((step2 > 0) && (step2 < comm_size)) {
+        	compute(computing, computing + recv_counts[prev_peer]);
+        }
+
+        // set up next iteration.
+//        BL_BENCH_LOOP_PAUSE(idist, 1);
+//        BL_BENCH_END(idist_loop, "compute", recv_counts[prev_peer]);
+
+//        BL_BENCH_LOOP_RESUME(idist, 2);
+//        BL_BENCH_START(idist_loop);
+        // now wait for irecv from this iteration to complete, in order to continue.
+        if ((step > 0) && (step < comm_size)) {
+        	MPI_Wait(&req, MPI_STATUS_IGNORE);
+        }
+//        BL_BENCH_LOOP_PAUSE(idist, 2);
+//        BL_BENCH_END(idist_loop, "wait", prev_peer);
+
+        ::std::swap(recving, computing);
+
+        prev_peer = curr_peer;
+        // then swap pointer
+
+//        BL_BENCH_REPORT_NAMED(idist_loop, "khmxx:exch_permute_mod local");
+
+      }
+
+
+#if 0
       // current imple
 //      BL_BENCH_START(idist);
       // do remaining...
@@ -3511,7 +3573,7 @@ namespace khmxx
       // last process
 //      BL_BENCH_LOOP_RESUME(idist, 1);
       compute(computing, computing + recv_counts[prev_peer]);
-      total += recv_counts[prev_peer];
+      //total += recv_counts[prev_peer];
 //      BL_BENCH_LOOP_PAUSE(idist, 1);
 
       // wait for all send to finish.
@@ -3519,7 +3581,9 @@ namespace khmxx
 //      BL_BENCH_LOOP_END(idist, 1, "loop_compute", total);
 //      BL_BENCH_LOOP_END(idist, 2, "loop_wait", total	);
 //      BL_BENCH_END(idist, "irecv_compute", total);
-#else
+#endif
+
+#if 0
       // probe based impl  - allows progress when peer is out of order.
       // PERFORMANCE REGRESSION:  nearly 2x slower than above.  "wait" for early iterations, ranks 0-50 out of 64 were over 10x slower than compute (in 2.5s range)
       // note that probe checkes for messages from source ranks in increasing order, from 0 to ...
@@ -3625,256 +3689,218 @@ namespace khmxx
     /// this version requires one-to-one input/output mapping.
     /// uses pairwise exchange.  use issend for sending, and irsend for receive to avoid buffering.
     template <typename IT, typename SIZE, typename OP, typename OT,
-      typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<IT>::iterator_category,
-                                             ::std::random_access_iterator_tag >::value &&
-                                ::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
-                                             ::std::random_access_iterator_tag >::value, int>::type = 1>
-      void ialltoallv_and_query_one_to_one(IT permuted, IT permuted_end,
-                      ::std::vector<SIZE> const & send_counts,
-                       OP compute,
-                       OT result,
-                      ::mxx::comm const &_comm) {
+    typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<IT>::iterator_category,
+    ::std::random_access_iterator_tag >::value &&
+     ::std::is_same<typename ::std::iterator_traits<OT>::iterator_category,
+      ::std::random_access_iterator_tag >::value, int>::type = 1>
+    void ialltoallv_and_query_one_to_one(IT permuted, IT permuted_end,
+                                         ::std::vector<SIZE> const & send_counts,
+                                          OP compute,
+                                          OT result,
+                                          ::mxx::comm const &_comm) {
 
-        BL_BENCH_INIT(idist);
+      BL_BENCH_INIT(idist);
 
-        size_t input_size = std::distance(permuted, permuted_end);
+      size_t input_size = std::distance(permuted, permuted_end);
 
-        assert((send_counts.size() == static_cast<size_t>(_comm.size())) && "send_count size not same as _comm size.");
+      assert((send_counts.size() == static_cast<size_t>(_comm.size())) && "send_count size not same as _comm size.");
 
-        // make sure tehre is something to do.
-        BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
-        bool empty = input_size == 0;
-        empty = mxx::all_of(empty);
-        BL_BENCH_END(idist, "empty", input_size);
+      // make sure tehre is something to do.
+      BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
+      bool empty = input_size == 0;
+      empty = mxx::all_of(empty);
+      BL_BENCH_END(idist, "empty", input_size);
 
-        if (empty) {
-          BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
-          return;
-        }
+      if (empty) {
+        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+        return;
+      }
 
-        // if there is comm size is 1.
-        if (_comm.size() == 1) {
-          BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
-          compute(permuted, permuted_end, result);
-          BL_BENCH_END(idist, "compute_1", input_size);
+      // if there is comm size is 1.
+      if (_comm.size() == 1) {
+        BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
+        compute(permuted, permuted_end, result);
+        BL_BENCH_END(idist, "compute_1", input_size);
 
-          BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
-          return;
-        }
-
-        // get the recv counts.
-        BL_BENCH_COLLECTIVE_START(idist, "a2a_counts", _comm);
-        ::std::vector<SIZE> recv_counts(send_counts.size(), 0);
-        mxx::all2all(send_counts.data(), 1, recv_counts.data(), _comm);
-
-        ::std::vector<size_t> send_displs;
-        send_displs.reserve(send_counts.size() + 1);
-
-        // compute displacement for send and recv, also compute the max buffer size needed
-        SIZE buffer_max = 0;
-        send_displs.emplace_back(0UL);
-        for (int i = 0; i < _comm.size(); ++i) {
-          buffer_max = std::max(buffer_max, recv_counts[i]);
-
-          send_displs.emplace_back(send_displs.back() + send_counts[i]);
-        }
-        BL_BENCH_END(idist, "a2a_counts", buffer_max);
+        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+        return;
+      }
 
 
-        // TODO need to estimate total, else we'd see a lot of growth in the array.
-        // this could be a big problem.
+      // get the recv counts.
+      BL_BENCH_COLLECTIVE_START(idist, "a2a_counts", _comm);
+      ::std::vector<SIZE> recv_counts(send_counts.size(), 0);
+      mxx::all2all(send_counts.data(), 1, recv_counts.data(), _comm);
 
-        // setup the temporary storage.  double buffered.
-        BL_BENCH_COLLECTIVE_START(idist, "a2av_alloc", _comm);
-        using V = typename ::std::iterator_traits<IT>::value_type;
+      ::std::vector<size_t> send_displs;
+      send_displs.reserve(send_counts.size() + 1);
 
-        // allocate recv_compressed
-        V* buffers = nullptr;
-        int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, (buffer_max << 1) * sizeof(V));
-        if (ret) {
-          free(buffers);
-          throw std::length_error("failed to allocate aligned memory");
-        }
-        V* recving = buffers;
-        V* computing = buffers + buffer_max;
+      // compute displacement for send and recv, also compute the max buffer size needed
+      SIZE buffer_max = 0;
+      send_displs.emplace_back(0UL);
+      for (int i = 0; i < _comm.size(); ++i) {
+        buffer_max = std::max(buffer_max, recv_counts[i]);
 
-        using U = typename ::std::iterator_traits<OT>::value_type;
-
-        // allocate recv_compressed
-        U* out_buffers = nullptr;
-        ret = posix_memalign(reinterpret_cast<void **>(&out_buffers), 64, (buffer_max << 1) * sizeof(U));
-        if (ret) {
-          free(out_buffers);
-          throw std::length_error("failed to allocate aligned memory");
-        }
-        U* storing = out_buffers;
-        U* sending = out_buffers + buffer_max;
-
-        BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
+        send_displs.emplace_back(send_displs.back() + send_counts[i]);
+      }
+      BL_BENCH_END(idist, "a2a_counts", buffer_max);
 
 
-
-        // loop and process each processor's assignment.  use isend and irecv.
-        BL_BENCH_COLLECTIVE_START(idist, "a2av_reqs", _comm);
-
-        const int query_tag = 1773;
-        const int resp_tag = 1779;
-
-        // local (step 0) - skip the send recv, just directly process.
-        size_t comm_size = _comm.size();
-        size_t comm_rank = _comm.rank();
-        size_t curr_peer;
-
-        mxx::datatype q_dt = mxx::get_datatype<V>();
-        std::vector<MPI_Request> q_reqs(_comm.size() - 1);
-
-        mxx::datatype r_dt = mxx::get_datatype<U>();
-        std::vector<MPI_Request> r_reqs(_comm.size() - 1);
+      // TODO need to estimate total, else we'd see a lot of growth in the array.
+      // this could be a big problem.
 
 
-        // copy self data into computing.
-        std::memcpy(computing, &(*(permuted + send_displs[comm_rank])), sizeof(V) * send_counts[comm_rank]);
-        bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
-        size_t step;
+      // setup the temporary storage.  double buffered.
+      BL_BENCH_COLLECTIVE_START(idist, "a2av_alloc", _comm);
+      using V = typename ::std::iterator_traits<IT>::value_type;
 
-        for (step = 1; step < comm_size; ++step) {
-          //====  first setup send and recv.
+      // allocate recv_compressed
+      V* buffers = ::utils::mem::aligned_alloc<V>(buffer_max << 1);
+      V* recving = buffers;
+      V* computing = buffers + buffer_max;
 
-          // target rank
-          if ( is_pow2 )  {  // power of 2
-            curr_peer = comm_rank ^ step;
-          } else {
-            curr_peer = (comm_rank + step) % comm_size;
-          }
+      using U = typename ::std::iterator_traits<OT>::value_type;
 
-          // issend all, avoids buffering.
-          MPI_Issend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], q_dt.type(),
-          			curr_peer, query_tag, _comm, &q_reqs[step - 1] );
+      // allocate recv_compressed
+      U* out_buffers = ::utils::mem::aligned_alloc<U>(buffer_max << 1);
+      U* storing = out_buffers;
+      U* sending = out_buffers + buffer_max;
 
-          // irecv all
-          MPI_Irecv(&(*(result + send_displs[curr_peer])), send_counts[curr_peer], r_dt.type(),
-          			curr_peer, resp_tag, _comm, &r_reqs[step - 1] );
-
-        }
-        BL_BENCH_END(idist, "a2av_reqs", comm_size);
+      BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
 
 
+      // loop and process each processor's assignment.  use isend and irecv.
+      BL_BENCH_COLLECTIVE_START(idist, "a2av_reqs", _comm);
 
-        // loop and process each processor's assignment.  use isend and irecv.
-        BL_BENCH_START(idist);  // don't use collective start because Issend before...
+      const int query_tag = 1773;
+      const int resp_tag = 1779;
 
-        size_t prev_peer = comm_rank;
-        MPI_Request q_req, r_req;
-        size_t total = 0;
+      // local (step 0) - skip the send recv, just directly process.
+      int comm_size = _comm.size();
+      int comm_rank = _comm.rank();
+      int curr_peer;
 
-        // do step = 1
+      mxx::datatype q_dt = mxx::get_datatype<V>();
+      std::vector<MPI_Request> q_reqs(_comm.size() - 1);
+
+      mxx::datatype r_dt = mxx::get_datatype<U>();
+      std::vector<MPI_Request> r_reqs(_comm.size() - 1);
+
+
+      // PIPELINE:  send_q, recv_q, compute, send_r, recv_r.
+      // note that send_q and recv_r are done in batch before the main loop, so that they are ready to go.
+      // so we have buffers query-> recving,  recving <-> computing, computing -> storing, storing <-> sending, sending->output
+      // also note, computing for own rank occurs locally at the beginning.
+
+      // COMPUTE SELF.  note that this is one to one, so dealing with send_displs on both permuted and result.
+
+      bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
+      int step;
+
+      for (step = 1; step < comm_size; ++step) {
+        //====  first setup send and recv.
+
         // target rank
         if ( is_pow2 )  {  // power of 2
-          curr_peer = comm_rank ^ 1;
+          curr_peer = comm_rank ^ step;
         } else {
-          curr_peer = (comm_rank + 1) % comm_size;
+          curr_peer = (comm_rank + step) % comm_size;
         }
 
-        // recv next.
-        MPI_Irecv(recving, recv_counts[curr_peer], q_dt.type(),
-                  curr_peer, query_tag, _comm, &q_req );
+        // issend all, avoids buffering (via ssend).
+        MPI_Issend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], q_dt.type(),
+                  curr_peer, query_tag, _comm, &q_reqs[step - 1] );
+
+        // irecv all
+        MPI_Irecv(&(*(result + send_displs[curr_peer])), send_counts[curr_peer], r_dt.type(),
+                  curr_peer, resp_tag, _comm, &r_reqs[step - 1] );
+
+      }
+      BL_BENCH_END(idist, "a2av_reqs", comm_size);
+
+
+
+      // loop and process each processor's assignment.  use isend and irecv.
+      BL_BENCH_START(idist);  // don't use collective start because Issend before...
+
+      // compute for self rank.
+      compute(&(*(permuted + send_displs[comm_rank])),
+              &(*(permuted + send_displs[comm_rank ] + send_counts[comm_rank])),
+              &(*(result + send_displs[comm_rank])));
+
+
+      int prev_peer = comm_rank, prev_peer2 = comm_rank;
+      MPI_Request q_req, r_req;
+      size_t total = 0;
+      int step2, step3;
+
+      // iterate for the steps.  note that we are overlapping 3 loops in a pipelined way.
+      // assume that the conditionals are kind of cheap?
+      for (step = 1, step2 = 0, step3 = -1; step3 < comm_size; ++step, ++step2, ++step3) {
+        //====  first setup send and recv.
+
+        // target rank
+        if ( is_pow2 )  {  // power of 2
+          curr_peer = comm_rank ^ step;
+        } else {
+          curr_peer = (comm_rank + step) % comm_size;
+        }
+
+        // 2nd stage of pipeline
+        if ((step > 0) && (step < comm_size)) {
+          // send and recv next.  post recv first.
+          MPI_Irecv(recving, recv_counts[curr_peer], q_dt.type(),
+                    curr_peer, query_tag, _comm, &q_req );
+          // if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " recv Q from " << curr_peer << std::endl;
+        }
+
+        // 4rd stage of pipeline
+        if ((step3 > 0) && (step3 < comm_size)) {
+          // send results.  use rsend to avoid buffering
+          MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
+                     prev_peer2, resp_tag, _comm, &r_req );
+          total += recv_counts[prev_peer2];
+          // if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " send R to " << prev_peer2 << std::endl;
+        }
 
         // process previously received.
-        compute(computing, computing + recv_counts[prev_peer], storing);
-
+        if ((step2 > 0) && (step2 < comm_size)) {
+			compute(computing, computing + recv_counts[prev_peer], storing);
+			// if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " compute for " << prev_peer << std::endl;
+        }
 
         // now wait for irecv from this iteration to complete, in order to continue.
-        MPI_Wait(&q_req, MPI_STATUS_IGNORE);
+        if ((step > 0) && (step < comm_size)) {
+        	MPI_Wait(&q_req, MPI_STATUS_IGNORE);
+        	// if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " recved Q from " << curr_peer << std::endl;
+        }
 
-        // set up next iteration.
-        size_t prev_peer2 = prev_peer;
-        prev_peer = curr_peer;
+        if ((step3 > 0) && (step3 < comm_size)) {
+        	MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+        	// if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " sent R to " << prev_peer2 << std::endl;
+        }
 
         // then swap pointer
         ::std::swap(recving, computing);
         ::std::swap(storing, sending);
 
-
-        // do remaining...
-        for (step = 2; step < comm_size; ++step) {
-          //====  first setup send and recv.
-
-          // target rank
-          if ( is_pow2 )  {  // power of 2
-            curr_peer = comm_rank ^ step;
-          } else {
-            curr_peer = (comm_rank + step) % comm_size;
-          }
-
-          // send and recv next.  post recv first.
-          MPI_Irecv(recving, recv_counts[curr_peer], q_dt.type(),
-                    curr_peer, query_tag, _comm, &q_req );
-		  // send results.  use rsend to avoid buffering
-		  MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
-					 prev_peer2, resp_tag, _comm, &r_req );
-          total += recv_counts[prev_peer2];
-
-          // process previously received.
-          compute(computing, computing + recv_counts[prev_peer], storing);
-
-
-          // now wait for irecv from this iteration to complete, in order to continue.
-          MPI_Wait(&q_req, MPI_STATUS_IGNORE);
-          MPI_Wait(&r_req, MPI_STATUS_IGNORE);
-
-          // then swap pointer
-          ::std::swap(recving, computing);
-          ::std::swap(storing, sending);
-
-          // set up next iteration.
-          prev_peer2 = prev_peer;
-          prev_peer = curr_peer;
-        }
-
-        // ===== second to last
-	    // send results.  use rsend to avoid buffering
-		MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
-					 prev_peer2, resp_tag, _comm, &r_req );
-        total += recv_counts[prev_peer2];
-
-        // process previously received.
-        compute(computing, computing + recv_counts[prev_peer], storing);
-
-
-        // now wait for irecv from this iteration to complete, in order to continue.
-        MPI_Wait(&r_req, MPI_STATUS_IGNORE);
-
-        // then swap pointer
-        ::std::swap(storing, sending);
-
         // set up next iteration.
         prev_peer2 = prev_peer;
+        prev_peer = curr_peer;
+      }
 
 
-        // ===== last
-	      // send results.  use rsend to avoid buffering
-		    MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
-					 prev_peer2, resp_tag, _comm, &r_req );
-        total += recv_counts[prev_peer2];
+      BL_BENCH_COLLECTIVE_START(idist, "cleanup", _comm);
+      MPI_Waitall(comm_size - 1, q_reqs.data(), MPI_STATUSES_IGNORE);
 
-        // now wait for irecv from this iteration to complete, in order to continue.
-        MPI_Wait(&r_req, MPI_STATUS_IGNORE);
+      MPI_Waitall(comm_size - 1, r_reqs.data(), MPI_STATUSES_IGNORE);
 
-
-        // wait for all send to finish.
-        BL_BENCH_END(idist, "recv_compute", total);
+      free(buffers);
+      free(out_buffers);
+      BL_BENCH_END(idist, "cleanup", comm_size - 1);
 
 
-        BL_BENCH_COLLECTIVE_START(idist, "cleanup", _comm);
-        MPI_Waitall(comm_size - 1, q_reqs.data(), MPI_STATUSES_IGNORE);
-        MPI_Waitall(comm_size - 1, r_reqs.data(), MPI_STATUSES_IGNORE);
-
-        free(buffers);
-        free(out_buffers);
-        BL_BENCH_END(idist, "cleanup", comm_size - 1);
-
-
-        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+      BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
 
 
     }
@@ -3882,7 +3908,7 @@ namespace khmxx
     /// incremental distribute and compute.  Assume the input is already permuted.
     /// return size for the results.  this version allows missing results, so will compact.
 
-
+#if 0  // no tested
     /// incremental ialltoallv, compute, and respond.  Assume the input is already permuted.
     /// this version requires one-to-one input/output mapping.
     /// uses pairwise exchange.  use issend for sending, and irsend for receive to avoid buffering.
@@ -4139,7 +4165,9 @@ namespace khmxx
 
 
     }
-  }
+
+#endif
+  } // namespace incremental
 
 
   namespace lz4 {
