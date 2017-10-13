@@ -647,6 +647,10 @@ namespace dsc  // distributed std container
       using size_type             = typename local_container_type::size_type;
       using difference_type       = typename local_container_type::difference_type;
 
+      using count_result_type     = decltype(::std::declval<local_container_type>().count(::std::declval<key_type>(),
+                                                                                          ::std::declval<::bliss::filter::TruePredicate>(),
+                                                                                           ::std::declval<::bliss::filter::TruePredicate>()));
+
     protected:
       local_container_type c;
 
@@ -824,7 +828,7 @@ namespace dsc  // distributed std container
 
         bucket_sizes.clear();
 
-        BL_BENCH_INIT(permute_est);
+//        BL_BENCH_INIT(permute_est);
         size_t input_size = std::distance(_begin, _end);
 
         if (_begin == _end) {
@@ -839,16 +843,16 @@ namespace dsc  // distributed std container
         // 64 / sizeof(ASSIGN_TYPE)...
         constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) * batch_size;
 
-        BL_BENCH_START(permute_est);
+//        BL_BENCH_START(permute_est);
 
         // initialize number of elements per bucket
         bucket_sizes.resize(num_buckets, 0);
-        BL_BENCH_END(permute_est, "alloc_count", num_buckets);
+//        BL_BENCH_END(permute_est, "alloc_count", num_buckets);
 
 
         // single bucket.  still need to estimate.
         if (num_buckets == 1) {
-        	BL_BENCH_START(permute_est);
+//        	BL_BENCH_START(permute_est);
 
           // set output buckets sizes
           bucket_sizes[0] = input_size;
@@ -894,21 +898,21 @@ namespace dsc  // distributed std container
         		  *output = *it;
         	  }
           }
-          BL_BENCH_END(permute_est, "est_permute", input_size);
-
-          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
+//          BL_BENCH_END(permute_est, "est_permute", input_size);
+//
+//          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
 
           return;
         }
 
 
-        BL_BENCH_START(permute_est);
+//        BL_BENCH_START(permute_est);
 
         ASSIGN_TYPE* bucketIds = ::utils::mem::aligned_alloc<ASSIGN_TYPE>(input_size);
-        BL_BENCH_END(permute_est, "alloc", input_size);
+//        BL_BENCH_END(permute_est, "alloc", input_size);
 
 
-        BL_BENCH_START(permute_est);
+//        BL_BENCH_START(permute_est);
 
           // 1st pass of 2 pass algo.
 
@@ -1016,22 +1020,22 @@ namespace dsc  // distributed std container
 				  }
         	  } // pow2_p?
 		  } // batching?
-          BL_BENCH_END(permute_est, "est_count", input_size);
+//          BL_BENCH_END(permute_est, "est_count", input_size);
 
 
 //          size_t est = hll.estimate();
 //          std::cout << "estimate : " << est << std::endl;
 
-          BL_BENCH_START(permute_est);
+//          BL_BENCH_START(permute_est);
           // pass 2, do the actual permute
           permute_by_bucketid(_begin, _end, bucketIds, bucket_sizes, output );
-          BL_BENCH_END(permute_est, "permute", input_size);
+//          BL_BENCH_END(permute_est, "permute", input_size);
 
-          BL_BENCH_START(permute_est);
+//          BL_BENCH_START(permute_est);
           free(bucketIds);
-          BL_BENCH_END(permute_est, "free", input_size);
+//          BL_BENCH_END(permute_est, "free", input_size);
 
-          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
+//          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
 
 
       }  // end of assign_count_estimate_permute
@@ -1054,7 +1058,7 @@ namespace dsc  // distributed std container
 
         if (_begin == _end) return;  // no data in question.
 
-        BL_BENCH_INIT(permute_est);
+//        BL_BENCH_INIT(permute_est);
 
         constexpr size_t batch_size = InternalHash::batch_size;
 //        		decltype(declval<decltype(declval<KeyToRank>().proc_trans_hash)>().h)::batch_size;
@@ -1062,37 +1066,37 @@ namespace dsc  // distributed std container
         // 64 / sizeof(ASSIGN_TYPE)...
         constexpr size_t block_size = (64 / sizeof(transhashmod_val_type)) * batch_size;
 
-        BL_BENCH_START(permute_est);
+//        BL_BENCH_START(permute_est);
         // initialize number of elements per bucket
         bucket_sizes.resize(num_buckets, 0);
-        BL_BENCH_END(permute_est, "alloc_count", num_buckets);
+//        BL_BENCH_END(permute_est, "alloc_count", num_buckets);
 
         size_t input_size = std::distance(_begin, _end);
 
         // single bucket.  still need to estimate.
         if (num_buckets == 1) {
-            BL_BENCH_START(permute_est);
+//            BL_BENCH_START(permute_est);
           // set output buckets sizes
           bucket_sizes[0] = input_size;
 
           // set all of bucketIds to 0
           std::copy(_begin, _end, output);
-          BL_BENCH_END(permute_est, "permute", input_size);
+//          BL_BENCH_END(permute_est, "permute", input_size);
 
-          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
+//          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
 
           return;
         }
 
-        BL_BENCH_START(permute_est);
+//        BL_BENCH_START(permute_est);
 
         transhashmod_val_type* bucketIds = ::utils::mem::aligned_alloc<transhashmod_val_type>(input_size);
-        BL_BENCH_END(permute_est, "alloc", input_size);
+//        BL_BENCH_END(permute_est, "alloc", input_size);
 
 
           // 1st pass of 2 pass algo.
 
-        BL_BENCH_START(permute_est);
+//        BL_BENCH_START(permute_est);
           // [1st pass]: compute bucket counts and input2bucket assignment.
           // store input2bucket assignment in bucketIds temporarily.
           transhashmod_val_type* i2o_it = bucketIds;
@@ -1130,17 +1134,17 @@ namespace dsc  // distributed std container
 				  ++bucket_sizes[rank];
 			  }
 		  } // batching?
-          BL_BENCH_END(permute_est, "count", input_size);
+//          BL_BENCH_END(permute_est, "count", input_size);
 
-          BL_BENCH_START(permute_est);
+//          BL_BENCH_START(permute_est);
           permute_by_bucketid(_begin, _end, bucketIds, bucket_sizes, output);
-          BL_BENCH_END(permute_est, "permiute", input_size);
+//          BL_BENCH_END(permute_est, "permiute", input_size);
 
-          BL_BENCH_START(permute_est);
+//          BL_BENCH_START(permute_est);
           free(bucketIds);
-          BL_BENCH_END(permute_est, "free", input_size);
+//          BL_BENCH_END(permute_est, "free", input_size);
 
-          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
+//          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
 
       }  // end of assign_estimate_count
 
@@ -1772,11 +1776,11 @@ namespace dsc  // distributed std container
        * @param input  vector.  will be permuted.
        */
       template <typename Predicate = ::bliss::filter::TruePredicate>
-      std::vector<size_type> count_1(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) const {
+      std::vector<count_result_type> count_1(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) const {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(count);
 
-        ::std::vector<size_type > results;
+        ::std::vector<count_result_type > results;
 
         if (::dsc::empty(input, this->comm)) {
           BL_BENCH_REPORT_MPI_NAMED(count, "base_batched_robinhood_map:count", this->comm);
@@ -1818,7 +1822,7 @@ if (measure_mode == MEASURE_RESERVE)
   if (measure_mode == MEASURE_COUNT)
       __itt_resume();
 #endif
-	::fsc::back_emplace_iterator<::std::vector< size_type > > emplace_iter(results);
+	::fsc::back_emplace_iterator<::std::vector< count_result_type > > emplace_iter(results);
           	this->c.count(emplace_iter, input.data(), input.data() + input.size(), pred, pred);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_COUNT)
@@ -1838,12 +1842,12 @@ if (measure_mode == MEASURE_RESERVE)
        * @param input  vector.  will be permuted.
        */
       template <typename Predicate = ::bliss::filter::TruePredicate>
-      std::vector<size_type> count_p(std::vector<Key >& input, bool sorted_input = false,
+      std::vector<count_result_type> count_p(std::vector<Key >& input, bool sorted_input = false,
     		  Predicate const & pred = Predicate()) const {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(count);
 
-        std::vector<size_type> results;
+        std::vector<count_result_type> results;
 
         if (::dsc::empty(input, this->comm)) {
           BL_BENCH_REPORT_MPI_NAMED(count, "hashmap:count", this->comm);
@@ -1975,7 +1979,7 @@ if (measure_mode == MEASURE_RESERVE)
 
   	      ::khmxx::incremental::ialltoallv_and_query_one_to_one(
   	    		  input.data(), input.data() + input.size(), send_counts,
-  	                                                  [this, &pred](Key* b, Key* e, size_type * out){
+  	                                                  [this, &pred](Key* b, Key* e, count_result_type * out){
   	                                                     this->c.count(out, b, e, pred, pred);
   	                                                  },
 													  results.data(),
@@ -1995,7 +1999,7 @@ if (measure_mode == MEASURE_RESERVE)
   	  	  	  size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
 
   	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
-  	          size_type* dist_results = ::utils::mem::aligned_alloc<size_type>(recv_total);
+  	          count_result_type* dist_results = ::utils::mem::aligned_alloc<count_result_type>(recv_total);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -2011,13 +2015,19 @@ if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
 #endif
 
+#ifdef ENABLE_LZ4_COMM
+  	  	  	  ::khmxx::lz4::distribute_permuted(input.data(), input.data() + input.size(),
+  	  	  			  send_counts, distributed, recv_counts, this->comm);
+#else
 			  ::khmxx::distribute_permuted(input.data(), input.data() + input.size(),
   	  	  			  send_counts, distributed, recv_counts, this->comm);
+#endif
+
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_A2A)
       __itt_pause();
 #endif
-			  BL_BENCH_END(count, "a2a", input.size());
+			  BL_BENCH_END(count, "a2av", input.size());
 
 
 
@@ -2070,7 +2080,7 @@ if (measure_mode == MEASURE_A2A)
 
 
 // this needs to be done.
-#ifdef ENABLE_LZ4_COMM
+#ifdef ENABLE_LZ4_RESULT
   	  	  	  ::khmxx::lz4::distribute_permuted(dist_results, dist_results + recv_total,
   	  	  			  recv_counts, results.data(), send_counts, this->comm);
 #else
@@ -2251,7 +2261,7 @@ if (measure_mode == MEASURE_A2A)
 
     public:
       template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
-      ::std::vector<size_type > count(::std::vector<Key>& keys, bool sorted_input = false,
+      ::std::vector<count_result_type > count(::std::vector<Key>& keys, bool sorted_input = false,
                                                         Predicate const& pred = Predicate() ) const {
     	  if (this->comm.size() == 1) {
     		  return count_1(keys, sorted_input, pred);
@@ -2521,8 +2531,14 @@ if (measure_mode == MEASURE_RESERVE)
       __itt_resume();
 #endif
 
+#ifdef ENABLE_LZ4_COMM
+  	  	  	  ::khmxx::lz4::distribute_permuted(input.data(), input.data() + input.size(),
+  	  	  			  send_counts, distributed, recv_counts, this->comm);
+#else
 			  ::khmxx::distribute_permuted(input.data(), input.data() + input.size(),
   	  	  			  send_counts, distributed, recv_counts, this->comm);
+#endif
+
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_A2A)
       __itt_pause();
@@ -2580,7 +2596,7 @@ if (measure_mode == MEASURE_A2A)
 
 
 // this needs to be done.
-#ifdef ENABLE_LZ4_COMM
+#ifdef ENABLE_LZ4_RESULT
   	  	  	  ::khmxx::lz4::distribute_permuted(dist_results, dist_results + recv_total,
   	  	  			  recv_counts, results.data(), send_counts, this->comm);
 #else
@@ -2622,7 +2638,7 @@ if (measure_mode == MEASURE_A2A)
     	  }
       }
 
-#if 0
+#if 0  // TODO: temporarily retired.
       /**
        * @brief find elements with the specified keys in the distributed batched_robinhood_multimap.
        * @param keys  content will be changed and reordered
@@ -3023,8 +3039,14 @@ if (measure_mode == MEASURE_A2A)
       __itt_resume();
 #endif
 
+#ifdef ENABLE_LZ4_COMM
+  	  	  	  ::khmxx::lz4::distribute_permuted(input.data(), input.data() + input.size(),
+  	  	  			  send_counts, distributed, recv_counts, this->comm);
+#else
 			  ::khmxx::distribute_permuted(input.data(), input.data() + input.size(),
   	  	  			  send_counts, distributed, recv_counts, this->comm);
+#endif
+
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_A2A)
       __itt_pause();

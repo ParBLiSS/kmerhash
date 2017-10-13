@@ -72,7 +72,7 @@ if (BUILD_BENCHMARKS)
 	# lz4 distributed benchmarks.
 	foreach(map BROBINHOOD)
 		foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
-			add_dist_hashmap_target(testLZ4KmerIndex ${map} ${hash} ${hash} ENABLE_LZ4_COMM)
+			add_dist_hashmap_target(testLZ4KmerIndex ${map} ${hash} ${hash} ENABLE_LZ4_RESULT)
 		endforeach(hash)
 	endforeach(map)
 
