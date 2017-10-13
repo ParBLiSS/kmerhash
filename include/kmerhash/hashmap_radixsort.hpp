@@ -14,17 +14,19 @@
 #include "mem_utils.hpp"
 #include "hash.hpp"
 
+#include "iterators/transform_iterator.hpp"
+
 //#define min(x,y) (((x) < (y)) ? (x):(y))
 
 namespace fsc {
-template <class Key, class V = int32_t, template <typename> class Hash = ::std::hash,
+template <class Key, class V, template <typename> class Hash = ::std::hash,
           template <typename> class Equal = ::std::equal_to
          >
 class hashmap_radixsort {
 
-    static_assert(::std::is_same<int32_t, V>::value, "currently only support value of type int32_t");
 
 public:
+
 
     using key_type              = Key;
     using mapped_type           = V;
@@ -39,7 +41,21 @@ public:
         Key key;
         V val;
         int32_t bucketId;
-    }HashElement;
+    } HashElement;
+
+    struct HashElementTransform {
+    	::std::pair<const Key, V> operator()(HashElement const & x) const {
+    		return std::make_pair(x.key, x.val);
+    	}
+    };
+    struct HashElementConstTransform {
+    	const ::std::pair<const Key, V> operator()(HashElement const & x) const {
+    		return std::make_pair(x.key, x.val);
+    	}
+    };
+	using iterator              = ::bliss::iterator::transform_iterator<HashElement*, HashElementTransform>;
+	using const_iterator        = ::bliss::iterator::transform_iterator<HashElement const *, HashElementConstTransform>;
+
 
 #define COHERENT 0
 #define INSERT 1
@@ -55,7 +71,7 @@ public:
     int32_t overflowBufSize;
     int32_t curOverflowBufId;
     int32_t sortBufSize;
-    V noValue;
+    mutable V noValue;
     int8_t  coherence;
     int32_t seed;
     int32_t totalKeyCount;
@@ -309,7 +325,7 @@ public:
         return count;
     }
 
-    inline HashElement *find_internal(Key key, int32_t bucketId)
+    inline HashElement *find_internal(Key key, int32_t bucketId) const
     {
         int32_t binId = bucketId >> binShift;
         int32_t binId2 = (bucketId + 1) >> binShift;
@@ -381,8 +397,31 @@ public:
 		_mm_free(info_container);
 	}
 
-	void set_novalue(V _noValue) { noValue = _noValue; }
+	void set_novalue(V _noValue) const { noValue = _noValue; }
 
+	const_iterator cbegin() const {
+		std::cerr << "WARNING: NOT FILTERING OUT EMPTY ENTRIES" << std::endl;
+		return const_iterator(hashTable, HashElementConstTransform());
+	}
+
+	const_iterator cend() const {
+		std::cerr << "WARNING: NOT FILTERING OUT EMPTY ENTRIES" << std::endl;
+		return const_iterator(hashTable + numBins * binSize, HashElementConstTransform());
+	}
+
+	::std::vector<::std::pair<Key, V> > to_vector() const {
+		std::cerr << "WARNING: NOT IMPLEMENTED" << std::endl;
+		return ::std::vector<::std::pair<Key, V> >();
+	}
+
+	::std::vector<Key> keys() const {
+		std::cerr << "WARNING: NOT IMPLEMENTED" << std::endl;
+		return ::std::vector<Key>();
+	}
+
+	void reserve(uint32_t _newElementCount) {
+		resize(next_power_of_2(_newElementCount));
+	}
 
 	void resize(uint32_t _newNumBuckets)
 	{
@@ -1048,7 +1087,7 @@ public:
         coherence = COHERENT;
     }
 
-    size_t find(Key *keyArray, int32_t numKeys, uint32_t *findResult)
+    size_t find(Key *keyArray, int32_t numKeys, uint32_t *findResult) const
     {
         if(coherence != COHERENT)
         {
@@ -1127,7 +1166,7 @@ public:
         return foundCount;
     }
 
-    size_t count(Key *keyArray, int32_t numKeys, uint8_t *countResult)
+    size_t count(Key *keyArray, int32_t numKeys, uint8_t *countResult) const
     {
         if(coherence != COHERENT)
         {
