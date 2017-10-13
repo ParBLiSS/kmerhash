@@ -141,6 +141,7 @@ inline CONSTEXPR T next_power_of_2(T x) {
 #endif
 
 
+#if 0
 
 // compute gcd
 #include <numeric>
@@ -299,5 +300,8 @@ T lcm(T a, T b)
 
     return temp ? ((a / temp) * b) : 0;
 }
+
+#endif
+
 
 #endif /* KMERHASH_MATH_UTILS_HPP_ */
