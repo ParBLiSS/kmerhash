@@ -68,7 +68,8 @@ inline uint64_t next_power_of_2(uint64_t x) {
   return  0x1ULL << (64 - __lzcnt64(x-1));
 }
 
-#elif defined(__GNUC__)
+#elif defined(__GNUG__) && !defined(__INTEL_COMPILER)
+
 
 inline uint64_t next_power_of_2(uint64_t x) {
 
@@ -212,7 +213,7 @@ T gcd(T a, T b)
   return a << shift;
 }
 
-#elif defined(__GNU__)
+#elif defined(__GNUG__) && !defined(__INTEL_COMPILER)
 // use built in.  from  https://hbfs.wordpress.com/2013/12/10/the-speed-of-gcd/
 template <typename T,
  	 typename ::std::enable_if<(sizeof(T) > 4), int>::type = 1>
