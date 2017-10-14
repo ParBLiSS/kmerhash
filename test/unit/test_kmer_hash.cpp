@@ -168,6 +168,26 @@ class KmerHashTest : public ::testing::Test {
 
       ASSERT_TRUE(same);
 
+
+      // make sure that seeds do something.
+      H<T> op2(9876543);
+      std::vector<OT> test2(this->iterations, 0);
+
+ 
+       for (size_t i = 0; i < this->iterations; ++i) {
+         test2[i] = op2(this->kmers[i]);
+       }
+
+	bool diff = true;
+
+      for (size_t i = 0; i < this->iterations; ++i) {
+        diff &= (test[i] != test2[i]);
+      }
+
+      ASSERT_TRUE(diff);
+
+     
+
     }
     template <template <typename> class B, template <typename> class H, typename OT = uint32_t>
     void hash_vector_vs_sse_batch(std::string name) {
@@ -199,41 +219,147 @@ class KmerHashTest : public ::testing::Test {
 
       ASSERT_TRUE(same);
 
+
+  // make sure that seeds do something.
+      H<T> op2(9876543);
+      std::vector<OT> test2(this->iterations, 0);
+
+	op2.hash(this->kmers.data(), this->iterations, test.data());
+
+	bool diff = true;
+      for (size_t i = 0; i < this->iterations; ++i) {
+        diff &= (test[i] != test2[i]);
+      }
+
+      ASSERT_TRUE(diff);
+
+ 
+	// testing the mix of counts that may not be a multiple of batch_size.
+
       op.hash(this->kmers.data(), this->iterations-1, test.data());
-
      same = true;
-
      for (size_t i = 0; i < this->iterations - 1; ++i) {
        same &= (truth[i] == test[i]);
      }
-
      ASSERT_TRUE(same);
 
 
-
      op.hash(this->kmers.data(), this->iterations-2, test.data());
-
     same = true;
-
     for (size_t i = 0; i < this->iterations - 2; ++i) {
       same &= (truth[i] == test[i]);
     }
-
     ASSERT_TRUE(same);
 
 
     op.hash(this->kmers.data(), this->iterations-3, test.data());
-
    same = true;
-
    for (size_t i = 0; i < this->iterations - 3; ++i) {
      same &= (truth[i] == test[i]);
    }
-
    ASSERT_TRUE(same);
 
 
+
+    
+
+
+
     }
+
+
+
+    template <template <typename> class H, typename OT = uint32_t>
+    void hash_crc32c(std::string name) {
+
+       H<T> op;
+
+       std::vector<OT> test(this->iterations, 0);
+
+       
+
+  // make sure that seeds do something.
+      H<T> op2(9876543);
+      std::vector<OT> test2(this->iterations, 0);
+
+	for (size_t i = 0; i < this->iterations; ++i) {
+		test[i] = op(this->kmers[i]);
+		test2[i] = op2(this->kmers[i]);
+	}
+
+
+
+	bool diff = (test[0] != test2[0]);
+
+	bool no_collision1 = true;
+	bool no_collision2 = true;
+
+	for (size_t i = 1; i < this->iterations; ++i) {
+        diff &= (test[i] != test2[i]);
+
+        no_collision1 &= (this->kmers[i-1] == this->kmers[i]) || (test[i] != test[i-1]);
+        no_collision2 &= (this->kmers[i-1] == this->kmers[i]) || (test2[i] != test2[i-1]);
+
+	if (!no_collision1) {
+		std::cout << "test1: i-1 " << (i-1) << ":" << this->kmers[i-1] << "->" << test[i-1] << " i " << i << ":" << this->kmers[i] << "->" << test[i] << std::endl; 
+	}
+ 
+	if (!no_collision2) {
+		std::cout << "test2: i-1 " << (i-1) << ":" << this->kmers[i-1] << "->" << test2[i-1] << " i " << i << ":" << this->kmers[i] << "->" << test2[i] << std::endl; 
+	}
+     
+      ASSERT_TRUE(diff);
+	ASSERT_TRUE(no_collision1);
+	ASSERT_TRUE(no_collision2);
+	}
+
+
+    }
+
+    template <template <typename> class H, typename OT = uint32_t>
+    void hash_crc32c_batch(std::string name) {
+
+       H<T> op;
+
+       std::vector<OT> test(this->iterations, 0);
+
+       op.hash(this->kmers.data(), this->iterations, test.data());
+
+
+  // make sure that seeds do something.
+      H<T> op2(9876543);
+      std::vector<OT> test2(this->iterations, 0);
+
+	op2.hash(this->kmers.data(), this->iterations, test2.data());
+
+	bool diff = (test[0] != test2[0]);
+
+	bool no_collision1 = true;
+	bool no_collision2 = true;
+      for (size_t i = 1; i < this->iterations; ++i) {
+        diff &= (test[i] != test2[i]);
+
+
+        no_collision1 &= (this->kmers[i-1] == this->kmers[i]) || (test[i] != test[i-1]);
+        no_collision2 &= (this->kmers[i-1] == this->kmers[i]) || (test2[i] != test2[i-1]);
+
+	if (!no_collision1) {
+		std::cout << "test1: i-1 " << (i-1) << ":" << this->kmers[i-1] << "->" << test[i-1] << " i " << i << ":" << this->kmers[i] << "->" << test[i] << std::endl; 
+	}
+ 
+	if (!no_collision2) {
+		std::cout << "test2: i-1 " << (i-1) << ":" << this->kmers[i-1] << "->" << test2[i-1] << " i " << i << ":" << this->kmers[i] << "->" << test2[i] << std::endl; 
+	}
+     
+
+      ASSERT_TRUE(diff);
+	ASSERT_TRUE(no_collision1);
+	ASSERT_TRUE(no_collision2);
+
+	}
+
+    }
+
 
 
 };
@@ -319,6 +445,18 @@ TYPED_TEST_P(KmerHashTest, murmur32avx_batch)
 {
   this->template hash_vector_vs_sse_batch<fsc::hash::murmur32, fsc::hash::murmur3avx32>(std::string("murmur3_32_vs_avx_batch"));
 }
+#endif
+
+#if defined(__SSE4_2__)
+TYPED_TEST_P(KmerHashTest, crc32c)
+{
+  this->template hash_crc32c<::fsc::hash::crc32c>(std::string("crc32c_seed"));
+}
+
+TYPED_TEST_P(KmerHashTest, crc32c_batch)
+{
+  this->template hash_crc32c_batch<::fsc::hash::crc32c>(std::string("crc32c_seed_batch"));
+}
 
 #endif
 
@@ -331,6 +469,9 @@ REGISTER_TYPED_TEST_CASE_P(KmerHashTest, iden, murmur, farm,
 #endif
 #if defined(__AVX2__)
                            murmur32avx, murmur32avx_batch,
+#endif
+#if defined(__SSE4_2__)
+			crc32c, crc32c_batch,
 #endif
                            stdcpp);
 
