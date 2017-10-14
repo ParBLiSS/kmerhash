@@ -229,6 +229,7 @@ void benchmark_unordered_map(std::string name, std::vector<::std::pair<Kmer, Val
   ::std::unordered_map<Kmer, Value, StoreHash<Kmer> > map;//(count * 2 / repeat_rate);
   map.max_load_factor(max_load);
 
+
   BL_BENCH_END(map, "reserve", input.size());
 
   {
@@ -1613,6 +1614,10 @@ int main(int argc, char** argv) {
 
   // make the input
 
+  std::cout << "USING:\tStoreHash=" << typeid(StoreHash<Kmer>).name() << std::endl;
+  std::cout << "      \tStoreHash=" << typeid(StoreHash<DNA5Kmer>).name() << std::endl;
+  std::cout << "      \tStoreHash=" << typeid(StoreHash<FullKmer>).name() << std::endl;
+  std::cout << "      \tStoreHash=" << typeid(StoreHash<DNA16Kmer>).name() << std::endl;
 
   if (map == STD_UNORDERED_TYPE) {
 

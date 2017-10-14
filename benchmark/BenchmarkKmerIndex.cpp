@@ -206,10 +206,12 @@ using CountType = uint32_t;
 	using DistHash = bliss::kmer::hash::cpp_std<KM, true>;
 #elif (pDistHash == IDEN)
 	template <typename KM>
-	using DistHash = bliss::kmer::hash::identity<KM, true>;
+//	using DistHash = bliss::kmer::hash::identity<KM, true>;
+	using DistHash = ::fsc::hash::identity<KM>;
 #elif (pDistHash == MURMUR)
 	template <typename KM>
-	using DistHash = bliss::kmer::hash::murmur<KM, true>;
+//	using DistHash = bliss::kmer::hash::murmur<KM, true>;
+	using DistHash = ::fsc::hash::murmur<KM>;
 #elif (pDistHash == MURMUR32)
 	template <typename KM>
 	using DistHash = ::fsc::hash::murmur32<KM>;
@@ -227,7 +229,8 @@ using CountType = uint32_t;
 	using DistHash = ::fsc::hash::farm32<KM>;
 #elif (pDistHash == FARM)
   template <typename KM>
-  using DistHash = bliss::kmer::hash::farm<KM, true>;
+  //using DistHash = bliss::kmer::hash::farm<KM, true>;
+  using DistHash = ::fsc::hash::farm<KM>;
 #endif
 
 
@@ -237,10 +240,12 @@ using CountType = uint32_t;
 	using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
 #elif (pStoreHash == IDEN)
 	template <typename KM>
-	using StoreHash = bliss::kmer::hash::identity<KM, false>;
+//	using StoreHash = bliss::kmer::hash::identity<KM, false>;
+	using StoreHash = ::fsc::hash::identity<KM>;
 #elif (pStoreHash == MURMUR)
 	template <typename KM>
-	using StoreHash = bliss::kmer::hash::murmur<KM, false>;
+//	using StoreHash = bliss::kmer::hash::murmur<KM, false>;
+	using StoreHash = ::fsc::hash::murmur<KM>;
 #elif (pStoreHash == MURMUR32)
 	template <typename KM>
 	using StoreHash = ::fsc::hash::murmur32<KM>;
@@ -258,7 +263,8 @@ using CountType = uint32_t;
 	using StoreHash = ::fsc::hash::farm32<KM>;
 #elif (pStoreHash == FARM)
   template <typename KM>
-  using StoreHash = bliss::kmer::hash::farm<KM, false>;
+//  using StoreHash = bliss::kmer::hash::farm<KM, false>;
+  using StoreHash = ::fsc::hash::farm<KM>;
 #endif
 
 
@@ -639,7 +645,14 @@ int main(int argc, char** argv) {
 
 
 
-
+  if (comm.rank() == 0) {
+    std::cout << "USING:\tKmerType=" << typeid(KmerType).name() << std::endl;
+    std::cout << "      \tValType=" << typeid(ValType).name() << std::endl;
+    std::cout << "      \tDistHash=" << typeid(DistHash<KmerType>).name() << std::endl;
+    std::cout << "      \tDistTrans=" << typeid(DistTrans<KmerType>).name() << std::endl;
+    std::cout << "      \tStoreHash=" << typeid(StoreHash<KmerType>).name() << std::endl;
+    std::cout << "      \tMapType=" << typeid(MapType).name() << std::endl;
+  }
 
   // ================  read and get file
   IndexType idx(comm);
