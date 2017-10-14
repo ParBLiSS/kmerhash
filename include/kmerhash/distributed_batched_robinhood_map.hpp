@@ -985,18 +985,6 @@ namespace dsc  // distributed std container
 	std::vector<size_t> recv_counts(this->comm.size());
     mxx::all2all(send_counts.data(), 1, recv_counts.data(), this->comm);
 
-#if defined(DEBUG_COMM_VOLUME)
-    // DEBUG.  get the send counts.
-    {
-		std::stringstream ss;
-		ss << "SEND_COUNT rank " << this->comm.rank() << ": ";
-		for (int i = 0; i < this->comm.size(); ++i) {
-			ss << send_counts[i] << ", ";
-		}
-		std::cout << ss.str() << std::endl;
-    }
-#endif
-
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_A2A)
       __itt_pause();
@@ -2998,18 +2986,6 @@ if (measure_mode == MEASURE_A2A)
 // merge and do estimate.
 std::vector<size_t> recv_counts(this->comm.size());
 mxx::all2all(send_counts.data(), 1, recv_counts.data(), this->comm);
-
-#if defined(DEBUG_COMM_VOLUME)
-    // DEBUG.  get the send counts.
-    {
-		std::stringstream ss;
-		ss << "SEND_COUNT rank " << this->comm.rank() << ": ";
-		for (int i = 0; i < this->comm.size(); ++i) {
-			ss << send_counts[i] << ", ";
-		}
-		std::cout << ss.str() << std::endl;
-    }
-#endif
 
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_A2A)
