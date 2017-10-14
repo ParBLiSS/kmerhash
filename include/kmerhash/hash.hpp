@@ -68,6 +68,7 @@
 #include <cstring>  // memcpy
 #include <stdexcept>  //logic error
 #include <stdint.h>  // std int strings
+#include <iostream>  // cout
 
 
 #include "utils/filter_utils.hpp"
@@ -2085,6 +2086,13 @@ namespace fsc {
      *
      *          prefetching did not help
      *   algo at https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm_crc&expand=5247,1244
+     *   PROBLEM:  using a random seed at beginning of algo does not seem to help.
+     *   		inputs at regular intervals (from a partition by a previous crc32c)
+     *   			shows the same kind of regular intervals as the seed does not appear to sufficiently mix the bits.
+     *   	transforms via seed does not seem to have an effect.
+     *   HOWEVER, CRC can be applied when WITH a different family of hash.  given its speed, maybe at critical section.
+     *
+     *  TAKE AWAY: CRC32C is good for fast hashing but should not be used as a FAMILY of hash functions.
      */
     template <typename T>
     class crc32c {
@@ -2097,10 +2105,10 @@ namespace fsc {
         static constexpr size_t offset = (sizeof(T) >> 3) << 3;
         mutable uint32_t temp[4];
 
-        uint32_t hash1(const T & key) const {
+        FSC_FORCE_INLINE uint32_t hash1(const T & key) const {
 
           // block of 8 bytes
-          uint64_t crc64 = seed;
+          uint64_t crc64 = seed; //_mm_crc32_u32(1, seed);
           if (sizeof(T) >= 8) {
             uint64_t const * data64 = reinterpret_cast<uint64_t const *>(&key);
             for (size_t i = 0; i < blocks; ++i) {
@@ -2127,12 +2135,10 @@ namespace fsc {
           return crc;
         }
 
-        void hash4(T const * keys, uint32_t * results) const {
-          // loop over 3 keys at a time
-          uint64_t aa = seed;
-          uint64_t bb = seed;
-          uint64_t cc = seed;
-          uint64_t dd = seed;
+        FSC_FORCE_INLINE void hash4(T const * keys, uint32_t * results) const {
+          // loop over 4 keys at a time
+          uint64_t aa, bb, cc, dd;
+	  aa = bb = cc = dd = seed; // _mm_crc32_u32(1, seed);
 
           if (sizeof(T) >= 8) {
             // block of 8 bytes
@@ -2189,6 +2195,7 @@ namespace fsc {
 
       public:
         static constexpr uint8_t batch_size = 4;
+
         using result_type = uint32_t;
         using argument_type = T;
 
@@ -2197,11 +2204,13 @@ namespace fsc {
         // do 1 element.
         FSC_FORCE_INLINE uint32_t operator()(const T & key) const
         {
+//          std::cout << "CRC32C operator1()" << std::endl;
           return hash1(key);
         }
 
         FSC_FORCE_INLINE void operator()(T const * keys, size_t count, uint32_t * results) const
         {
+//          std::cout << "CRC32C operatorN() " << count << std::endl;
           hash(keys, count, results);
         }
 
@@ -2209,7 +2218,10 @@ namespace fsc {
         // do 3 at the same time.  since latency of crc32 is 3 cycles.
         // however, to limit the modulus, do 4 at a time.
         FSC_FORCE_INLINE void hash(T const * keys, size_t count, uint32_t * results) const {
-          // loop over 3 keys at a time
+        	// VERIFY THAT RIGHT CRC32 is being used.  VERIFIED.
+        	// std::cout << "DEBUG: seed set to " << seed << std::endl;
+
+          // loop over 4 keys at a time
           size_t max = count - (count & 3);
           size_t i = 0;
           for (; i < max; i += 4) {
@@ -2355,13 +2367,8 @@ namespace fsc {
     		  decltype(::std::declval<PostTransform<HASH_VAL_TYPE> >().operator()(::std::declval<HASH_VAL_TYPE>()));
       using argument_type = Key;
 
-////      TODO: [ ] make below fallback to 1 if batch_size is not defined.
-//      constexpr size_t pretrans_batch_size = PRETRANS_T::batch_size;
-//      constexpr size_t hash_batch_size = 	 HASH_T::batch_size;
-//      constexpr size_t postrans_batch_size = POSTTRANS_T::batch_size;
-
 	  // lowest common multiple of the three.  default to 64byte/sizeof(HASH_VAL_TYPE) for now (cacheline multiple)
-      static constexpr uint8_t batch_size = (sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
+      static constexpr uint8_t batch_size = 64 / sizeof(HASH_VAL_TYPE); //(sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
       	  // HASH_T::batch_size; //(sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
 
       static_assert((batch_size & (batch_size - 1)) == 0, "ERROR: batch_size should be a power of 2.");
@@ -2387,17 +2394,10 @@ namespace fsc {
                       PRETRANS_T const & pre_trans = PRETRANS_T(),
                       POSTTRANS_T const & post_trans = POSTTRANS_T()) :
 				//batch_size(lcm(lcm(pretrans_batch_size, hash_batch_size), postrans_batch_size)),
-//				key_buf(nullptr), trans_buf(nullptr), hash_buf(nullptr),
 				trans(pre_trans), h(_hash), posttrans(post_trans) {
-//    	  key_buf = ::utils::mem::aligned_alloc<Key>(batch_size);
-//    	  trans_buf = ::utils::mem::aligned_alloc<PRETRANS_VAL_TYPE>(batch_size);
-//    	  hash_buf = ::utils::mem::aligned_alloc<HASH_VAL_TYPE>(batch_size);
       };
 
       ~TransformedHash() {
-//    	  free(key_buf);
-//    	  free(trans_buf);
-//    	  free(hash_buf);
       }
 
       // conditionally defined, there should be just 1 defined methods after compiler resolves all this.
@@ -2408,7 +2408,6 @@ namespace fsc {
 				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
 					int>::type = 1>
       inline result_type operator()(Key const& k) const {
-        //std::cout << "op 1.1" << std::endl;
         return h(k);
       }
       template <typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
@@ -2417,7 +2416,6 @@ namespace fsc {
 				   ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
 					int>::type = 1>
       inline result_type operator()(Key const& k) const {
-        //std::cout << "op 1.2" << std::endl;
         return h(trans(k));
       }
       template <typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
@@ -2426,7 +2424,6 @@ namespace fsc {
 				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
 					int>::type = 1>
       inline result_type operator()(Key const& k) const {
-        //std::cout << "op 1.3" << std::endl;
         return posttrans(h(k));
       }
       template <typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
@@ -2435,18 +2432,15 @@ namespace fsc {
 				  !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE> >::value,
 					int>::type = 1>
       inline result_type operator()(Key const& k) const {
-        //std::cout << "op 1.4" << std::endl;
         return posttrans(h(trans(k)));
       }
 
       template<typename V>
       inline result_type operator()(::std::pair<Key, V> const& x) const {
-        //std::cout << "op 2.1" << std::endl;
         return this->operator()(x.first);
       }
       template<typename V>
       inline result_type operator()(::std::pair<const Key, V> const& x) const {
-        //std::cout << "op 2.2" << std::endl;
         return this->operator()(x.first);
       }
 
@@ -2472,16 +2466,9 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, int) const
       -> decltype(::std::declval<HT>()(k, count, out), size_t())
       {
-        //std::cout << "op 3.1" << std::endl;
-//    	  size_t max = count - (count & (batch_size - 1) );
-//    	  size_t i = 0;
-//    	  for (; i < max; i += batch_size ) {
-//        	  h(k+i, batch_size, out+i);
-//    	  }
     	  h(k, count, out);
     	  return count;
     	  // no last part
-    	  //return max;
       }
       template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
     		  typename ::std::enable_if<
@@ -2490,7 +2477,6 @@ namespace fsc {
 					int>::type = 1>
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, int) const
       -> decltype(::std::declval<HT>()(::std::declval<Key>()), size_t()) {
-        //std::cout << "op 3.2" << std::endl;
     	  // no batched part.
     	  return 0;
       }
@@ -2503,8 +2489,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, int) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(trans_buf, count, out), size_t()) {
     	  // first part.
-        //std::cout << "op 3.3" << std::endl;
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2522,7 +2506,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, int) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(*trans_buf), size_t()) {
     	  // first part.
-        //std::cout << "op 3.4" << std::endl;
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2540,8 +2523,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, int, int) const
       -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(trans_buf, count, out), size_t()) {
     	  // first part.
-        //std::cout << "op 3.5" << std::endl;
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2558,7 +2539,6 @@ namespace fsc {
 					int>::type = 1>
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, long, int) const
       -> decltype(::std::declval<PrT>()(::std::declval<Key>()), ::std::declval<HT>()(::std::declval<PRETRANS_VAL_TYPE>()), size_t()) {
-        //std::cout << "op 3.6" << std::endl;
     	  // no batched part.
     	  return 0;
       }
@@ -2571,8 +2551,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, int) const
       -> decltype(::std::declval<HT>()(k, count, hash_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
     	  // first part.
-        //std::cout << "op 3.7" << std::endl;
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2590,8 +2568,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, int) const
       -> decltype(::std::declval<HT>()(*k), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
     	  // first part.
-        //std::cout << "op 3.8" << std::endl;
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2609,8 +2585,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, long) const
       -> decltype(::std::declval<HT>()(k, count, hash_buf), ::std::declval<PoT>()(*hash_buf), size_t()) {
     	  // first part.
-        //std::cout << "op 3.9" << std::endl;
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2627,8 +2601,6 @@ namespace fsc {
 					int>::type = 1>
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, long) const
       -> decltype(::std::declval<HT>()(::std::declval<Key>()), ::std::declval<PoT>()(::std::declval<HASH_VAL_TYPE>()), size_t()) {
-
-        //std::cout << "op 3.10" << std::endl;
     	  // no batched part.
     	  return 0;
       }
@@ -2641,8 +2613,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, int) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(trans_buf, count, hash_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
     	  // first part.
-        //std::cout << "op 3.11" << std::endl;
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2661,8 +2631,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, int) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(*trans_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
     	  // first part.
-        //std::cout << "op 3.12" << std::endl;
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2681,8 +2649,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, int, int) const
       -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(trans_buf, count, hash_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
     	  // first part.
-        //std::cout << "op 3.13" << std::endl;
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2701,9 +2667,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, long, int) const
       -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(*trans_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t()) {
 
-        //std::cout << "op 3.14" << std::endl;
-
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2721,8 +2684,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, int, long) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(trans_buf, count, hash_buf),  ::std::declval<PoT>()(*hash_buf), size_t()) {
     	  // first part.
-        //std::cout << "op 3.15" << std::endl;
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2741,8 +2702,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, int, long, long) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(*trans_buf),  ::std::declval<PoT>()(*hash_buf), size_t()) {
     	  // first part.
-        //std::cout << "op 3.16" << std::endl;
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2760,9 +2719,6 @@ namespace fsc {
       inline auto batch_op(Key const * k, size_t const & count, result_type * out, long, int, long) const
       -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(trans_buf, count, hash_buf),  ::std::declval<PoT>()(*hash_buf), size_t()) {
     	  // first part.
-        //std::cout << "op 3.17" << std::endl;
-
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2782,8 +2738,6 @@ namespace fsc {
       -> decltype(::std::declval<PrT>()(::std::declval<Key>()),
     		  ::std::declval<HT>()(::std::declval<PRETRANS_VAL_TYPE>()),
     		  ::std::declval<PoT>()(::std::declval<HASH_VAL_TYPE>()), size_t()) {
-
-        //std::cout << "op 3.18" << std::endl;
     	  // no batched part.
     	 return 0;
       }
@@ -2793,8 +2747,6 @@ namespace fsc {
       inline void operator()(Key const * k, size_t const & count, result_type* out) const {
     	  size_t max = count - (count & (batch_size - 1) );
     	  max = this->batch_op(k, max, out, 0, 0, 0);  // 0 has type int....
-    	  // last part
-        //std::cout << "op 3" << std::endl;
 
     	  for (size_t i = max; i < count; ++i) {
     		  out[i] = this->operator()(k[i]);
@@ -2804,9 +2756,6 @@ namespace fsc {
 
       template<typename V>
       inline void operator()(::std::pair<Key, V> const * x, size_t const & count, result_type * out) const {
-        //std::cout << "op 4.1" << std::endl;
-
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {
@@ -2821,8 +2770,6 @@ namespace fsc {
 
       template<typename V>
       inline void operator()(::std::pair<const Key, V> const * x, size_t const & count, result_type * out) const {
-        //std::cout << "op 4.2" << std::endl;
-
     	  size_t max = count - (count & (batch_size - 1) );
     	  size_t i = 0, j = 0;
     	  for (; i < max; i += batch_size ) {

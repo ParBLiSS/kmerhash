@@ -392,8 +392,8 @@ public:
 #if defined (REPROBE_STAT)
 			upsize_count(0), downsize_count(0),
 #endif
-//			hash(1234567),   // not all hash functions have constructors that takes seeds.  e.g. std::hash
-			hash_mod2(hasher(), ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(mask)),
+			// hash(123457),   // not all hash functions have constructors that takes seeds.  e.g. std::hash.  goal of this hashmap is to be general.
+			hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(mask)),
 			container(buckets + info_empty), info_container(buckets + info_empty, info_empty)
 	{
 		// set the min load and max load thresholds.  there should be a good separation so that when resizing, we don't encounter a resize immediately.
@@ -419,9 +419,7 @@ public:
 
 	~hashmap_robinhood_offsets_reduction() {
 #if defined(REPROBE_STAT)
-		::std::cout << "SUMMARY:" << std::endl;
-		::std::cout << "  upsize\t= " << upsize_count << std::endl;
-		::std::cout << "  downsize\t= " << downsize_count << std::endl;
+		::std::cout << "RESIZE SUMMARY:\tupsize\t= " << upsize_count << "\tdownsize\t= " << downsize_count << std::endl;
 #endif
 	}
 
@@ -1622,11 +1620,11 @@ protected:
 
 
 #if defined(REPROBE_STAT)
-		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
-			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-		} else {
-			std::cout << "STATUS: container alignment on value boundary" << std::endl;
-		}
+//		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+//			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//		} else {
+//			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//		}
 
 		size_type before = lsize;
 #endif
@@ -1690,14 +1688,14 @@ protected:
 			// first check if we need to resize.  within 1% of
 			if (static_cast<size_t>(static_cast<double>(lsize) * 1.01) >= max_load) {
 
-#if defined(REPROBE_STAT)
-				std::cout << "rehashed.  size = " << buckets << std::endl;
-				if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type))  > 0) {
-					std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-				} else {
-					std::cout << "STATUS: container alignment on value boundary" << std::endl;
-				}
-#endif
+//#if defined(REPROBE_STAT)
+//				std::cout << "rehashing.  size = " << buckets << std::endl;
+//				if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type))  > 0) {
+//					std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//				} else {
+//					std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//				}
+//#endif
 
 				return i;  // return with what's completed.
 			}
@@ -1824,11 +1822,11 @@ protected:
 
 
 #if defined(REPROBE_STAT)
-    if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
-      std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-    } else {
-      std::cout << "STATUS: container alignment on value boundary" << std::endl;
-    }
+//    if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+//      std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//    } else {
+//      std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//    }
 
     size_type before = lsize;
 #endif
@@ -1850,15 +1848,27 @@ protected:
 
 #if defined(REPROBE_STAT)
       std::cout << "rehashed.  size = " << buckets << std::endl;
-      if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type))  > 0) {
-        std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-      } else {
-        std::cout << "STATUS: container alignment on value boundary" << std::endl;
-      }
+//      if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type))  > 0) {
+//        std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//      } else {
+//        std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//      }
 #endif
     }
 
     size_t j;
+
+
+#if defined(DEBUG_HASH_MAPPING)
+    // DEBUGGING:  make histogram
+    uint32_t* histo = ::utils::mem::aligned_alloc<uint32_t>(1024);  // 1024 bins.
+    memset(histo, 0, 1024 * sizeof(uint32_t));
+    uint32_t bin_size = std::max(1UL, (buckets >> 10));
+    uint8_t histo_shift = std::log2(bin_size);
+    uint32_t* profile = ::utils::mem::aligned_alloc<uint32_t>(bin_size);  // 1024 bins.
+    uint32_t profile_mask = ~((~0) << histo_shift);
+    memset(profile, 0, bin_size * sizeof(uint32_t));
+#endif
 
     // compute the first part of the hashes
     size_t max_prefetch = std::min(input_size, lookahead2);
@@ -1888,10 +1898,38 @@ protected:
 
     		// process current
     		val = get_tuple(input[i], default_val);
+
+#if defined(DEBUG_HASH_MAPPING)
+    		// DEBUG
+        	++histo[(hashes[k] >> histo_shift)];
+        	++profile[(hashes[k] & profile_mask)];
+#endif
+
             insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
             	free(hashes);
+
+#if defined(DEBUG_HASH_MAPPING)
+    	// DEBUG: printout the histogram and profile
+    	{
+    		::std::stringstream ss;
+			ss << "HISTOGRAM, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < 1024; ++ii) {
+				ss << histo[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+    	{
+    		::std::stringstream ss;
+			ss << "PROFILE, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < bin_size; ++ii) {
+				ss << profile[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+#endif
+
             	return i;
 //              rehash(buckets << 1);  // resize.
 //              insert_bid = insert_with_hint(container, info_container, hashes[k], val);
@@ -1932,10 +1970,38 @@ protected:
 
     		// process current
     		val = get_tuple(input[i], default_val);
+
+#if defined(DEBUG_HASH_MAPPING)
+    		// DEBUG
+        	++histo[(hashes[k] >> histo_shift)];
+        	++profile[(hashes[k] & profile_mask)];
+#endif
+
             insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
             	free(hashes);
+
+#if defined(DEBUG_HASH_MAPPING)
+    	// DEBUG: printout the histogram and profile
+    	{
+    		::std::stringstream ss;
+			ss << "HISTOGRAM, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < 1024; ++ii) {
+				ss << histo[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+    	{
+    		::std::stringstream ss;
+			ss << "PROFILE, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < bin_size; ++ii) {
+				ss << profile[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+#endif
+
             	return i;
 //              rehash(buckets << 1);  // resize.
 //              insert_bid = insert_with_hint(container, info_container, hashes[k], val);
@@ -1960,10 +2026,38 @@ protected:
     	for (; k < batch_size; ++k, ++i) {
     		// process current
     		val = get_tuple(input[i], default_val);
-            insert_bid = insert_with_hint(container, info_container, hashes[k], val);
+
+#if defined(DEBUG_HASH_MAPPING)
+    		// DEBUG
+        	++histo[(hashes[k] >> histo_shift)];
+        	++profile[(hashes[k] & profile_mask)];
+#endif
+
+    		insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
             	free(hashes);
+
+#if defined(DEBUG_HASH_MAPPING)
+    	// DEBUG: printout the histogram and profile
+    	{
+    		::std::stringstream ss;
+			ss << "HISTOGRAM, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < 1024; ++ii) {
+				ss << histo[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+    	{
+    		::std::stringstream ss;
+			ss << "PROFILE, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < bin_size; ++ii) {
+				ss << profile[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+#endif
+
             	return i;
 //              rehash(buckets << 1);  // resize.
 //              insert_bid = insert_with_hint(container, info_container, hashes[k], val);
@@ -1977,6 +2071,27 @@ protected:
         if (static_cast<size_t>(static_cast<double>(lsize) * 1.01) >= max_load) {
         	// start over from current position
         	free(hashes);
+
+#if defined(DEBUG_HASH_MAPPING)
+    	// DEBUG: printout the histogram and profile
+    	{
+    		::std::stringstream ss;
+			ss << "HISTOGRAM, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < 1024; ++ii) {
+				ss << histo[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+    	{
+    		::std::stringstream ss;
+			ss << "PROFILE, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < bin_size; ++ii) {
+				ss << profile[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+#endif
+
         	return i;
 //          rehash(buckets << 1);
 
@@ -2003,10 +2118,38 @@ protected:
 
     		// process current
     		val = get_tuple(input[i], default_val);
+
+#if defined(DEBUG_HASH_MAPPING)
+    		// DEBUG
+        	++histo[(hashes[k] >> histo_shift)];
+        	++profile[(hashes[k] & profile_mask)];
+#endif
+
             insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
             	free(hashes);
+
+#if defined(DEBUG_HASH_MAPPING)
+    	// DEBUG: printout the histogram and profile
+    	{
+    		::std::stringstream ss;
+			ss << "HISTOGRAM, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < 1024; ++ii) {
+				ss << histo[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+    	{
+    		::std::stringstream ss;
+			ss << "PROFILE, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < bin_size; ++ii) {
+				ss << profile[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+#endif
+
             	return i;
 
 //              rehash(buckets << 1);  // resize.
@@ -2040,10 +2183,38 @@ protected:
 
     		// process current
     		val = get_tuple(input[i], default_val);
+
+#if defined(DEBUG_HASH_MAPPING)
+    		// DEBUG
+        	++histo[(hashes[k] >> histo_shift)];
+        	++profile[(hashes[k] & profile_mask)];
+#endif
+
             insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
             	free(hashes);
+
+#if defined(DEBUG_HASH_MAPPING)
+    	// DEBUG: printout the histogram and profile
+    	{
+    		::std::stringstream ss;
+			ss << "HISTOGRAM, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < 1024; ++ii) {
+				ss << histo[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+    	{
+    		::std::stringstream ss;
+			ss << "PROFILE, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < bin_size; ++ii) {
+				ss << profile[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+#endif
+
             	return i;
 //              rehash(buckets << 1);  // resize.
 //              insert_bid = insert_with_hint(container, info_container, hashes[k], val);
@@ -2069,10 +2240,38 @@ protected:
     	for (; k < kmax; ++k, ++i) {
     		// process current
     		val = get_tuple(input[i], default_val);
+
+#if defined(DEBUG_HASH_MAPPING)
+    		// DEBUG
+        	++histo[(hashes[k] >> histo_shift)];
+        	++profile[(hashes[k] & profile_mask)];
+#endif
+
             insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
             	free(hashes);
+
+#if defined(DEBUG_HASH_MAPPING)
+    	// DEBUG: printout the histogram and profile
+    	{
+    		::std::stringstream ss;
+			ss << "HISTOGRAM, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < 1024; ++ii) {
+				ss << histo[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+    	{
+    		::std::stringstream ss;
+			ss << "PROFILE, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < bin_size; ++ii) {
+				ss << profile[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+#endif
+
             	return i;
 
 //              rehash(buckets << 1);  // resize.
@@ -2084,6 +2283,25 @@ protected:
 
     	free(hashes);
 
+#if defined(DEBUG_HASH_MAPPING)
+    	// DEBUG: printout the histogram and profile
+    	{
+    		::std::stringstream ss;
+			ss << "HISTOGRAM, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < 1024; ++ii) {
+				ss << histo[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+    	{
+    		::std::stringstream ss;
+			ss << "PROFILE, " << buckets << " buckets: ";
+			for (size_t ii = 0; ii < bin_size; ++ii) {
+				ss << profile[ii] << ", ";
+			}
+			std::cout << ss.str() << std::endl;
+    	}
+#endif
     	return input_size;
     }
 
@@ -2172,13 +2390,13 @@ protected:
 	auto insert_impl(IT begin, IT end, int)
 		-> decltype(::std::declval<H>()(::std::declval<K*>(), ::std::declval<size_t>(), ::std::declval<HVT*>()), void()) {
 #if defined(REPROBE_STAT)
-		std::cout << "INSERT ITER B" << std::endl;
+		std::cout << "INSERT PAIR ITER B" << std::endl;
 
-		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
-			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-		} else {
-			std::cout << "STATUS: container alignment on value boundary" << std::endl;
-		}
+//		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+//			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//		} else {
+//			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//		}
 
 		reset_reprobe_stats();
 		size_type before = lsize;
@@ -2260,13 +2478,13 @@ protected:
 	auto insert_impl(IT begin, IT end, mapped_type const & default_val, int)
 		-> decltype(::std::declval<H>()(::std::declval<K*>(), ::std::declval<size_t>(), ::std::declval<HVT*>()), void()) {
 #if defined(REPROBE_STAT)
-		std::cout << "INSERT ITER B" << std::endl;
+		std::cout << "INSERT KEY ITER B" << std::endl;
 
-		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
-			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-		} else {
-			std::cout << "STATUS: container alignment on value boundary" << std::endl;
-		}
+//		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+//			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//		} else {
+//			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//		}
 
 		reset_reprobe_stats();
 		size_type before = lsize;
@@ -2328,13 +2546,13 @@ protected:
 	auto insert_impl(IT begin, IT end, long)
 		-> decltype(::std::declval<H>()(::std::declval<K>()), void()) {
 #if defined(REPROBE_STAT)
-		std::cout << "INSERT ITER" << std::endl;
+		std::cout << "INSERT PAIR ITER" << std::endl;
 
-		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
-			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-		} else {
-			std::cout << "STATUS: container alignment on value boundary" << std::endl;
-		}
+//		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+//			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//		} else {
+//			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//		}
 
 		reset_reprobe_stats();
 		size_type before = lsize;
@@ -2393,13 +2611,13 @@ protected:
 	auto insert_impl(IT begin, IT end, mapped_type const & default_val, long)
 		-> decltype(::std::declval<H>()(::std::declval<K>()), void()) {
 #if defined(REPROBE_STAT)
-		std::cout << "INSERT ITER" << std::endl;
+		std::cout << "INSERT KEY ITER" << std::endl;
 
-		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
-			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-		} else {
-			std::cout << "STATUS: container alignment on value boundary" << std::endl;
-		}
+//		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+//			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//		} else {
+//			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//		}
 
 		reset_reprobe_stats();
 		size_type before = lsize;
@@ -2484,13 +2702,13 @@ public:
     //insert_impl<false>(begin, end, default_val, 0);
 
 #if defined(REPROBE_STAT)
-		std::cout << "INSERT ITER" << std::endl;
+		std::cout << "INSERT Key NO EST" << std::endl;
 
-		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
-			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-		} else {
-			std::cout << "STATUS: container alignment on value boundary" << std::endl;
-		}
+//		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+//			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//		} else {
+//			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//		}
 
 		reset_reprobe_stats();
 		size_type before = lsize;
@@ -2518,13 +2736,13 @@ public:
     //insert_impl<false>(begin, end, default_val, 0);
 
 #if defined(REPROBE_STAT)
-		std::cout << "INSERT ITER" << std::endl;
+		std::cout << "INSERT Pair No Est" << std::endl;
 
-		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
-			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-		} else {
-			std::cout << "STATUS: container alignment on value boundary" << std::endl;
-		}
+//		if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type)) > 0) {
+//			std::cout << "WARNING: container alignment not on value boundary" << std::endl;
+//		} else {
+//			std::cout << "STATUS: container alignment on value boundary" << std::endl;
+//		}
 
 		reset_reprobe_stats();
 		size_type before = lsize;
