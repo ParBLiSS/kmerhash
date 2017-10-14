@@ -50,7 +50,7 @@
 #include <functional> 		// for std::function and std::hash
 #include <algorithm> 		// for sort, stable_sort, unique, is_sorted
 #include <iterator>  // advance, distance
-#include <sstream>  // stringstream for filea
+#include <sstream>  // stringstream for filea.  for debugging...
 #include <cstdint>  // for uint8, etc.
 #include <ostream>  // std::flush
 
@@ -158,7 +158,7 @@ namespace dsc  // distributed std container
     	using trans_val_type = decltype(::std::declval<DistTrans<Key>>()(::std::declval<Key>()));
     	using hash_val_type = decltype(::std::declval<DistHash<Key>>()(::std::declval<trans_val_type>()));
 
-    	DistHash<trans_val_type> hash;
+//    	DistHash<trans_val_type> hash;
 
   	template <typename S>
   	struct modulus {
@@ -985,6 +985,18 @@ namespace dsc  // distributed std container
 	std::vector<size_t> recv_counts(this->comm.size());
     mxx::all2all(send_counts.data(), 1, recv_counts.data(), this->comm);
 
+#if defined(DEBUG_COMM_VOLUME)
+    // DEBUG.  get the send counts.
+    {
+		std::stringstream ss;
+		ss << "SEND_COUNT rank " << this->comm.rank() << ": ";
+		for (int i = 0; i < this->comm.size(); ++i) {
+			ss << send_counts[i] << ", ";
+		}
+		std::cout << ss.str() << std::endl;
+    }
+#endif
+
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_A2A)
       __itt_pause();
@@ -992,10 +1004,9 @@ namespace dsc  // distributed std container
   	  	  	  BL_BENCH_END(insert, "a2a_count", recv_counts.size());
 
   	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
-  	        if (this->comm.rank() == 0) std::cout << "local estimated size " << this->hll.estimate() << std::endl;
   			size_t est = this->hll.estimate_average_per_rank(this->comm);
   	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate)));
-  	        if (this->comm.rank() == 0) std::cout << " estimated size " << est << std::endl;
+  	        std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
   	        BL_BENCH_END(insert, "alloc_hashtable", est);
 
   	        size_t before = this->c.size();
@@ -2988,6 +2999,18 @@ if (measure_mode == MEASURE_A2A)
 std::vector<size_t> recv_counts(this->comm.size());
 mxx::all2all(send_counts.data(), 1, recv_counts.data(), this->comm);
 
+#if defined(DEBUG_COMM_VOLUME)
+    // DEBUG.  get the send counts.
+    {
+		std::stringstream ss;
+		ss << "SEND_COUNT rank " << this->comm.rank() << ": ";
+		for (int i = 0; i < this->comm.size(); ++i) {
+			ss << send_counts[i] << ", ";
+		}
+		std::cout << ss.str() << std::endl;
+    }
+#endif
+
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_A2A)
   __itt_pause();
@@ -2995,10 +3018,9 @@ if (measure_mode == MEASURE_A2A)
 	  	  	  BL_BENCH_END(insert, "a2a_count", recv_counts.size());
 
 	  	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
-	  	        if (this->comm.rank() == 0) std::cout << "local estimated size " << this->hll.estimate() << std::endl;
-	  			size_t est = this->hll.estimate_average_per_rank(this->comm);
+	  	        size_t est = this->hll.estimate_average_per_rank(this->comm);
 	  	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate)));
-	  	        if (this->comm.rank() == 0) std::cout << " estimated size " << est << std::endl;
+	  	        std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
 	  	        BL_BENCH_END(insert, "alloc_hashtable", est);
 
 	        size_t before = this->c.size();
