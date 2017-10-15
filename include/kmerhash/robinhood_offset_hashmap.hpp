@@ -1956,14 +1956,16 @@ protected:
     	}
 
     	// exhasuted indices for prefetching.  fetch some more.
-        hash_mod2(input + i + lookahead2, lookahead2, hashes);
-        for (j = 0; j < lookahead2; ++j) {
-          // prefetch the info_container entry for ii.
-          KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + hashes[j]), _MM_HINT_T0);
-          // prefetch container as well - would be NEAR but may not be exact.
-          KH_PREFETCH((const char *)(container.data() + hashes[j]), _MM_HINT_T0);
-        }
-
+    	if (input_size > (i+lookahead2)) {
+    		max_prefetch = std::min(input_size - (i + lookahead2), lookahead2);
+    		hash_mod2(input + i + lookahead2, max_prefetch, hashes);
+			for (j = 0; j < max_prefetch; ++j) {
+			  // prefetch the info_container entry for ii.
+			  KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + hashes[j]), _MM_HINT_T0);
+			  // prefetch container as well - would be NEAR but may not be exact.
+			  KH_PREFETCH((const char *)(container.data() + hashes[j]), _MM_HINT_T0);
+			}
+    	}
     	// now finish the current section with limited prefetching.
     	// and loop and insert.
     	for (kmax = batch_size - INSERT_LOOKAHEAD; k < kmax; ++k, ++i) {
@@ -2093,23 +2095,13 @@ protected:
 #endif
 
         	return i;
-//          rehash(buckets << 1);
-
-//    #if defined(REPROBE_STAT)
-//          std::cout << "rehashed.  size = " << buckets << std::endl;
-//          if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type))  > 0) {
-//            std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-//          } else {
-//            std::cout << "STATUS: container alignment on value boundary" << std::endl;
-//          }
-//    #endif
         }
 
     }
 
     // do the remainder (less than blocks of batch_size.
     	// has the remainder
-    	kmax = ((input_size - max) > j) ? (input_size - max) - j : 0;
+    	kmax = std::max((input_size - max), j) - j;
     	if (kmax > 0)
     		hash_mod2(input + i + j, kmax, hashes + j);
 
@@ -2160,25 +2152,28 @@ protected:
 
             // intention is to write, so should prefetch for empty entries too.
             // prefetch container
-            bid = hashes[k + INSERT_LOOKAHEAD];
-            bid1 = bid + 1;
-            bid += get_offset(info_container[bid]);
-            bid1 += get_offset(info_container[bid1]);
+            if ((k + INSERT_LOOKAHEAD) < (input_size - max)) {
+				bid = hashes[k + INSERT_LOOKAHEAD];
+				bid1 = bid + 1;
+				bid += get_offset(info_container[bid]);
+				bid1 += get_offset(info_container[bid1]);
 
-            KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
-            // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
-            // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
-            if (bid1 > (bid + value_per_cacheline))
-              KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
-
+				KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
+				// NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
+				// bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
+				if (bid1 > (bid + value_per_cacheline))
+				  KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+            }
             // prefetch info container.
-            bid = hashes[k + lookahead2];
-            KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + bid), _MM_HINT_T0);
+            if ((k + lookahead2) < (input_size - max)) {
+            	bid = hashes[k + lookahead2];
+            	KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + bid), _MM_HINT_T0);
+            }
     	}
 
     	// now finish the current section with limited prefetching.
     	// and loop and insert.
-    	kmax = ((input_size - max) > INSERT_LOOKAHEAD) ? ((input_size - max) - INSERT_LOOKAHEAD) : 0;
+    	kmax = std::max((input_size - max), static_cast<size_t>(INSERT_LOOKAHEAD)) - INSERT_LOOKAHEAD;
     	for (; k < kmax; ++k, ++i) {
 
     		// process current
@@ -2224,16 +2219,19 @@ protected:
 
             // intention is to write, so should prefetch for empty entries too.
             // prefetch container
-            bid = hashes[k + INSERT_LOOKAHEAD];
-            bid1 = bid + 1;
-            bid += get_offset(info_container[bid]);
-            bid1 += get_offset(info_container[bid1]);
+            if ((k + INSERT_LOOKAHEAD) < (input_size - max)) {
 
-            KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
-            // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
-            // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
-            if (bid1 > (bid + value_per_cacheline))
-              KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+				bid = hashes[k + INSERT_LOOKAHEAD];
+				bid1 = bid + 1;
+				bid += get_offset(info_container[bid]);
+				bid1 += get_offset(info_container[bid1]);
+
+				KH_PREFETCH((const char *)(container.data() + bid), _MM_HINT_T0);
+				// NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
+				// bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
+				if (bid1 > (bid + value_per_cacheline))
+				  KH_PREFETCH((const char *)(container.data() + bid + value_per_cacheline), _MM_HINT_T1);
+            }
     	}
 
     	kmax = (input_size - max);
