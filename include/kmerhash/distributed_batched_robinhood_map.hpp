@@ -994,7 +994,7 @@ namespace dsc  // distributed std container
   	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
   			size_t est = this->hll.estimate_average_per_rank(this->comm);
   	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate)));
-  	        std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
+  	        //std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
   	        BL_BENCH_END(insert, "alloc_hashtable", est);
 
   	        size_t before = this->c.size();
@@ -1011,6 +1011,31 @@ namespace dsc  // distributed std container
 
   	      BL_BENCH_END(insert, "a2av_insert", this->c.size());
 
+
+
+#elif defined(OVERLAPPED_COMM_FULLBUFFER)
+
+  	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_fullbuf", this->comm);
+
+  	      ::khmxx::incremental::ialltoallv_and_modify_fullbuffer(input.data(), input.data() + input.size(), send_counts,
+  	                                                  [this](::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
+  	                                                     this->c.insert_no_estimate(b, e);
+  	                                                  },
+  	                                                  this->comm);
+
+  	      BL_BENCH_END(insert, "a2av_insert_fullbuf", this->c.size());
+
+#elif defined(OVERLAPPED_COMM_2P)
+
+  	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_2pass", this->comm);
+
+  	      ::khmxx::incremental::ialltoallv_and_modify_2phase(input.data(), input.data() + input.size(), send_counts,
+  	                                                  [this](::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
+  	                                                     this->c.insert_no_estimate(b, e);
+  	                                                  },
+  	                                                  this->comm);
+
+  	      BL_BENCH_END(insert, "a2av_insert_2pass", this->c.size());
 
 
 #else
@@ -1564,6 +1589,71 @@ if (measure_mode == MEASURE_RESERVE)
 
   	      BL_BENCH_END(count, "a2av_count", this->c.size());
 
+#elif defined(OVERLAPPED_COMM_FULLBUFFER)
+
+          BL_BENCH_COLLECTIVE_START(count, "alloc out", this->comm);
+        // get mapping to proc
+        // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
+//          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
+//          BLISS_UNUSED(recv_counts);
+#ifdef VTUNE_ANALYSIS
+if (measure_mode == MEASURE_RESERVE)
+    __itt_resume();
+#endif
+
+		results.resize(input.size(), 0);
+
+#ifdef VTUNE_ANALYSIS
+if (measure_mode == MEASURE_RESERVE)
+    __itt_pause();
+#endif
+	  	  	  BL_BENCH_END(count, "alloc out ", input.size());
+
+
+	      BL_BENCH_COLLECTIVE_START(count, "a2av_count_fullbuf", this->comm);
+
+	      ::khmxx::incremental::ialltoallv_and_query_one_to_one_fullbuffer(
+	    		  input.data(), input.data() + input.size(), send_counts,
+	                                                  [this, &pred](Key* b, Key* e, count_result_type * out){
+	                                                     this->c.count(out, b, e, pred, pred);
+	                                                  },
+												  results.data(),
+	                                                  this->comm);
+
+	      BL_BENCH_END(count, "a2av_count_fullbuf", this->c.size());
+
+#elif defined(OVERLAPPED_COMM_2P)
+
+          BL_BENCH_COLLECTIVE_START(count, "alloc out", this->comm);
+        // get mapping to proc
+        // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
+//          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
+//          BLISS_UNUSED(recv_counts);
+#ifdef VTUNE_ANALYSIS
+if (measure_mode == MEASURE_RESERVE)
+    __itt_resume();
+#endif
+
+		results.resize(input.size(), 0);
+
+#ifdef VTUNE_ANALYSIS
+if (measure_mode == MEASURE_RESERVE)
+    __itt_pause();
+#endif
+	  	  	  BL_BENCH_END(count, "alloc out", input.size());
+
+
+	      BL_BENCH_COLLECTIVE_START(count, "a2av_count", this->comm);
+
+	      ::khmxx::incremental::ialltoallv_and_query_one_to_one_2phase(
+	    		  input.data(), input.data() + input.size(), send_counts,
+	                                                  [this, &pred](Key* b, Key* e, count_result_type * out){
+	                                                     this->c.count(out, b, e, pred, pred);
+	                                                  },
+												  results.data(),
+	                                                  this->comm);
+
+	      BL_BENCH_END(count, "a2av_count", this->c.size());
 
 
 #else
@@ -2081,6 +2171,72 @@ if (measure_mode == MEASURE_RESERVE)
   	      BL_BENCH_END(find, "a2av_find", this->c.size());
 
 
+#elif defined(OVERLAPPED_COMM_FULLBUFFER)
+
+          BL_BENCH_COLLECTIVE_START(find, "alloc out", this->comm);
+        // get mapping to proc
+        // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
+//          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
+//          BLISS_UNUSED(recv_counts);
+#ifdef VTUNE_ANALYSIS
+if (measure_mode == MEASURE_RESERVE)
+    __itt_resume();
+#endif
+
+		results.resize(input.size());
+
+#ifdef VTUNE_ANALYSIS
+if (measure_mode == MEASURE_RESERVE)
+    __itt_pause();
+#endif
+	  	  	  BL_BENCH_END(find, "alloc out", input.size());
+
+
+	      BL_BENCH_COLLECTIVE_START(find, "a2av_find_fullbuf", this->comm);
+
+	      ::khmxx::incremental::ialltoallv_and_query_one_to_one_fullbuffer(
+	    		  input.data(), input.data() + input.size(), send_counts,
+	                                                  [this, &pred, &nonexistent](Key* b, Key* e, mapped_type * out){
+	                                                     this->c.find(out, b, e, nonexistent, pred, pred);
+	                                                  },
+												  results.data(),
+	                                                  this->comm);
+
+	      BL_BENCH_END(find, "a2av_find_fullbuf", this->c.size());
+
+#elif defined(OVERLAPPED_COMM_2P)
+
+          BL_BENCH_COLLECTIVE_START(find, "alloc out", this->comm);
+        // get mapping to proc
+        // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
+//          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
+//          BLISS_UNUSED(recv_counts);
+#ifdef VTUNE_ANALYSIS
+if (measure_mode == MEASURE_RESERVE)
+    __itt_resume();
+#endif
+
+		results.resize(input.size());
+
+#ifdef VTUNE_ANALYSIS
+if (measure_mode == MEASURE_RESERVE)
+    __itt_pause();
+#endif
+	  	  	  BL_BENCH_END(find, "alloc out", input.size());
+
+
+	      BL_BENCH_COLLECTIVE_START(find, "a2av_find", this->comm);
+
+	      ::khmxx::incremental::ialltoallv_and_query_one_to_one_2phase(
+	    		  input.data(), input.data() + input.size(), send_counts,
+	                                                  [this, &pred, &nonexistent](Key* b, Key* e, mapped_type * out){
+	                                                     this->c.find(out, b, e, nonexistent, pred, pred);
+	                                                  },
+												  results.data(),
+	                                                  this->comm);
+
+	      BL_BENCH_END(find, "a2av_find", this->c.size());
+
 
 #else
 
@@ -2588,6 +2744,34 @@ if (measure_mode == MEASURE_A2A)
   	                                                  this->comm);
 
   	      BL_BENCH_END(erase, "a2av_erase", this->c.size());
+#elif defined(OVERLAPPED_COMM_FULLBUFFER)
+
+
+  	      BL_BENCH_COLLECTIVE_START(erase, "a2av_erase_fullbuff", this->comm);
+
+  	      ::khmxx::incremental::ialltoallv_and_modify_fullbuffer(
+  	    		  input.data(), input.data() + input.size(), send_counts,
+  	                                                  [this, &pred](Key* b, Key* e){
+  	                                                     this->c.erase(b, e, pred, pred);
+  	                                                  },
+  	                                                  this->comm);
+
+  	      BL_BENCH_END(erase, "a2av_erase_fullbuf", this->c.size());
+
+#elif defined(OVERLAPPED_COMM_2P)
+
+
+  	      BL_BENCH_COLLECTIVE_START(erase, "a2av_erase_2phase", this->comm);
+
+  	      ::khmxx::incremental::ialltoallv_and_modify_2phase(
+  	    		  input.data(), input.data() + input.size(), send_counts,
+  	                                                  [this, &pred](Key* b, Key* e){
+  	                                                     this->c.erase(b, e, pred, pred);
+  	                                                  },
+  	                                                  this->comm);
+
+  	      BL_BENCH_END(erase, "a2av_erase_2phase", this->c.size());
+
 
 
 
@@ -2996,7 +3180,7 @@ if (measure_mode == MEASURE_A2A)
 	  	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
 	  	        size_t est = this->hll.estimate_average_per_rank(this->comm);
 	  	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate)));
-	  	        std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
+	  	        //std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
 	  	        BL_BENCH_END(insert, "alloc_hashtable", est);
 
 	        size_t before = this->c.size();
@@ -3012,6 +3196,30 @@ if (measure_mode == MEASURE_A2A)
 	                                                  this->comm);
 
 	      BL_BENCH_END(insert, "a2av_insert", this->c.size());
+
+#elif defined(OVERLAPPED_COMM_FULLBUFFER)
+
+	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_fullbuf", this->comm);
+
+	      ::khmxx::incremental::ialltoallv_and_modify_fullbuffer(input.data(), input.data() + input.size(), send_counts,
+	                                                  [this](Key* b, Key* e){
+	                                                     this->c.insert_no_estimate(b, e, T(1));
+	                                                  },
+	                                                  this->comm);
+
+	      BL_BENCH_END(insert, "a2av_insert_fullbuf", this->c.size());
+
+#elif defined(OVERLAPPED_COMM_2P)
+
+	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_2phase", this->comm);
+
+	      ::khmxx::incremental::ialltoallv_and_modify_2phase(input.data(), input.data() + input.size(), send_counts,
+	                                                  [this](Key* b, Key* e){
+	                                                     this->c.insert_no_estimate(b, e, T(1));
+	                                                  },
+	                                                  this->comm);
+
+	      BL_BENCH_END(insert, "a2av_insert_2phase", this->c.size());
 
 
 

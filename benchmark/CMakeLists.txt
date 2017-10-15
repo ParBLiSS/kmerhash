@@ -83,6 +83,20 @@ if (BUILD_BENCHMARKS)
 		endforeach(hash)
 	endforeach(map)
 	
+	#overlapped comm and insert/find/count/erase.
+	foreach(map BROBINHOOD RADIXSORT)
+		foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
+			add_dist_hashmap_target(overlapFull-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_FULLBUFFER)
+		endforeach(hash)
+	endforeach(map)
+
+	#overlapped comm and insert/find/count/erase.
+	foreach(map BROBINHOOD RADIXSORT)
+		foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
+			add_dist_hashmap_target(overlap2P-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_2P)
+		endforeach(hash)
+	endforeach(map)
+
 
 # kmer-count pair.
   add_executable(testKmerPairIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
