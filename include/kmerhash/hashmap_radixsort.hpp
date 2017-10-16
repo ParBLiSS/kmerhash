@@ -359,7 +359,7 @@ public:
 
     public:
     hashmap_radixsort(uint32_t _numBuckets = 1048576,
-            uint32_t _binSize = 1024,
+            uint32_t _binSize = 4096,
             V _noValue = 0) :
             	numBuckets(next_power_of_2(_numBuckets)),
 				bucketMask(numBuckets - 1),
