@@ -104,12 +104,12 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
   BL_BENCH_END(benchmark, "murmur32", count);
 
 #if defined(__SSE4_1__)
-  BL_BENCH_START(benchmark);
-  {
-    ::fsc::hash::murmur3sse32<DataStruct<N> > h;
-     benchmark_hash(h, data, out, count);
-  }
-  BL_BENCH_END(benchmark, "murmur32sse1", count);
+//  BL_BENCH_START(benchmark);
+//  {
+//    ::fsc::hash::murmur3sse32<DataStruct<N> > h;
+//     benchmark_hash(h, data, out, count);
+//  }
+//  BL_BENCH_END(benchmark, "murmur32sse1", count);
 
   BL_BENCH_START(benchmark);
   {
@@ -150,12 +150,12 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
 #endif
 
 #if defined(__AVX2__)
-  BL_BENCH_START(benchmark);
-  {
-    ::fsc::hash::murmur3avx32<DataStruct<N> > h;
-     benchmark_hash(h, data, out, count);
-  }
-  BL_BENCH_END(benchmark, "murmur32avx1", count);
+//  BL_BENCH_START(benchmark);
+//  {
+//    ::fsc::hash::murmur3avx32<DataStruct<N> > h;
+//     benchmark_hash(h, data, out, count);
+//  }
+//  BL_BENCH_END(benchmark, "murmur32avx1", count);
 
   BL_BENCH_START(benchmark);
   {
