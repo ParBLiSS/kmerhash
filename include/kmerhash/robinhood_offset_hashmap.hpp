@@ -3000,7 +3000,9 @@ protected:
 		size_t total = std::distance(begin, end);
 
 		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
+#if defined(ENABLE_PREFETCH)
 		size_t h;
+#endif
 
 		size_t batch_size = InternalHash::batch_size; // static_cast<size_t>(QUERY_LOOKAHEAD));
 
@@ -3025,6 +3027,7 @@ protected:
 		size_t i = 0;
 		key_type * it = begin;
 		hash_mod2(it, max, bids);
+#if defined(ENABLE_PREFETCH)
 		for (i = 0; i < max; ++it, ++i) {
 			h =  bids[i];
 			// prefetch the info_container entry for ii.
@@ -3033,6 +3036,7 @@ protected:
 			// prefetch container as well - would be NEAR but may not be exact.
 			KH_PREFETCH((const char *)(container.data() + h), _MM_HINT_T0);
 		}
+#endif
 
 		size_t bid, bid1;
 		max = total - (total & lookahead2_mask);
@@ -3474,7 +3478,9 @@ public:
 		size_t total = std::distance(begin, end);
 
 		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
+#if defined(ENABLE_PREFETCH)
 		size_t h;
+#endif
 
 
 		size_t batch_size = InternalHash::batch_size; // static_cast<size_t>(QUERY_LOOKAHEAD));
@@ -3502,6 +3508,7 @@ public:
 		size_t i = 0;
 		key_type const * it = begin;
 		hash_mod2(it, max, bids);
+#if defined(ENABLE_PREFETCH)
 		for (i = 0; i < max; ++it, ++i) {
 
 			h =  bids[i];
@@ -3511,6 +3518,7 @@ public:
 			// prefetch container as well - would be NEAR but may not be exact.
 			KH_PREFETCH((const char *)(container.data() + h), _MM_HINT_T0);
 		}
+#endif
 //		std::cout << "hashed and prefetched [0, " << i << ")" << std::endl;
 
 		size_t bid, bid1;

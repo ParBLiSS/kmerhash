@@ -548,11 +548,11 @@ endif(ENABLE_VTUNE_PROFILING)
 endif()
 
 
-# Prefetch configuration.
-OPTION(ENABLE_PREFETCH "enable prefetching in hashmap" ON)
-if (ENABLE_PREFETCH)
-    add_definitions(-DENABLE_PREFETCH)
-endif(ENABLE_PREFETCH)
+## Prefetch configuration.
+#OPTION(ENABLE_PREFETCH "enable prefetching in hashmap" ON)
+#if (ENABLE_PREFETCH)
+#    add_definitions(-DENABLE_PREFETCH)
+#endif(ENABLE_PREFETCH)
 
 ## LZ4 configuration.
 #OPTION(ENABLE_LZ4 "enable LZ4 compression during communication" ON)
