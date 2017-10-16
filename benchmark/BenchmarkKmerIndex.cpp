@@ -58,7 +58,6 @@ static int measure_mode = MEASURE_DISABLED;
 #include <iostream>  // for system("pause");
 
 #include "utils/logging.h"
-#include "utils/transform_utils.hpp"
 
 #include "common/alphabets.hpp"
 #include "common/kmer.hpp"

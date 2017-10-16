@@ -12,6 +12,7 @@
 #include "kmerhash/experimental/hashmap_robinhood_offsets_prefetch.hpp"
 #include "kmerhash/robinhood_offset_hashmap.hpp"
 #include "kmerhash/hashmap_linearprobe.hpp"
+#include "kmerhash/hashmap_radixsort.hpp"
 #include "kmerhash/hash.hpp"
 
 #include <robinhood.h>
@@ -1217,6 +1218,82 @@ void bench_batch_insert_2(HS& r, MicroBenchmark& mb, const std::string& title, s
     print(fout, all_stats);
 }
 
+
+template<class HS>
+void bench_batch_insert_3(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
+    std::cout << title << "; ";
+    std::cout.flush();
+    std::vector<Stats> stats;
+    Stats s;
+    s.title = title;
+    Timer t;
+    size_t mem_before = get_mem();
+    const int upTo = static_cast<int>(increase);
+    const int times = static_cast<int>(totalTimes);
+    std::vector<typename HS::value_type> data(upTo);
+    std::vector<typename HS::key_type> keys(upTo);
+    srand(23);
+    int i = 0;
+    size_t found = 0;
+    for (int ti = 0; ti < static_cast<int>(times); ++ti) {
+        // insert
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+          i = rand();
+            data[up].first = static_cast<typename HS::key_type>(i);
+            data[up].second = static_cast<typename HS::mapped_type>(i);
+            keys[up] = static_cast<typename HS::key_type>(i);
+        }
+        t.restart();
+        r.insert(data);
+        r.finalize_insert();
+        s.elapsed_insert = t.elapsed() / upTo;
+        auto gm = get_mem();
+        s.mem = gm - mem_before;
+        if (gm < mem_before) {
+            // overflow check
+            s.mem = 0;
+        }
+        s.num = r.size();
+
+
+        // query existing
+        while (mb.keepRunning()) {
+          found += r.find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
+        }
+        s.elapsed_find_existing = mb.min() / upTo;
+
+        // query nonexisting
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+          keys[up] = rand();
+        }
+        while (mb.keepRunning()) {
+          found += r.find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
+        }
+        s.elapsed_find_nonexisting = mb.min() / upTo;
+        s.found = found;
+        stats.push_back(s);
+    }
+
+    Stats sum;
+    std::for_each(stats.begin(), stats.end(), [&sum](const Stats& s) {
+        sum += s;
+    });
+    sum /= stats.size();
+
+    std::cout
+        << 1000000 * sum.elapsed_insert << "; "
+        << 1000000 * sum.elapsed_find_existing << "; "
+        << 1000000 * sum.elapsed_find_nonexisting << "; "
+        << sum.mem / (1024.0 * 1024) << "; "
+        << sum.found << std::endl;
+
+    all_stats.push_back(stats);
+
+    std::ofstream fout("out.txt");
+    print(fout, all_stats);
+}
+
+
 template<class HS>
 void bench_batch_insert_integrated(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
     std::cout << title << "; ";
@@ -1301,20 +1378,20 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
 		::fsc::hashmap_robinhood_doubling<K, V, H<K>> m;
 		m.set_max_load_factor(max_load);
 		m.set_min_load_factor(min_load);
-		bench_sequential_insert_pair(m, mb, "Tony Robinhood", upTo, times, all_stats);
+		bench_sequential_insert_pair(m, mb, "RH", upTo, times, all_stats);
 	}
 	{
 		::fsc::hashmap_robinhood_doubling<K, V, H<K>> m;
 		m.set_max_load_factor(max_load);
 		m.set_min_load_factor(min_load);
-		bench_batch_insert(m, mb, "Tony Robinhood BATCH", upTo, times, all_stats);
+		bench_batch_insert(m, mb, "BRH", upTo, times, all_stats);
 	}
-	{
-		::fsc::hashmap_robinhood_doubling<K, V, H<K>> m;
-		m.set_max_load_factor(max_load);
-		m.set_min_load_factor(min_load);
-		bench_batch_insert_integrated(m, mb, "Tony Robinhood BATCH integrated", upTo, times, all_stats);
-	}
+//	{
+//		::fsc::hashmap_robinhood_doubling<K, V, H<K>> m;
+//		m.set_max_load_factor(max_load);
+//		m.set_min_load_factor(min_load);
+//		bench_batch_insert_integrated(m, mb, "Tony Robinhood BATCH integrated", upTo, times, all_stats);
+//	}
 
 //	{
 //		::fsc::hashmap_robinhood_prefetch<K, V, H<K>> m;
@@ -1326,15 +1403,15 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
 		::fsc::hashmap_robinhood_prefetch<K, V, H<K>> m;
 		m.set_max_load_factor(max_load);
 		m.set_min_load_factor(min_load);
-		bench_batch_insert(m, mb, "Tony RHPre BATCH", upTo, times, all_stats);
+		bench_batch_insert(m, mb, "BRH_Prefetch", upTo, times, all_stats);
 	}
-	{
-		::fsc::hashmap_robinhood_prefetch<K, V, H<K>> m;
-		m.set_max_load_factor(max_load);
-		m.set_min_load_factor(min_load);
-
-		bench_batch_insert_integrated(m, mb, "Tony RHPre BATCH integrated", upTo, times, all_stats);
-	}
+//	{
+//		::fsc::hashmap_robinhood_prefetch<K, V, H<K>> m;
+//		m.set_max_load_factor(max_load);
+//		m.set_min_load_factor(min_load);
+//
+//		bench_batch_insert_integrated(m, mb, "Tony RHPre BATCH integrated", upTo, times, all_stats);
+//	}
 
 //    {
 //        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H<K>> m;
@@ -1342,18 +1419,18 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
 	//	m.set_min_load_factor(min_load);
 //        bench_sequential_insert_pair(m, mb, "Tony RHOffPre", upTo, times, all_stats);
 //    }
-    {
-        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H<K>> m;
-		m.set_max_load_factor(max_load);
-		m.set_min_load_factor(min_load);
-        bench_batch_insert(m, mb, "Tony RHOffPre BATCH", upTo, times, all_stats);
-    }
-    {
-        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H<K>> m;
-		m.set_max_load_factor(max_load);
-		m.set_min_load_factor(min_load);
-        bench_batch_insert_integrated(m, mb, "Tony RHOffPre BATCH integrated", upTo, times, all_stats);
-    }
+//    {
+//        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H<K>> m;
+//		m.set_max_load_factor(max_load);
+//		m.set_min_load_factor(min_load);
+//        bench_batch_insert(m, mb, "Tony RHOffPre BATCH", upTo, times, all_stats);
+//    }
+//    {
+//        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H<K>> m;
+//		m.set_max_load_factor(max_load);
+//		m.set_min_load_factor(min_load);
+//        bench_batch_insert_integrated(m, mb, "Tony RHOffPre BATCH integrated", upTo, times, all_stats);
+//    }
 
 //    {
 //        ::fsc::hashmap_robinhood_offsets<K, V, H> m;
@@ -1365,44 +1442,51 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
         ::fsc::hashmap_robinhood_offsets<K, V, H> m;
 		m.set_max_load_factor(max_load);
 		m.set_min_load_factor(min_load);
-        bench_batch_insert_2(m, mb, "Tony RHOffPreNoOverflow BATCH", upTo, times, all_stats);
+        bench_batch_insert_2(m, mb, "BRHO_Prefetch", upTo, times, all_stats);  // no overflow
     }
 
     {
-        ::fsc::hashmap_linearprobe_doubling<K, V, H<K>> m;
-		m.set_max_load_factor(max_load);
-		m.set_min_load_factor(min_load);
-        bench_sequential_insert_pair(m, mb, "Tony LP", upTo, times, all_stats);
-    }
-    {
-        ::fsc::hashmap_linearprobe_doubling<K, V, H<K>> m;
-		m.set_max_load_factor(max_load);
-		m.set_min_load_factor(min_load);
-        bench_batch_insert(m, mb, "Tony LP BATCH", upTo, times, all_stats);
+        ::fsc::hashmap_radixsort<K, V, H> m;
+        bench_batch_insert_3(m, mb, "BRS_Prefetch", upTo, times, all_stats);  // radixsort
     }
 
-    {
-        RobinHoodInfobytePairNoOverflow::Map<K, V, H<K>> m;
-		m.max_load_factor(max_load);
-        bench_sequential_insert(m, mb, "RobinHoodInfobytePairNoOverflow", upTo, times, all_stats);
-    }
+//    {
+//        RobinHoodInfobytePairNoOverflow::Map<K, V, H<K>> m;
+//		m.max_load_factor(max_load);
+//        bench_sequential_insert(m, mb, "RobinHoodInfobytePairNoOverflow", upTo, times, all_stats);
+//    }
 
 ////    {
 ////        RobinHoodInfobytePairNoOverflow::Map<int, int, H<K>> m;
 ////        m.max_load_factor(0.5f);
 ////        bench_sequential_insert(m, mb, "RobinHoodInfobytePairNoOverflow 0.5", upTo, times, all_stats);
 ////    }
-
-    {
-        RobinHoodInfobytePair::Map<K, V, H<K>> m;
-        m.max_load_factor(0.9f);
-        bench_sequential_insert(m, mb, "RobinHoodInfobytePair 0.9", upTo, times, all_stats);
-    }
+//
+//    {
+//        RobinHoodInfobytePair::Map<K, V, H<K>> m;
+//        m.max_load_factor(0.9f);
+//        bench_sequential_insert(m, mb, "RobinHoodInfobytePair 0.9", upTo, times, all_stats);
+//    }
 ////    {
 ////        RobinHoodInfobytePair::Map<int, int, H<K>> m;
 ////        m.max_load_factor(0.5f);
 ////        bench_sequential_insert(m, mb, "RobinHoodInfobytePair 0.5", upTo, times, all_stats);
 ////    }
+
+
+    {
+        ::fsc::hashmap_linearprobe_doubling<K, V, H<K>> m;
+    m.set_max_load_factor(max_load);
+    m.set_min_load_factor(min_load);
+        bench_sequential_insert_pair(m, mb, "LP", upTo, times, all_stats);
+    }
+    {
+        ::fsc::hashmap_linearprobe_doubling<K, V, H<K>> m;
+    m.set_max_load_factor(max_load);
+    m.set_min_load_factor(min_load);
+        bench_batch_insert(m, mb, "LP_BATCH", upTo, times, all_stats);
+    }
+
 
     {
         google::dense_hash_map<K, V, H<K>> googlemap;
@@ -1740,11 +1824,18 @@ int main(int argc, char** argv) {
     size_t iterations = 1000;
     size_t cnt_per_iter = 100 * 1000;
     {
-      // using murmur, as farmhash impl is sensitive to prefetch on/off.
-		auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur >(cnt_per_iter, iterations, 0.8, 0.35);
-		print(std::cout, stats64);
-		std::ofstream fout("datascaling_benchmark_64_32_farmhash-0.8-0.35.txt");
-		print(fout, stats64);
+        // using murmur32sse, as farmhash impl is sensitive to prefetch on/off.
+      auto stats64 = bench_insert_find<uint32_t, uint32_t, ::fsc::hash::murmur3sse32 >(cnt_per_iter, iterations, 0.8, 0.35);
+      print(std::cout, stats64);
+      std::ofstream fout("datascaling_benchmark_64_32_murmur32sse-0.8-0.35.txt");
+      print(fout, stats64);
+    }
+    {
+        // using murmur32sse, as farmhash impl is sensitive to prefetch on/off.
+      auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur3sse32 >(cnt_per_iter, iterations, 0.8, 0.35);
+      print(std::cout, stats64);
+      std::ofstream fout("datascaling_benchmark_64_32_murmur32sse-0.8-0.35.txt");
+      print(fout, stats64);
     }
 //    {
 //		auto stats = bench_sequential_insert<int, int, ::fsc::hash::farm<int> >(cnt_per_iter, iterations);
