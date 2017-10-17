@@ -9,27 +9,27 @@ endif(BUILD_TESTS)
 message(STATUS "VTUNE_ANALYSIS set to ${VTUNE_ANALYSIS}")
 
 
-function(add_hashmap_target storehash)
+function(add_hashmap_target prefix storehash extra)
 
-      add_executable(benchmark_hashtables_${storehash} BenchmarkHashTables.cpp)
-      SET_TARGET_PROPERTIES(benchmark_hashtables_${storehash}
+      add_executable(benchmark_hashtables_${prefix}_${storehash} BenchmarkHashTables.cpp)
+      SET_TARGET_PROPERTIES(benchmark_hashtables_${prefix}_${storehash}
          PROPERTIES COMPILE_FLAGS 
-         "-DpStoreHash=${storehash}")
-      target_link_libraries(benchmark_hashtables_${storehash} ${EXTRA_LIBS})
+         "-DpStoreHash=${storehash} -D${extra}")
+      target_link_libraries(benchmark_hashtables_${prefix}_${storehash} ${EXTRA_LIBS})
 
 	if (ENABLE_VTUNE_PROFILING)
-		target_link_libraries(benchmark_hashtables_${storehash} ittnotify dl)
+		target_link_libraries(benchmark_hashtables_${prefix}_${storehash} ittnotify dl)
 	endif (ENABLE_VTUNE_PROFILING)
 
 endfunction(add_hashmap_target)
 
 
-function(add_dist_hashmap_target prefix map disthash storehash extra)
+function(add_dist_hashmap_target prefix map disthash storehash extra extra2)
 
       add_executable(${prefix}-FASTQ-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash} BenchmarkKmerIndex.cpp)      
       SET_TARGET_PROPERTIES(${prefix}-FASTQ-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash}
          PROPERTIES COMPILE_FLAGS 
-         "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=${disthash} -DpStoreHash=${storehash} -D${extra}")
+         "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=${disthash} -DpStoreHash=${storehash} -D${extra} -D${extra2}")
       target_link_libraries(${prefix}-FASTQ-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash}
        ${EXTRA_LIBS})
        
@@ -37,6 +37,21 @@ function(add_dist_hashmap_target prefix map disthash storehash extra)
 		target_link_libraries(${prefix}-FASTQ-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash} ittnotify dl)
 	endif (ENABLE_VTUNE_PROFILING)       
 endfunction(add_dist_hashmap_target)
+
+
+function(add_dist_hashmap_kmer_target prefix k dna map disthash storehash extra extra2)
+
+      add_executable(${prefix}-FASTQ-a${dna}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash} BenchmarkKmerIndex.cpp)      
+      SET_TARGET_PROPERTIES(${prefix}-FASTQ-a${dna}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash}
+         PROPERTIES COMPILE_FLAGS 
+         "-DpPARSER=FASTQ -DpDNA=${dna} -DpK=${k} -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=${disthash} -DpStoreHash=${storehash} -D${extra} -D${extra2}")
+      target_link_libraries(${prefix}-FASTQ-a${dna}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash}
+       ${EXTRA_LIBS})
+       
+	if (ENABLE_VTUNE_PROFILING)
+		target_link_libraries(${prefix}-FASTQ-a${dna}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash} ittnotify dl)
+	endif (ENABLE_VTUNE_PROFILING)       
+endfunction(add_dist_hashmap_kmer_target)
 
 
 
@@ -52,48 +67,94 @@ if (BUILD_BENCHMARKS)
 	endif(ENABLE_VTUNE_PROFILING)
 
 	# benchmark executable, FARM and MURMUR
-	foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
-		add_hashmap_target(${hash})
+	foreach(hash STD IDEN FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
+		add_hashmap_target(noPref ${hash} KH_DUMMY)
+		add_hashmap_target(Pref ${hash} ENABLE_PREFETCH)
 	endforeach(hash)
 	
 	# distributed benchmarks.
-	foreach(map ROBINHOOD DENSEHASH)
-		foreach(hash FARM MURMUR)
-			add_dist_hashmap_target(testKmerIndex ${map} ${hash} ${hash} KH_DUMMY)
+	foreach(map DENSEHASH)
+		foreach(hash FARM MURMUR32)
+			add_dist_hashmap_target(testKmerIndex ${map} ${hash} ${hash} KH_DUMMY KH_DUMMY2)
 		endforeach(hash)
-	endforeach(map)
-	foreach(map BROBINHOOD RADIXSORT)
-		foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
-			add_dist_hashmap_target(testKmerIndex ${map} ${hash} ${hash} KH_DUMMY)
-		endforeach(hash)
+		add_dist_hashmap_target(testKmerIndex ${map} MURMUR32 CRC32C KH_DUMMY KH_DUMMY2)
+
+		foreach(k 15 21 63)
+			add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} MURMUR32 CRC32C KH_DUMMY KH_DUMMY2)
+			add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} MURMUR32 MURMUR32 KH_DUMMY KH_DUMMY2)
+		endforeach(k)
+		foreach(dna 5 16)
+			add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} MURMUR32 CRC32C KH_DUMMY KH_DUMMY2)
+			add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} MURMUR32 MURMUR32 KH_DUMMY KH_DUMMY2)
+		endforeach(dna)
 	endforeach(map)
 	
-	
-	# lz4 distributed benchmarks.
 	foreach(map BROBINHOOD RADIXSORT)
-		foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
-			add_dist_hashmap_target(testLZ4KmerIndex ${map} ${hash} ${hash} ENABLE_LZ4_RESULT)
+		# with prefetch
+		add_dist_hashmap_target(testKmerIndex ${map} FARM FARM KH_DUMMY1 ENABLE_PREFETCH)
+		foreach(hash MURMUR32 MURMUR32avx)
+			add_dist_hashmap_target(testKmerIndex ${map} ${hash} ${hash} KH_DUMMY1 ENABLE_PREFETCH)
+			add_dist_hashmap_target(testKmerIndex ${map} ${hash} CRC32C KH_DUMMY1 ENABLE_PREFETCH)
 		endforeach(hash)
+		
+			
+		# without prefetch		
+		add_dist_hashmap_target(noPref_KmerIndex ${map} FARM FARM KH_DUMMY1 KH_DUMMY2)
+		foreach(hash MURMUR32 MURMUR32avx)
+			add_dist_hashmap_target(noPref_KmerIndex ${map} ${hash} ${hash} KH_DUMMY1 KH_DUMMY2)
+			add_dist_hashmap_target(noPref_KmerIndex ${map} ${hash} CRC32C KH_DUMMY1 KH_DUMMY2)
+		endforeach(hash)
+	
+		# with overlap and no prefetch
+		#overlapped comm and insert/find/count/erase.
+		add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} FARM FARM OVERLAPPED_COMM KH_DUMMY2)
+		foreach(hash MURMUR32 MURMUR32avx)
+			add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM KH_DUMMY2)
+			add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM KH_DUMMY2)
+		endforeach(hash)
+	
+		#with overlap and prefetch
+		add_dist_hashmap_target(overlap-KmerIndex ${map} FARM FARM OVERLAPPED_COMM ENABLE_PREFETCH)
+		foreach(hash MURMUR32 MURMUR32avx)
+			add_dist_hashmap_target(overlap-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
+			add_dist_hashmap_target(overlap-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM ENABLE_PREFETCH)
+		endforeach(hash)
+		
+		foreach(k 15 21 63)
+			foreach(hash MURMUR32 MURMUR32avx)
+				add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} ${hash} ${hash} KH_DUMMY1 ENABLE_PREFETCH)
+				add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} ${hash} CRC32C KH_DUMMY1 ENABLE_PREFETCH)
+				add_dist_hashmap_kmer_target(overlap-KmerIndex ${k} 4 ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
+				add_dist_hashmap_kmer_target(overlap-KmerIndex ${k} 4 ${map} ${hash} CRC32C OVERLAPPED_COMM ENABLE_PREFETCH)
+			endforeach(hash)
+		endforeach(k)
+		foreach(dna 5 16)
+			foreach(hash MURMUR32 MURMUR32avx)
+				add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} ${hash} ${hash} KH_DUMMY1 ENABLE_PREFETCH)
+				add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} ${hash} CRC32C KH_DUMMY1 ENABLE_PREFETCH)
+				add_dist_hashmap_kmer_target(overlap-KmerIndex 31 ${dna} ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
+				add_dist_hashmap_kmer_target(overlap-KmerIndex 31 ${dna} ${map} ${hash} CRC32C OVERLAPPED_COMM ENABLE_PREFETCH)
+			endforeach(hash)
+		endforeach(dna)
 	endforeach(map)
 
-	#overlapped comm and insert/find/count/erase.
 	foreach(map BROBINHOOD RADIXSORT)
-		foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
-			add_dist_hashmap_target(overlap-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM)
+		# lz4 distributed benchmarks.
+		foreach(hash MURMUR32avx) 
+		 # FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C
+			add_dist_hashmap_target(testLZ4KmerIndex ${map} ${hash} ${hash} ENABLE_LZ4_RESULT ENABLE_PREFETCH)
 		endforeach(hash)
-	endforeach(map)
 	
-	#overlapped comm and insert/find/count/erase.
-	foreach(map BROBINHOOD RADIXSORT)
-		foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
-			add_dist_hashmap_target(overlapFull-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_FULLBUFFER)
+		#overlapped comm using full array
+		foreach(hash MURMUR32avx) 
+		# FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
+			add_dist_hashmap_target(overlapFull-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_FULLBUFFER ENABLE_PREFETCH)
 		endforeach(hash)
-	endforeach(map)
-
-	#overlapped comm and insert/find/count/erase.
-	foreach(map BROBINHOOD RADIXSORT)
-		foreach(hash FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
-			add_dist_hashmap_target(overlap2P-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_2P)
+	
+		#overlapped comm 2 phase.
+		foreach(hash MURMUR32avx) 
+		#FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
+			add_dist_hashmap_target(overlap2P-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_2P ENABLE_PREFETCH)
 		endforeach(hash)
 	endforeach(map)
 
@@ -102,7 +163,7 @@ if (BUILD_BENCHMARKS)
   add_executable(testKmerPairIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
   SET_TARGET_PROPERTIES(testKmerPairIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
      PROPERTIES COMPILE_FLAGS 
-     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=BROBINHOOD -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DINSERT_KMER_COUNT_PAIR")
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=BROBINHOOD -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DINSERT_KMER_COUNT_PAIR -DENABLE_PREFETCH")
   target_link_libraries(testKmerPairIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
    ${EXTRA_LIBS})
 if (ENABLE_VTUNE_PROFILING)
@@ -113,7 +174,7 @@ endif(ENABLE_VTUNE_PROFILING)
   add_executable(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
   SET_TARGET_PROPERTIES(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
      PROPERTIES COMPILE_FLAGS 
-     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=BROBINHOOD -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DDUMP_DISTRIBUTED_INPUT")
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=BROBINHOOD -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DDUMP_DISTRIBUTED_INPUT -DENABLE_PREFETCH")
   target_link_libraries(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
    ${EXTRA_LIBS})
 if (ENABLE_VTUNE_PROFILING)
@@ -124,7 +185,7 @@ endif(ENABLE_VTUNE_PROFILING)
   add_executable(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
   SET_TARGET_PROPERTIES(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
      PROPERTIES COMPILE_FLAGS 
-     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=BROBINHOOD -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DINSERT_KMER_COUNT_PAIR -DDUMP_DISTRIBUTED_INPUT")
+     "-DpPARSER=FASTQ -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=BROBINHOOD -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=MURMUR -DINSERT_KMER_COUNT_PAIR -DDUMP_DISTRIBUTED_INPUT -DENABLE_PREFETCH")
   target_link_libraries(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR
    ${EXTRA_LIBS})
 if (ENABLE_VTUNE_PROFILING)
@@ -137,7 +198,12 @@ endif(ENABLE_VTUNE_PROFILING)
 include_directories("${EXT_PROJECTS_DIR}/martinus/src")
 include_directories("${EXT_PROJECTS_DIR}/martinus/src/3rdparty/google")
 add_executable(benchmark_hashtables_martinus martinus_test_robinhood.cpp)
+SET_TARGET_PROPERTIES(benchmark_hashtables_martinus
+	PROPERTIES COMPILE_FLAGS "-DENABLE_PREFETCH")
 target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
+
+add_executable(benchmark_hashtables_martinus_nopref martinus_test_robinhood.cpp)
+target_link_libraries(benchmark_hashtables_martinus_nopref ${EXTRA_LIBS})
 
 
 

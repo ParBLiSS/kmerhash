@@ -899,6 +899,18 @@ void print(O& out, const std::vector<std::vector<Stats>>& s) {
     out << "num checked." << std::endl;
 }
 
+
+
+template<class O>
+void print_header(O& out, const std::vector<std::vector<Stats>>& s, const std::string& title) {
+    out << std::endl << title << std::endl;
+    for (size_t i = 0; i < s.size(); ++i) {
+        out << ";" << s[i][0].title;
+    }
+    out << std::endl;
+}
+
+
 template<class HS>
 void bench_sequential_insert(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
     std::cout << title << "; ";
@@ -980,18 +992,6 @@ void bench_sequential_insert(HS& r, MicroBenchmark& mb, const std::string& title
     std::ofstream fout("out.txt");
     print(fout, all_stats);
 }
-
-
-template<class O>
-void print_header(O& out, const std::vector<std::vector<Stats>>& s, const std::string& title) {
-    out << std::endl << title << std::endl;
-    for (size_t i = 0; i < s.size(); ++i) {
-        out << ";" << s[i][0].title;
-    }
-    out << std::endl;
-}
-
-
 
 template<class HS>
 void bench_sequential_insert_pair(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
@@ -1144,9 +1144,9 @@ void bench_batch_insert(HS& r, MicroBenchmark& mb, const std::string& title, siz
     print(fout, all_stats);
 }
 
-
+// find returns mapped_types only.
 template<class HS>
-void bench_batch_insert_2(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
+void bench_batch_insert_robinhood(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
     std::cout << title << "; ";
     std::cout.flush();
     std::vector<Stats> stats;
@@ -1220,7 +1220,7 @@ void bench_batch_insert_2(HS& r, MicroBenchmark& mb, const std::string& title, s
 
 
 template<class HS>
-void bench_batch_insert_3(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
+void bench_batch_insert_radix(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
     std::cout << title << "; ";
     std::cout.flush();
     std::vector<Stats> stats;
@@ -1230,8 +1230,10 @@ void bench_batch_insert_3(HS& r, MicroBenchmark& mb, const std::string& title, s
     size_t mem_before = get_mem();
     const int upTo = static_cast<int>(increase);
     const int times = static_cast<int>(totalTimes);
-    std::vector<typename HS::value_type> data(upTo);
     std::vector<typename HS::key_type> keys(upTo);
+    std::vector<typename HS::key_type> rand_keys(upTo);
+    std::vector<typename HS::mapped_type> results(upTo);
+
     srand(23);
     int i = 0;
     size_t found = 0;
@@ -1239,12 +1241,14 @@ void bench_batch_insert_3(HS& r, MicroBenchmark& mb, const std::string& title, s
         // insert
         for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
           i = rand();
-            data[up].first = static_cast<typename HS::key_type>(i);
-            data[up].second = static_cast<typename HS::mapped_type>(i);
             keys[up] = static_cast<typename HS::key_type>(i);
+            rand_keys[up] = static_cast<typename HS::key_type>(rand());
         }
         t.restart();
-        r.insert(data);
+        r.get_hll().update(keys.data(), keys.size());
+        r.reserve(r.get_hll().estimate());
+
+        r.insert(keys.data(), keys.size());
         r.finalize_insert();
         s.elapsed_insert = t.elapsed() / upTo;
         auto gm = get_mem();
@@ -1258,16 +1262,13 @@ void bench_batch_insert_3(HS& r, MicroBenchmark& mb, const std::string& title, s
 
         // query existing
         while (mb.keepRunning()) {
-          found += r.find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
+          found += r.find(keys.data(), keys.size(), results.data());
         }
         s.elapsed_find_existing = mb.min() / upTo;
 
         // query nonexisting
-        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
-          keys[up] = rand();
-        }
         while (mb.keepRunning()) {
-          found += r.find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
+          found += r.find(rand_keys.data(), rand_keys.size(), results.data());
         }
         s.elapsed_find_nonexisting = mb.min() / upTo;
         s.found = found;
@@ -1294,79 +1295,8 @@ void bench_batch_insert_3(HS& r, MicroBenchmark& mb, const std::string& title, s
 }
 
 
-template<class HS>
-void bench_batch_insert_integrated(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
-    std::cout << title << "; ";
-    std::cout.flush();
-    std::vector<Stats> stats;
-    Stats s;
-    s.title = title;
-    Timer t;
-    size_t mem_before = get_mem();
-    const int upTo = static_cast<int>(increase);
-    const int times = static_cast<int>(totalTimes);
-    std::vector<typename HS::value_type> data(upTo);
-    srand(23);
-    int i = 0;
-    size_t found = 0;
-    for (int ti = 0; ti < static_cast<int>(times); ++ti) {
-        // insert
-        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
-          i = rand();
-            data[up].first = static_cast<typename HS::key_type>(i);
-            data[up].second = static_cast<typename HS::mapped_type>(i);
-        }
-        t.restart();
-        r.insert_integrated(data);
-        s.elapsed_insert = t.elapsed() / upTo;
-        auto gm = get_mem();
-        s.mem = gm - mem_before;
-        if (gm < mem_before) {
-            // overflow check
-            s.mem = 0;
-        }
-        s.num = r.size();
 
-
-        // query existing
-        while (mb.keepRunning()) {
-          found += r.find(data.begin(), data.end()).size();
-        }
-        s.elapsed_find_existing = mb.min() / upTo;
-
-        // query nonexisting
-        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
-          data[up].first = rand();
-        }
-        while (mb.keepRunning()) {
-          found += r.find(data.begin(), data.end()).size();
-        }
-        s.elapsed_find_nonexisting = mb.min() / upTo;
-        s.found = found;
-        stats.push_back(s);
-    }
-
-    Stats sum;
-    std::for_each(stats.begin(), stats.end(), [&sum](const Stats& s) {
-        sum += s;
-    });
-    sum /= stats.size();
-
-    std::cout
-        << 1000000 * sum.elapsed_insert << "; "
-        << 1000000 * sum.elapsed_find_existing << "; "
-        << 1000000 * sum.elapsed_find_nonexisting << "; "
-        << sum.mem / (1024.0 * 1024) << "; "
-        << sum.found << std::endl;
-
-    all_stats.push_back(stats);
-
-    std::ofstream fout("out.txt");
-    print(fout, all_stats);
-}
-
-
-template<class K, class V, template <typename> class H>
+template<class K, class V, template <typename> class H, template <typename> class Havx >
 std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, double max_load, double min_load) {
     std::cout << "Title;1M inserts [sec];find 1M existing [sec];find 1M nonexisting [sec];memory usage [MB];foundcount" << std::endl;
     std::vector<std::vector<Stats>> all_stats;
@@ -1374,6 +1304,7 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
     MicroBenchmark mb;
     //bench_sequential_insert(hopscotch_map<int, int, H>(), "tessil/hopscotch_map", upTo, times, all_stats);
 
+#if defined(ENABLE_PREFETCH)
 	{
 		::fsc::hashmap_robinhood_doubling<K, V, H<K>> m;
 		m.set_max_load_factor(max_load);
@@ -1386,75 +1317,42 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
 		m.set_min_load_factor(min_load);
 		bench_batch_insert(m, mb, "BRH", upTo, times, all_stats);
 	}
-//	{
-//		::fsc::hashmap_robinhood_doubling<K, V, H<K>> m;
-//		m.set_max_load_factor(max_load);
-//		m.set_min_load_factor(min_load);
-//		bench_batch_insert_integrated(m, mb, "Tony Robinhood BATCH integrated", upTo, times, all_stats);
-//	}
+#endif
 
-//	{
-//		::fsc::hashmap_robinhood_prefetch<K, V, H<K>> m;
-//	m.set_max_load_factor(max_load);
-//	m.set_min_load_factor(min_load);
-//		bench_sequential_insert_pair(m, mb, "Tony RHPre", upTo, times, all_stats);
-//	}
 	{
 		::fsc::hashmap_robinhood_prefetch<K, V, H<K>> m;
 		m.set_max_load_factor(max_load);
 		m.set_min_load_factor(min_load);
 		bench_batch_insert(m, mb, "BRH_Prefetch", upTo, times, all_stats);
 	}
-//	{
-//		::fsc::hashmap_robinhood_prefetch<K, V, H<K>> m;
-//		m.set_max_load_factor(max_load);
-//		m.set_min_load_factor(min_load);
-//
-//		bench_batch_insert_integrated(m, mb, "Tony RHPre BATCH integrated", upTo, times, all_stats);
-//	}
-
-//    {
-//        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H<K>> m;
-	//	m.set_max_load_factor(max_load);
-	//	m.set_min_load_factor(min_load);
-//        bench_sequential_insert_pair(m, mb, "Tony RHOffPre", upTo, times, all_stats);
-//    }
-//    {
-//        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H<K>> m;
-//		m.set_max_load_factor(max_load);
-//		m.set_min_load_factor(min_load);
-//        bench_batch_insert(m, mb, "Tony RHOffPre BATCH", upTo, times, all_stats);
-//    }
-//    {
-//        ::fsc::hashmap_robinhood_doubling_offsets<K, V, H<K>> m;
-//		m.set_max_load_factor(max_load);
-//		m.set_min_load_factor(min_load);
-//        bench_batch_insert_integrated(m, mb, "Tony RHOffPre BATCH integrated", upTo, times, all_stats);
-//    }
-
-//    {
-//        ::fsc::hashmap_robinhood_offsets<K, V, H> m;
-    //	m.set_max_load_factor(max_load);
-    //	m.set_min_load_factor(min_load);
-//        bench_sequential_insert_pair(m, mb, "Tony RHOffPreNoOverflow", upTo, times, all_stats);
-//    }
     {
         ::fsc::hashmap_robinhood_offsets<K, V, H> m;
 		m.set_max_load_factor(max_load);
 		m.set_min_load_factor(min_load);
-        bench_batch_insert_2(m, mb, "BRHO_Prefetch", upTo, times, all_stats);  // no overflow
+        bench_batch_insert_robinhood(m, mb, "BRHO_Prefetch", upTo, times, all_stats);  // no overflow
+    }
+    {
+        ::fsc::hashmap_robinhood_offsets<K, V, Havx> m;
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+        bench_batch_insert_robinhood(m, mb, "BRHO_Prefetch_avx", upTo, times, all_stats);  // no overflow
+    }
+    {
+        ::fsc::hashmap_radixsort<K, V, H> m;
+        bench_batch_insert_radix(m, mb, "BRS_Prefetch", upTo, times, all_stats);  // radixsort
     }
 
     {
-        ::fsc::hashmap_radixsort<K, V, H> m;
-        bench_batch_insert_3(m, mb, "BRS_Prefetch", upTo, times, all_stats);  // radixsort
+        ::fsc::hashmap_radixsort<K, V, Havx> m;
+        bench_batch_insert_radix(m, mb, "BRS_Prefetch_avx", upTo, times, all_stats);  // radixsort
     }
 
-//    {
-//        RobinHoodInfobytePairNoOverflow::Map<K, V, H<K>> m;
-//		m.max_load_factor(max_load);
-//        bench_sequential_insert(m, mb, "RobinHoodInfobytePairNoOverflow", upTo, times, all_stats);
-//    }
+#if defined(ENABLE_PREFETCH)
+    {
+        RobinHoodInfobytePairNoOverflow::Map<K, V, H<K>> m;
+		m.max_load_factor(max_load);
+        bench_sequential_insert(m, mb, "RobinHoodInfobytePairNoOverflow", upTo, times, all_stats);
+    }
 
 ////    {
 ////        RobinHoodInfobytePairNoOverflow::Map<int, int, H<K>> m;
@@ -1476,14 +1374,14 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
 
     {
         ::fsc::hashmap_linearprobe_doubling<K, V, H<K>> m;
-    m.set_max_load_factor(max_load);
-    m.set_min_load_factor(min_load);
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
         bench_sequential_insert_pair(m, mb, "LP", upTo, times, all_stats);
     }
     {
         ::fsc::hashmap_linearprobe_doubling<K, V, H<K>> m;
-    m.set_max_load_factor(max_load);
-    m.set_min_load_factor(min_load);
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
         bench_batch_insert(m, mb, "LP_BATCH", upTo, times, all_stats);
     }
 
@@ -1510,12 +1408,17 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
         m.max_load_factor(max_load);
         bench_sequential_insert(m, mb, "std::unordered_map", upTo, times, all_stats);
     }
-
 ////    {
 ////        std::unordered_map<int, int, H<K>> m;
 ////        m.max_load_factor(0.5f);
 ////        bench_sequential_insert(m, mb, "std::unordered_map 0.5", upTo, times, all_stats);
 ////    }
+
+//    {
+//    	HopScotchAdaptive::Map<K, V, H<K>, std::equal_to<K>, HopScotchAdaptive::Style::Default> m;
+//    	bench_sequential_insert(m, mb, "HopScotchAdaptive Default", upTo, times, all_stats);
+//    }
+
     /*
     bench_sequential_insert<RobinHoodInfobyteJumpheuristic::Map<int, int, H, std::equal_to<int>, RobinHoodInfobyteJumpheuristic::Style::Default>>("infobyte Jumpheuristic", upTo, times, searchtimes, all_stats);
     bench_sequential_insert<RobinHoodInfobyte::Map<int, int, H, std::equal_to<int>, RobinHoodInfobyte::Style::Default>>("Robin Hood Infobyte", upTo, times, searchtimes, all_stats);
@@ -1534,8 +1437,539 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
     bench_sequential_insert<HopScotchAdaptive::Map<int, int, H, std::equal_to<int>, HopScotchAdaptive::Style::Fast>>("HopScotchAdaptive Fast", upTo, times, searchtimes, all_stats);
     bench_sequential_insert<HopScotchAdaptive::Map<int, int, H, std::equal_to<int>, HopScotchAdaptive::Style::Compact>>("HopScotchAdaptive Compact", upTo, times, searchtimes, all_stats);
     */
+#endif
     return all_stats;
 }
+
+
+template<class HS>
+void bench_sequential_erase(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
+    std::cout << title << "; ";
+    std::cout.flush();
+    std::vector<Stats> stats;
+    Stats s;
+    s.title = title;
+    Timer t;
+    size_t mem_before = get_mem();
+    const int upTo = static_cast<int>(increase);
+    const int times = static_cast<int>(totalTimes);
+    std::vector<int> data(upTo);
+    srand(23);
+    int i = 0;
+    size_t found = 0;
+    for (int ti = 0; ti < static_cast<int>(times); ++ti) {
+        // insert
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+          data[up] = rand();
+        }
+        t.restart();
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+          i = data[up];
+          r[static_cast<typename HS::key_type>(i)] = static_cast<typename HS::mapped_type>(i);
+        }
+        s.elapsed_insert = t.elapsed() / upTo;
+        auto gm = get_mem();
+        s.mem = gm - mem_before;
+        if (gm < mem_before) {
+            // overflow check
+            s.mem = 0;
+        }
+        s.num = r.size();
+
+
+        // query existing
+        const auto endIt = r.end();
+        while (mb.keepRunning()) {
+          for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+            if (endIt != r.find(data[up])) {
+                ++found;
+            }
+          }
+        }
+        s.elapsed_find_existing = mb.min() / upTo;
+
+        // query nonexisting
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+          data[up]   = rand();
+        }
+        while (mb.keepRunning()) {
+          for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+            if (endIt != r.find(data[up])) {
+                ++found;
+            }
+          }
+        }
+        s.elapsed_find_nonexisting = mb.min() / upTo;
+
+        s.found = found;
+        stats.push_back(s);
+    }
+
+    Stats sum;
+    std::for_each(stats.begin(), stats.end(), [&sum](const Stats& s) {
+        sum += s;
+    });
+    sum /= stats.size();
+
+    std::cout
+        << 1000000 * sum.elapsed_insert << "; "
+        << 1000000 * sum.elapsed_find_existing << "; "
+        << 1000000 * sum.elapsed_find_nonexisting << "; "
+        << sum.mem / (1024.0 * 1024) << "; "
+        << sum.found << std::endl;
+
+    all_stats.push_back(stats);
+
+    std::ofstream fout("out.txt");
+    print(fout, all_stats);
+}
+
+template<class HS>
+void bench_sequential_erase_pair(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
+    std::cout << title << "; ";
+    std::cout.flush();
+    std::vector<Stats> stats;
+    Stats s;
+    s.title = title;
+    Timer t;
+    size_t mem_before = get_mem();
+    const int upTo = static_cast<int>(increase);
+    const int times = static_cast<int>(totalTimes);
+    std::vector<typename HS::value_type> data(upTo);
+    srand(23);
+    int i = 0;
+    size_t found = 0;
+    for (int ti = 0; ti < static_cast<int>(times); ++ti) {
+        // insert
+      for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+        i = rand();
+        data[up].first = static_cast<typename HS::key_type>(i);
+        data[up].second = static_cast<typename HS::mapped_type>(i);
+      }
+        t.restart();
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+            r.insert(std::move(data[up]));
+        }
+        s.elapsed_insert = t.elapsed() / upTo;
+        auto gm = get_mem();
+        s.mem = gm - mem_before;
+        if (gm < mem_before) {
+            // overflow check
+            s.mem = 0;
+        }
+        s.num = r.size();
+
+
+        // query existing
+        const auto endIt = r.end();
+        while (mb.keepRunning()) {
+          for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+              if (endIt != r.find(data[up].first) ) ++found;
+          }
+        }
+        s.elapsed_find_existing = mb.min() / upTo;
+
+        // query nonexisting
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+          data[up].first = rand();
+        }
+        while (mb.keepRunning()) {
+          for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+              if (endIt != r.find(data[up].first) ) ++found;
+          }
+        }
+        s.elapsed_find_nonexisting = mb.min() / upTo;
+        s.found = found;
+        stats.push_back(s);
+    }
+
+    Stats sum;
+    std::for_each(stats.begin(), stats.end(), [&sum](const Stats& s) {
+        sum += s;
+    });
+    sum /= stats.size();
+
+    std::cout
+        << 1000000 * sum.elapsed_insert << "; "
+        << 1000000 * sum.elapsed_find_existing << "; "
+        << 1000000 * sum.elapsed_find_nonexisting << "; "
+        << sum.mem / (1024.0 * 1024) << "; "
+        << sum.found << std::endl;
+
+    all_stats.push_back(stats);
+
+    std::ofstream fout("out.txt");
+    print(fout, all_stats);
+}
+
+template<class HS>
+void bench_batch_erase(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
+    std::cout << title << "; ";
+    std::cout.flush();
+    std::vector<Stats> stats;
+    Stats s;
+    s.title = title;
+    Timer t;
+    size_t mem_before = get_mem();
+    const int upTo = static_cast<int>(increase);
+    const int times = static_cast<int>(totalTimes);
+    std::vector<typename HS::value_type> data(upTo);
+    std::vector<typename HS::key_type> keys(upTo);
+    srand(23);
+    int i = 0;
+    size_t found = 0;
+    for (int ti = 0; ti < static_cast<int>(times); ++ti) {
+        // insert
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+          i = rand();
+            data[up].first = static_cast<typename HS::key_type>(i);
+            data[up].second = static_cast<typename HS::mapped_type>(i);
+            keys[up] = static_cast<typename HS::key_type>(i);
+        }
+        t.restart();
+        r.insert(data);
+        s.elapsed_insert = t.elapsed() / upTo;
+        auto gm = get_mem();
+        s.mem = gm - mem_before;
+        if (gm < mem_before) {
+            // overflow check
+            s.mem = 0;
+        }
+        s.num = r.size();
+
+
+        // query existing
+        while (mb.keepRunning()) {
+          found += r.find(keys.data(), keys.data() + keys.size()).size();
+        }
+        s.elapsed_find_existing = mb.min() / upTo;
+
+        // query nonexisting
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+          keys[up] = rand();
+        }
+        while (mb.keepRunning()) {
+          found += r.find(keys.data(), keys.data() + keys.size()).size();
+        }
+        s.elapsed_find_nonexisting = mb.min() / upTo;
+        s.found = found;
+        stats.push_back(s);
+    }
+
+    Stats sum;
+    std::for_each(stats.begin(), stats.end(), [&sum](const Stats& s) {
+        sum += s;
+    });
+    sum /= stats.size();
+
+    std::cout
+        << 1000000 * sum.elapsed_insert << "; "
+        << 1000000 * sum.elapsed_find_existing << "; "
+        << 1000000 * sum.elapsed_find_nonexisting << "; "
+        << sum.mem / (1024.0 * 1024) << "; "
+        << sum.found << std::endl;
+
+    all_stats.push_back(stats);
+
+    std::ofstream fout("out.txt");
+    print(fout, all_stats);
+}
+
+// find returns mapped_types only.
+template<class HS>
+void bench_batch_erase_robinhood(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
+    std::cout << title << "; ";
+    std::cout.flush();
+    std::vector<Stats> stats;
+    Stats s;
+    s.title = title;
+    Timer t;
+    size_t mem_before = get_mem();
+    const int upTo = static_cast<int>(increase);
+    const int times = static_cast<int>(totalTimes);
+    std::vector<typename HS::value_type> data(upTo);
+    std::vector<typename HS::key_type> keys(upTo);
+    srand(23);
+    int i = 0;
+    size_t found = 0;
+    for (int ti = 0; ti < static_cast<int>(times); ++ti) {
+        // insert
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+          i = rand();
+            data[up].first = static_cast<typename HS::key_type>(i);
+            data[up].second = static_cast<typename HS::mapped_type>(i);
+            keys[up] = static_cast<typename HS::key_type>(i);
+        }
+        t.restart();
+        r.insert(data);
+        s.elapsed_insert = t.elapsed() / upTo;
+        auto gm = get_mem();
+        s.mem = gm - mem_before;
+        if (gm < mem_before) {
+            // overflow check
+            s.mem = 0;
+        }
+        s.num = r.size();
+
+
+        // query existing
+        while (mb.keepRunning()) {
+          found += r.find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
+        }
+        s.elapsed_find_existing = mb.min() / upTo;
+
+        // query nonexisting
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+          keys[up] = rand();
+        }
+        while (mb.keepRunning()) {
+          found += r.find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
+        }
+        s.elapsed_find_nonexisting = mb.min() / upTo;
+        s.found = found;
+        stats.push_back(s);
+    }
+
+    Stats sum;
+    std::for_each(stats.begin(), stats.end(), [&sum](const Stats& s) {
+        sum += s;
+    });
+    sum /= stats.size();
+
+    std::cout
+        << 1000000 * sum.elapsed_insert << "; "
+        << 1000000 * sum.elapsed_find_existing << "; "
+        << 1000000 * sum.elapsed_find_nonexisting << "; "
+        << sum.mem / (1024.0 * 1024) << "; "
+        << sum.found << std::endl;
+
+    all_stats.push_back(stats);
+
+    std::ofstream fout("out.txt");
+    print(fout, all_stats);
+}
+
+
+template<class HS>
+void bench_batch_erase_radix(HS& r, MicroBenchmark& mb, const std::string& title, size_t increase, size_t totalTimes, std::vector<std::vector<Stats>>& all_stats) {
+    std::cout << title << "; ";
+    std::cout.flush();
+    std::vector<Stats> stats;
+    Stats s;
+    s.title = title;
+    Timer t;
+    size_t mem_before = get_mem();
+    const int upTo = static_cast<int>(increase);
+    const int times = static_cast<int>(totalTimes);
+    std::vector<typename HS::key_type> keys(upTo);
+    std::vector<typename HS::key_type> rand_keys(upTo);
+    std::vector<typename HS::mapped_type> results(upTo);
+
+    srand(23);
+    int i = 0;
+    size_t found = 0;
+    for (int ti = 0; ti < static_cast<int>(times); ++ti) {
+        // insert
+        for (size_t up = 0; up < static_cast<size_t>(upTo); ++up) {
+          i = rand();
+            keys[up] = static_cast<typename HS::key_type>(i);
+            rand_keys[up] = static_cast<typename HS::key_type>(rand());
+        }
+        t.restart();
+        r.get_hll().update(keys.data(), keys.size());
+        r.reserve(r.get_hll().estimate());
+
+        r.insert(keys.data(), keys.size());
+        r.finalize_insert();
+        s.elapsed_insert = t.elapsed() / upTo;
+        auto gm = get_mem();
+        s.mem = gm - mem_before;
+        if (gm < mem_before) {
+            // overflow check
+            s.mem = 0;
+        }
+        s.num = r.size();
+
+
+        // query existing
+        while (mb.keepRunning()) {
+          found += r.find(keys.data(), keys.size(), results.data());
+        }
+        s.elapsed_find_existing = mb.min() / upTo;
+
+        // query nonexisting
+        while (mb.keepRunning()) {
+          found += r.find(rand_keys.data(), rand_keys.size(), results.data());
+        }
+        s.elapsed_find_nonexisting = mb.min() / upTo;
+        s.found = found;
+        stats.push_back(s);
+    }
+
+    Stats sum;
+    std::for_each(stats.begin(), stats.end(), [&sum](const Stats& s) {
+        sum += s;
+    });
+    sum /= stats.size();
+
+    std::cout
+        << 1000000 * sum.elapsed_insert << "; "
+        << 1000000 * sum.elapsed_find_existing << "; "
+        << 1000000 * sum.elapsed_find_nonexisting << "; "
+        << sum.mem / (1024.0 * 1024) << "; "
+        << sum.found << std::endl;
+
+    all_stats.push_back(stats);
+
+    std::ofstream fout("out.txt");
+    print(fout, all_stats);
+}
+
+
+template<class K, class V, template <typename> class H, template <typename> class Havx >
+std::vector<std::vector<Stats>> bench_insert_erase(size_t upTo, size_t times, double max_load, double min_load) {
+    std::cout << "Title;1M inserts [sec];find 1M existing [sec];find 1M nonexisting [sec];memory usage [MB];foundcount" << std::endl;
+    std::vector<std::vector<Stats>> all_stats;
+
+    MicroBenchmark mb;
+    //bench_sequential_insert(hopscotch_map<int, int, H>(), "tessil/hopscotch_map", upTo, times, all_stats);
+
+#if defined(ENABLE_PREFETCH)
+	{
+		::fsc::hashmap_robinhood_doubling<K, V, H<K>> m;
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+		bench_sequential_erase_pair(m, mb, "RH", upTo, times, all_stats);
+	}
+	{
+		::fsc::hashmap_robinhood_doubling<K, V, H<K>> m;
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+		bench_batch_erase(m, mb, "BRH", upTo, times, all_stats);
+	}
+#endif
+
+	{
+		::fsc::hashmap_robinhood_prefetch<K, V, H<K>> m;
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+		bench_batch_erase(m, mb, "BRH_Prefetch", upTo, times, all_stats);
+	}
+    {
+        ::fsc::hashmap_robinhood_offsets<K, V, H> m;
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+        bench_batch_erase_robinhood(m, mb, "BRHO_Prefetch", upTo, times, all_stats);  // no overflow
+    }
+    {
+        ::fsc::hashmap_robinhood_offsets<K, V, Havx> m;
+		m.set_max_load_factor(max_load);
+		m.set_min_load_factor(min_load);
+        bench_batch_erase_robinhood(m, mb, "BRHO_Prefetch_avx", upTo, times, all_stats);  // no overflow
+    }
+    {
+        ::fsc::hashmap_radixsort<K, V, H> m;
+        bench_batch_erase_radix(m, mb, "BRS_Prefetch", upTo, times, all_stats);  // radixsort
+    }
+
+    {
+        ::fsc::hashmap_radixsort<K, V, Havx> m;
+        bench_batch_erase_radix(m, mb, "BRS_Prefetch_avx", upTo, times, all_stats);  // radixsort
+    }
+#if defined(ENABLE_PREFETCH)
+
+    {
+        RobinHoodInfobytePairNoOverflow::Map<K, V, H<K>> m;
+		m.max_load_factor(max_load);
+        bench_sequential_erase(m, mb, "RobinHoodInfobytePairNoOverflow", upTo, times, all_stats);
+    }
+
+////    {
+////        RobinHoodInfobytePairNoOverflow::Map<int, int, H<K>> m;
+////        m.max_load_factor(0.5f);
+////        bench_sequential_insert(m, mb, "RobinHoodInfobytePairNoOverflow 0.5", upTo, times, all_stats);
+////    }
+//
+//    {
+//        RobinHoodInfobytePair::Map<K, V, H<K>> m;
+//        m.max_load_factor(0.9f);
+//        bench_sequential_insert(m, mb, "RobinHoodInfobytePair 0.9", upTo, times, all_stats);
+//    }
+////    {
+////        RobinHoodInfobytePair::Map<int, int, H<K>> m;
+////        m.max_load_factor(0.5f);
+////        bench_sequential_insert(m, mb, "RobinHoodInfobytePair 0.5", upTo, times, all_stats);
+////    }
+
+
+    {
+        ::fsc::hashmap_linearprobe_doubling<K, V, H<K>> m;
+    m.set_max_load_factor(max_load);
+    m.set_min_load_factor(min_load);
+        bench_sequential_erase_pair(m, mb, "LP", upTo, times, all_stats);
+    }
+    {
+        ::fsc::hashmap_linearprobe_doubling<K, V, H<K>> m;
+    m.set_max_load_factor(max_load);
+    m.set_min_load_factor(min_load);
+        bench_batch_erase(m, mb, "LP_BATCH", upTo, times, all_stats);
+    }
+
+
+    {
+        google::dense_hash_map<K, V, H<K>> googlemap;
+        googlemap.set_empty_key(-1);
+        googlemap.set_deleted_key(-2);
+        googlemap.max_load_factor(max_load);
+        googlemap.min_load_factor(min_load);
+        bench_sequential_erase(googlemap, mb, "google::dense_hash_map", upTo, times, all_stats);
+    }
+
+////    {
+////        google::dense_hash_map<int, int, H<K>> googlemap;
+////        googlemap.set_empty_key(-1);
+////        googlemap.set_deleted_key(-2);
+////        bench_sequential_insert(googlemap, mb, "google::dense_hash_map 0.5", upTo, times, all_stats);
+////    }
+
+
+    {
+        std::unordered_map<K, V, H<K>> m;
+        m.max_load_factor(max_load);
+        bench_sequential_erase(m, mb, "std::unordered_map", upTo, times, all_stats);
+    }
+////    {
+////        std::unordered_map<int, int, H<K>> m;
+////        m.max_load_factor(0.5f);
+////        bench_sequential_insert(m, mb, "std::unordered_map 0.5", upTo, times, all_stats);
+////    }
+//    {
+//    	HopScotchAdaptive::Map<K, V, H<K>, std::equal_to<K>, HopScotchAdaptive::Style::Default> m;
+//    	bench_sequential_insert(m, mb, "HopScotchAdaptive Default", upTo, times, all_stats);
+//    }
+    /*
+    bench_sequential_insert<RobinHoodInfobyteJumpheuristic::Map<int, int, H, std::equal_to<int>, RobinHoodInfobyteJumpheuristic::Style::Default>>("infobyte Jumpheuristic", upTo, times, searchtimes, all_stats);
+    bench_sequential_insert<RobinHoodInfobyte::Map<int, int, H, std::equal_to<int>, RobinHoodInfobyte::Style::Default>>("Robin Hood Infobyte", upTo, times, searchtimes, all_stats);
+    bench_sequential_insert<HopScotchAdaptive::Map<int, int, H, std::equal_to<int>, HopScotchAdaptive::Style::Default>>("HopScotchAdaptive Default", upTo, times, searchtimes, all_stats);
+
+    bench_sequential_insert(spp::sparse_hash_map<int, int, H>(), "spp::spare_hash_map", upTo, times, searchtimes, all_stats);
+    bench_sequential_insert(sherwood_map<int, int>(), "sherwood_map", upTo, times, searchtimes, all_stats);
+
+    bench_sequential_insert<RobinHoodInfobitsHashbits::Map<int, int, H, RobinHoodInfobitsHashbits::Style::Default>>("info & hash & overflow check", upTo, times, searchtimes, all_stats);
+    bench_sequential_insert<RobinHoodInfobyteFastforward::Map<int, int, H, RobinHoodInfobyteFastforward::Style::Default>>("info & fastforward", upTo, times, searchtimes, all_stats);
+    bench_sequential_insert<HopScotch::Map<int, int, H, HopScotch::Style::Hop8>>("Hopscotch Hop8", upTo, times, searchtimes, all_stats);
+    bench_sequential_insert<HopScotch::Map<int, int, H, HopScotch::Style::Hop16>>("Hopscotch Hop16", upTo, times, searchtimes, all_stats);
+    bench_sequential_insert<HopScotch::Map<int, int, H, HopScotch::Style::Hop32>>("Hopscotch Hop32", upTo, times, searchtimes, all_stats);
+    bench_sequential_insert<HopScotch::Map<int, int, H, HopScotch::Style::Hop64>>("Hopscotch Hop64", upTo, times, searchtimes, all_stats);
+
+    bench_sequential_insert<HopScotchAdaptive::Map<int, int, H, std::equal_to<int>, HopScotchAdaptive::Style::Fast>>("HopScotchAdaptive Fast", upTo, times, searchtimes, all_stats);
+    bench_sequential_insert<HopScotchAdaptive::Map<int, int, H, std::equal_to<int>, HopScotchAdaptive::Style::Compact>>("HopScotchAdaptive Compact", upTo, times, searchtimes, all_stats);
+    */
+#endif
+    return all_stats;
+}
+
+
 
 template<class H>
 void random_bench(const std::string& title) {
@@ -1824,17 +2258,25 @@ int main(int argc, char** argv) {
     size_t iterations = 1000;
     size_t cnt_per_iter = 100 * 1000;
     {
-        // using murmur32sse, as farmhash impl is sensitive to prefetch on/off.
-      auto stats64 = bench_insert_find<uint32_t, uint32_t, ::fsc::hash::murmur3sse32 >(cnt_per_iter, iterations, 0.8, 0.35);
+        // using murmur32avx, as farmhash impl is sensitive to prefetch on/off.
+      auto stats64 = bench_insert_find<uint32_t, uint32_t, ::fsc::hash::murmur32, ::fsc::hash::murmur3avx32 >(cnt_per_iter, iterations, 0.8, 0.35);
       print(std::cout, stats64);
-      std::ofstream fout("datascaling_benchmark_64_32_murmur32sse-0.8-0.35.txt");
+#if defined(ENABLE_PREFETCH)
+      std::ofstream fout("datascaling_benchmark_32_32_murmur32avx-0.8-0.35_prefetch.txt");
+#else
+      std::ofstream fout("datascaling_benchmark_32_32_murmur32avx-0.8-0.35.txt");
+#endif
       print(fout, stats64);
     }
     {
-        // using murmur32sse, as farmhash impl is sensitive to prefetch on/off.
-      auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur3sse32 >(cnt_per_iter, iterations, 0.8, 0.35);
+        // using murmur32avx, as farmhash impl is sensitive to prefetch on/off.
+      auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur32, ::fsc::hash::murmur3avx32 >(cnt_per_iter, iterations, 0.8, 0.35);
       print(std::cout, stats64);
-      std::ofstream fout("datascaling_benchmark_64_32_murmur32sse-0.8-0.35.txt");
+#if defined(ENABLE_PREFETCH)
+      std::ofstream fout("datascaling_benchmark_64_32_murmur32avx-0.8-0.35_prefetch.txt");
+#else
+      std::ofstream fout("datascaling_benchmark_64_32_murmur32avx-0.8-0.35.txt");
+#endif
       print(fout, stats64);
     }
 //    {

@@ -16,8 +16,6 @@
 
 #include "iterators/transform_iterator.hpp"
 
-//#define min(x,y) (((x) < (y)) ? (x):(y))
-
 namespace fsc {
 template <class Key, class V, template <typename> class Hash = ::std::hash,
           template <typename> class Equal = ::std::equal_to
@@ -509,11 +507,13 @@ public:
             HashElement he = oldElemArray[i];
             int binId = he.bucketId >> binShift;
             int count = countArray[binId];
-            int32_t f_bucketId = oldElemArray[(i + PFD)].bucketId =  bucketIdArray[ (i + PFD) & 31 ];
-            	//(hash(oldElemArray[i + PFD].key) & bucketMask);
+            oldElemArray[(i + PFD)].bucketId =  bucketIdArray[ (i + PFD) & 31 ];
+#if ENABLE_PREFETCH
+            int32_t f_bucketId = oldElemArray[(i + PFD)].bucketId;
             int f_binId = f_bucketId >> binShift;
             int f_count = countArray[f_binId];
             _mm_prefetch((const char *)(hashTable + f_binId * binSize + f_count), _MM_HINT_T0);
+#endif
             if(count < binSize)
             {
                 if(count == (binSize - 1))
@@ -573,10 +573,13 @@ public:
             HashElement he = oldElemArray[i];
             int binId = he.bucketId >> binShift;
             int count = countArray[binId];
-            int32_t f_bucketId = oldElemArray[(i + PFD)].bucketId = (hash(oldElemArray[i + PFD].key) & bucketMask);
+            oldElemArray[(i + PFD)].bucketId = (hash(oldElemArray[i + PFD].key) & bucketMask);
+#if ENABLE_PREFETCH
+            int32_t f_bucketId = oldElemArray[(i + PFD)].bucketId;
             int f_binId = f_bucketId >> binShift;
             int f_count = countArray[f_binId];
             _mm_prefetch((const char *)(hashTable + f_binId * binSize + f_count), _MM_HINT_T0);
+#endif
             if(count < binSize)
             {
                 if(count == (binSize - 1))
@@ -749,10 +752,12 @@ public:
 				he.bucketId = bucketIdArray[j & hash_mask];
 				int binId = he.bucketId >> binShift;
 				int count = countArray[binId];
+#if ENABLE_PREFETCH
 				int32_t f_bucketId = bucketIdArray[(j + PFD) & hash_mask]; // = (hash(keyArray[i + PFD]) & bucketMask);
 				int f_binId = f_bucketId >> binShift;
 				int f_count = countArray[f_binId];
 				_mm_prefetch((const char *)(hashTable + f_binId * binSize + f_count), _MM_HINT_T0);
+#endif
 				if(count < binSize)
 				{
 					if(count == (binSize - 1))
@@ -840,14 +845,15 @@ public:
             int binId = he.bucketId >> binShift;
             int count = countArray[binId];
             //startTick = __rdtsc();
-            int32_t f_bucketId = bucketIdArray[(i + PFD) & 31] = (hashArray[i + PFD] & bucketMask);
+            bucketIdArray[(i + PFD) & 31] = (hashArray[i + PFD] & bucketMask);
             //endTick = __rdtsc();
             //hashTicks += (endTick - startTick);
+#if ENABLE_PREFETCH
+            int32_t f_bucketId = bucketIdArray[(i + PFD) & 31];
             int f_binId = f_bucketId >> binShift;
             int f_count = countArray[f_binId];
-            //_mm_prefetch((const char *)(hashTable + f_bucketId), _MM_HINT_T0);
-            //_mm_prefetch((const char *)(countArray + f_binId), _MM_HINT_T0);
             _mm_prefetch((const char *)(hashTable + f_binId * binSize + f_count), _MM_HINT_T0);
+#endif
             if(count < binSize)
             {
                 if(count == (binSize - 1))
@@ -1005,12 +1011,14 @@ public:
 
 			for(j = i; j < last; j++)
 			{
+#if ENABLE_PREFETCH
 				int32_t f_info_bucketId = bucketIdArray[(j + PFD_INFO) & hash_mask];
 				_mm_prefetch((const char *)(info_container + f_info_bucketId), _MM_HINT_T0);
 				int32_t f_bucketId = bucketIdArray[(j + PFD_HASH) & hash_mask];
 				int32_t f_binId = f_bucketId >> binShift;
 				int32_t f_start = f_binId * binSize + info_container[f_bucketId];
 				_mm_prefetch((const char *)(hashTable + f_start), _MM_HINT_T0);
+#endif
 				int32_t bucketId = bucketIdArray[j & hash_mask];
 				HashElement *he = find_internal(keyArray[j], bucketId);
 				if(he != NULL)
@@ -1068,12 +1076,14 @@ public:
 
 			for(j = i; j < last; j++)
 			{
+#if ENABLE_PREFETCH
 				int32_t f_info_bucketId = bucketIdArray[(j + PFD_INFO) & hash_mask];
 				_mm_prefetch((const char *)(info_container + f_info_bucketId), _MM_HINT_T0);
 				int32_t f_bucketId = bucketIdArray[(j + PFD_HASH) & hash_mask];
 				int32_t f_binId = f_bucketId >> binShift;
 				int32_t f_start = f_binId * binSize + info_container[f_bucketId];
 				_mm_prefetch((const char *)(hashTable + f_start), _MM_HINT_T0);
+#endif
 				int32_t bucketId = bucketIdArray[j & hash_mask];
 				HashElement *he = find_internal(keyArray[j], bucketId);
 				if(he != NULL)
@@ -1130,12 +1140,14 @@ public:
 
 			for(j = i; j < last; j++)
 			{
+#if ENABLE_PREFETCH
 				int32_t f_info_bucketId = bucketIdArray[(j + PFD_INFO) & hash_mask];
 				_mm_prefetch((const char *)(info_container + f_info_bucketId), _MM_HINT_T0);
 				int32_t f_bucketId = bucketIdArray[(j + PFD_HASH) & hash_mask];
 				int32_t f_binId = f_bucketId >> binShift;
 				int32_t f_start = f_binId * binSize + info_container[f_bucketId];
 				_mm_prefetch((const char *)(hashTable + f_start), _MM_HINT_T0);
+#endif
 				int32_t bucketId = bucketIdArray[j & hash_mask];
 				HashElement *he = find_internal(keyArray[j], bucketId);
 				if(he != NULL)

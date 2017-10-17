@@ -1363,6 +1363,7 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
 #define ROBINHOOD_OFFSET2_TYPE 9
 #define ROBINHOOD_PREFETCH_TYPE 8
 #define RADIXSORT_TYPE 10
+#define ALL_TYPE 0
 
 #define DNA_TYPE 1
 #define DNA5_TYPE 2
@@ -1419,6 +1420,7 @@ parse_cmdline(int argc, char** argv) {
       allowed.push_back("robinhood_prefetch");
 	  allowed.push_back("robinhood_offset_overflow");
 	  allowed.push_back("radixsort");
+    allowed.push_back("all");
 	  TCLAP::ValuesConstraint<std::string> allowedVals( allowed );
 
 	  TCLAP::ValueArg<std::string> mapArg("m","map_type","type of map to use (default robinhood_offset_overflow)",false,"robinhood_offset_overflow",&allowedVals, cmd);
@@ -1493,6 +1495,8 @@ parse_cmdline(int argc, char** argv) {
 		  map = ROBINHOOD_PREFETCH_TYPE;
 	  } else if (map_type == "radixsort") {
 		  map = RADIXSORT_TYPE;
+	  } else if (map_type == "all") {
+	    map = ALL_TYPE;
 	  }
 
 	  std::string alpha = alphabetArg.getValue();
@@ -1619,7 +1623,8 @@ int main(int argc, char** argv) {
   std::cout << "      \tStoreHash=" << typeid(StoreHash<FullKmer>).name() << std::endl;
   std::cout << "      \tStoreHash=" << typeid(StoreHash<DNA16Kmer>).name() << std::endl;
 
-  if (map == STD_UNORDERED_TYPE) {
+  if ((map == STD_UNORDERED_TYPE) || (map == ALL_TYPE)) {
+    BL_BENCH_INIT(test);
 
 	  // ============ unordered map
 	  if (dna == DNA_TYPE) {
@@ -1654,9 +1659,14 @@ int main(int argc, char** argv) {
 
 		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 	  }
+	  BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
+
   // ------------- unordered map
-  } else if (map == KMERIND_TYPE) {
+  }
+
+  if ((map == KMERIND_TYPE) || (map == ALL_TYPE))  {
   // =============== dense hash map wrapped
+    BL_BENCH_INIT(test);
 
 	  if (dna == DNA_TYPE) {
 		  if (full) {
@@ -1696,9 +1706,12 @@ int main(int argc, char** argv) {
 
 		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 	  }
+	  BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
 
 // ------------------- end dense hash map wrapped.
-  } else if (map == GOOGLE_TYPE) {
+  }
+  if ((map == GOOGLE_TYPE) || (map == ALL_TYPE))  {
+    BL_BENCH_INIT(test);
 
   // =============== google dense hash map
 	  if (dna == DNA_TYPE) {
@@ -1731,10 +1744,14 @@ int main(int argc, char** argv) {
 
 		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 	  }
+	  BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
 
   // --------------- end google
-  } else if (map == LINEARPROBE_TYPE) {
+  }
+  if ((map == LINEARPROBE_TYPE) || (map == ALL_TYPE))  {
   //================ my new hashmap
+    BL_BENCH_INIT(test);
+
 	  if (dna == DNA_TYPE) {
 		  if (full) {
 			  BL_BENCH_START(test);
@@ -1769,11 +1786,16 @@ int main(int argc, char** argv) {
 
 		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 	  }
+	  BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
 
 
   // --------------- my new hashmap.
-  } else if (map == ROBINHOOD_TYPE) {
+  }
+
+  if ((map == ROBINHOOD_TYPE) || (map == ALL_TYPE))  {
   //================ my new hashmap Robin hood
+    BL_BENCH_INIT(test);
+
 	  if (dna == DNA_TYPE) {
 		  if (full) {
 			  BL_BENCH_START(test);
@@ -1808,8 +1830,12 @@ int main(int argc, char** argv) {
 
 		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 	  }
+	  BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
 
-  } else if (map == ROBINHOOD_OFFSET_TYPE) {
+  }
+
+  if ((map == ROBINHOOD_OFFSET_TYPE) || (map == ALL_TYPE))  {
+    BL_BENCH_INIT(test);
 
 	  //================ my new hashmap offsets
 	  if (dna == DNA_TYPE) {
@@ -1847,7 +1873,12 @@ int main(int argc, char** argv) {
 		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 	  }
 	  // --------------- my new hashmap.
-	} else if (map == ROBINHOOD_OFFSET2_TYPE) {
+	  BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
+
+	}
+  if ((map == ROBINHOOD_OFFSET2_TYPE) || (map == ALL_TYPE))  {
+    BL_BENCH_INIT(test);
+
 	  //================ my new hashmap Robin hood
 		  if (dna == DNA_TYPE) {
 			  if (full) {
@@ -1879,8 +1910,12 @@ int main(int argc, char** argv) {
 
 			  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 		  }
+		  BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
 
-	} else if (map == RADIXSORT_TYPE) {
+	}
+  if ((map == RADIXSORT_TYPE) || (map == ALL_TYPE))  {
+    BL_BENCH_INIT(test);
+
 	  //================ new hashmap Radixsort
 		  if (dna == DNA_TYPE) {
 			  if (full) {
@@ -1912,8 +1947,12 @@ int main(int argc, char** argv) {
 
 			  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
 		  }
+		  BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
 
-  } else if (map == ROBINHOOD_PREFETCH_TYPE) {
+  }
+ if ((map == ROBINHOOD_PREFETCH_TYPE) || (map == ALL_TYPE))  {
+   BL_BENCH_INIT(test);
+
 
     //================ my new hashmap offsets
     if (dna == DNA_TYPE) {
@@ -1950,8 +1989,8 @@ int main(int argc, char** argv) {
 
       throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
     }
-  } else {
-	  throw std::invalid_argument("UNSUPPORTED MAP TYPE");
+    BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
+
   }
 
 #if 0
@@ -1977,7 +2016,6 @@ int main(int argc, char** argv) {
 #endif
 
 
-  BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
 
 }
 
