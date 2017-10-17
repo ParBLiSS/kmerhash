@@ -341,10 +341,10 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
   #endif
 
 	#if (pDNA == 5) || (pKmerStore == CANONICAL)
-	using Splitter = ::fsc::TruePredicate;
+	using Splitter = ::bliss::filter::TruePredicate;
 	#else
 	using Splitter = typename ::std::conditional<(KmerType::nBits == (KmerType::nWords * sizeof(typename KmerType::KmerWordType) * 8)),
-			MSBSplitter, ::fsc::TruePredicate>::type;
+			MSBSplitter, ::bliss::filter::TruePredicate>::type;
 	#endif
 
 
@@ -1080,9 +1080,9 @@ int main(int argc, char** argv) {
     buckets = idx.get_map().get_local_container().capacity();
       max_load = buckets;
 #else
-	    buckets = idx.get_map().get_local_container().bucket_count();
+	    buckets = idx.get_map().get_local_container().capacity();
 	    orig_buckets = buckets;
-      max_load = idx.get_map().get_local_container().max_load_factor() * buckets;
+      max_load = idx.get_map().get_local_container().get_max_load_factor() * buckets;
 #endif
       free_mem = get_free_mem_per_proc(comm); // - total_file_size;  // free memory usage after last insert.
       usable_mem = free_mem - std::min((1UL << 33) / comm.size(), free_mem / 4UL);   // reserve either 1/4 or 8GB of GLOBAL TOTAL.  (to deal with 10 GB files?)
@@ -1198,8 +1198,8 @@ int main(int argc, char** argv) {
 	    idx.get_map().get_local_container().reserve(idx.local_size() + kmer_est);
 	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
 #else
-	    idx.get_map().get_local_container().resize(avg_distinct_count + delta_distinct);
-	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().bucket_count() << std::endl;
+	    idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
+	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
 #endif
     BL_BENCH_LOOP_PAUSE(test, 3);
 
@@ -1235,25 +1235,20 @@ int main(int argc, char** argv) {
 	    for (; i < j; ++i) {
 
 	      // ---- now read each file
-        if (reader_algo == 2)
-        {
-          if (comm.rank() == 0) printf("reading %s via fileloader\n", filenames[i].c_str());
-          idx.read_file<PARSER_TYPE, typename IndexType::KmerParserType, ::bliss::io::NSplitSequencesIterator>(filenames[i], temp, comm);
+  	  if (reader_algo == 5) {
+  		if (comm.rank() == 0) printf("reading %s via mmap\n", filename.c_str());
+  		::bliss::io::KmerFileHelper::read_file_mmap<typename IndexType::KmerParserType, PARSER_TYPE, bliss::io::NSplitSequencesIterator>(filenames[i], temp, comm);
 
-        } else if (reader_algo == 5) {
-          if (comm.rank() == 0) printf("reading %s via mmap\n", filenames[i].c_str());
-          idx.read_file_mmap<PARSER_TYPE, typename IndexType::KmerParserType, ::bliss::io::NSplitSequencesIterator>(filenames[i], temp, comm);
+  	  } else if (reader_algo == 7) {
+  		if (comm.rank() == 0) printf("reading %s via posix\n", filename.c_str());
+  		::bliss::io::KmerFileHelper::read_file_posix<typename IndexType::KmerParserType, PARSER_TYPE, bliss::io::NSplitSequencesIterator>(filenames[i], temp, comm);
 
-        } else if (reader_algo == 7) {
-          if (comm.rank() == 0) printf("reading %s via posix\n", filenames[i].c_str());
-          idx.read_file_posix<PARSER_TYPE, typename IndexType::KmerParserType, ::bliss::io::NSplitSequencesIterator>(filenames[i], temp, comm);
-
-        } else if (reader_algo == 10){
-          if (comm.rank() == 0) printf("reading %s via mpiio\n", filenames[i].c_str());
-          idx.read_file_mpiio<PARSER_TYPE, typename IndexType::KmerParserType, ::bliss::io::NSplitSequencesIterator>(filenames[i], temp, comm);
-        } else {
-          throw std::invalid_argument("missing file reader type");
-        }
+  	  } else if (reader_algo == 10){
+  		if (comm.rank() == 0) printf("reading %s via mpiio\n", filename.c_str());
+  		::bliss::io::KmerFileHelper::read_file_mpiio<typename IndexType::KmerParserType, PARSER_TYPE, bliss::io::NSplitSequencesIterator>(filenames[i], temp, comm);
+  	  } else {
+  		throw std::invalid_argument("missing file reader type");
+  	  }
 
 	    }
       ::mxx::distribute_inplace(temp, comm);
@@ -1337,8 +1332,8 @@ int main(int argc, char** argv) {
             static_cast<size_t>(idx.get_map().get_local_container().capacity()) <<
             " buckets " << buckets << " after " << idx.get_map().get_local_container().capacity() <<
 #else
-            static_cast<size_t>(idx.get_map().get_local_container().bucket_count() * idx.get_map().get_local_container().max_load_factor()) <<
-            " buckets " << buckets << " after " << idx.get_map().get_local_container().bucket_count() <<
+            static_cast<size_t>(idx.get_map().get_local_container().capacity() * idx.get_map().get_local_container().get_max_load_factor()) <<
+            " buckets " << buckets << " after " << idx.get_map().get_local_container().capacity() <<
 #endif
             std::endl;
       }
@@ -1361,7 +1356,7 @@ int main(int argc, char** argv) {
 #if (pMAP == SORTED)
   BL_BENCH_LOOP_END(test, 3, "resize", idx.get_map().get_local_container().capacity() );
 #else
-  BL_BENCH_LOOP_END(test, 3, "resize", idx.get_map().get_local_container().bucket_count() );
+  BL_BENCH_LOOP_END(test, 3, "resize", idx.get_map().get_local_container().capacity() );
 #endif
   BL_BENCH_LOOP_END(test, 4, "insert", idx.local_size() );
   BL_BENCH_LOOP_END(test, 5, "measure", chars_per_kmer);
@@ -1403,8 +1398,8 @@ int main(int argc, char** argv) {
 
 
 	  // copy into temporary storage.
-	  auto iter_end = idx.get_map().get_local_container().cend();
-	  for (auto it = idx.get_map().get_local_container().cbegin(); it != iter_end; ++it) {
+	  auto iter_end = idx.get_map().get_local_container().end();
+	  for (auto it = idx.get_map().get_local_container().begin(); it != iter_end; ++it) {
 		 // memcopy the kmer
 		  memcpy(q, it->first.getData(), KmerType::nWords * sizeof(typename KmerType::KmerWordType));
 		  q += KmerType::nWords * sizeof(typename KmerType::KmerWordType);
@@ -1441,7 +1436,7 @@ int main(int argc, char** argv) {
 #if (pMAP == SORTED)
 #else
 		unsigned char *q;
-		auto iter_end = idx.get_map().get_local_container().cend();
+		auto iter_end = idx.get_map().get_local_container().end();
 #endif
 		for (int i = 0; i < max_group_size; ++i) {
 
@@ -1458,7 +1453,7 @@ int main(int argc, char** argv) {
 				q = (unsigned char*)p;
 
 				// copy into temporary storage.
-				for (auto it = idx.get_map().get_local_container().cbegin(); it != iter_end; ++it) {
+				for (auto it = idx.get_map().get_local_container().begin(); it != iter_end; ++it) {
 				 // memcopy the kmer
 				  memcpy(q, it->first.getData(), KmerType::nWords * sizeof(typename KmerType::KmerWordType));
 				  q += KmerType::nWords * sizeof(typename KmerType::KmerWordType);
@@ -1495,7 +1490,7 @@ int main(int argc, char** argv) {
 #if (pMAP == SORTED)
 #else
    unsigned char *q;
-    auto iter_end = idx.get_map().get_local_container().cend();
+    auto iter_end = idx.get_map().get_local_container().end();
 #endif
         int res = posix_memalign(&p, block_size, target_size);
         if (res != 0) {
@@ -1508,7 +1503,7 @@ int main(int argc, char** argv) {
         q = (unsigned char*)p;
 
         // copy into temporary storage.
-        for (auto it = idx.get_map().get_local_container().cbegin(); it != iter_end; ++it) {
+        for (auto it = idx.get_map().get_local_container().begin(); it != iter_end; ++it) {
          // memcopy the kmer
           memcpy(q, it->first.getData(), KmerType::nWords * sizeof(typename KmerType::KmerWordType));
           q += KmerType::nWords * sizeof(typename KmerType::KmerWordType);
@@ -1542,7 +1537,7 @@ int main(int argc, char** argv) {
 #else
     void *p;
     unsigned char *q;
-    auto iter_end = idx.get_map().get_local_container().cend();
+    auto iter_end = idx.get_map().get_local_container().end();
     long block_size = 512;
 #endif
 
@@ -1560,7 +1555,7 @@ int main(int argc, char** argv) {
         q = (unsigned char*)p;
 
         // copy into temporary storage.
-        for (auto it = idx.get_map().get_local_container().cbegin(); it != iter_end; ++it) {
+        for (auto it = idx.get_map().get_local_container().begin(); it != iter_end; ++it) {
          // memcopy the kmer
           memcpy(q, it->first.getData(), KmerType::nWords * sizeof(typename KmerType::KmerWordType));
           q += KmerType::nWords * sizeof(typename KmerType::KmerWordType);
@@ -1598,7 +1593,7 @@ int main(int argc, char** argv) {
 
     void *p;
     unsigned char *q;
-    auto iter_end = idx.get_map().get_local_container().cend();
+    auto iter_end = idx.get_map().get_local_container().end();
 
 
         int res = posix_memalign(&p, block_size, target_size);
@@ -1609,7 +1604,7 @@ int main(int argc, char** argv) {
         q = (unsigned char*)p;
         
 	// copy into temporary storage.
-        for (auto it = idx.get_map().get_local_container().cbegin(); it != iter_end; ++it) {
+        for (auto it = idx.get_map().get_local_container().begin(); it != iter_end; ++it) {
          // memcopy the kmer
           memcpy(q, it->first.getData(), KmerType::nWords * sizeof(typename KmerType::KmerWordType));
           q += KmerType::nWords * sizeof(typename KmerType::KmerWordType);
@@ -1652,9 +1647,9 @@ int main(int argc, char** argv) {
 
 #else
  
-    auto iter_end = idx.get_map().get_local_container().cend();
+    auto iter_end = idx.get_map().get_local_container().end();
         // copy into temporary storage.
-        for (auto it = idx.get_map().get_local_container().cbegin(); it != iter_end; ++it) {
+        for (auto it = idx.get_map().get_local_container().begin(); it != iter_end; ++it) {
          // memcopy the kmer
           memcpy(q, it->first.getData(), KmerType::nWords * sizeof(typename KmerType::KmerWordType));
           q += KmerType::nWords * sizeof(typename KmerType::KmerWordType);
@@ -1687,10 +1682,10 @@ int main(int argc, char** argv) {
 	memcpy(q, idx.get_map().get_local_container().data(), target_size);	
 
 #else
-	auto iter_end = idx.get_map().get_local_container().cend();
+	auto iter_end = idx.get_map().get_local_container().end();
 
         // copy into temporary storage.
-        for (auto it = idx.get_map().get_local_container().cbegin(); it != iter_end; ++it) {
+        for (auto it = idx.get_map().get_local_container().begin(); it != iter_end; ++it) {
          // memcopy the kmer
           memcpy(q, it->first.getData(), KmerType::nWords * sizeof(typename KmerType::KmerWordType));
           q += KmerType::nWords * sizeof(typename KmerType::KmerWordType);

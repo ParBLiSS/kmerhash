@@ -193,6 +193,35 @@ if (ENABLE_VTUNE_PROFILING)
 endif(ENABLE_VTUNE_PROFILING)
 
 
+# kmer counter builds
+foreach(map BROBINHOOD)
+	foreach(hash MURMUR32avx CRC32C) 
+	  add_executable(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} BenchmarkKmerCounter.cpp)
+	  SET_TARGET_PROPERTIES(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash}
+	     PROPERTIES COMPILE_FLAGS 
+	     "-DpPARSER=FASTA -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR32avx -DpStoreHash=${hash} -DENABLE_PREFETCH")
+	  target_link_libraries(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash}
+	   ${EXTRA_LIBS})
+	if (ENABLE_VTUNE_PROFILING)
+		target_link_libraries(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} ittnotify dl)
+	endif(ENABLE_VTUNE_PROFILING)
+
+	foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
+	  add_executable(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} BenchmarkKmerCounter.cpp)
+	  SET_TARGET_PROPERTIES(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash}
+	     PROPERTIES COMPILE_FLAGS 
+	     "-DpPARSER=FASTQ -DpDNA=4 -DpK=${k} -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR32avx -DpStoreHash=${hash} -DENABLE_PREFETCH")
+	  target_link_libraries(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash}
+	   ${EXTRA_LIBS})
+		if (ENABLE_VTUNE_PROFILING)
+			target_link_libraries(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} ittnotify dl)
+		endif(ENABLE_VTUNE_PROFILING)
+	endforeach(k)
+	endforeach(hash)
+endforeach(map)
+
+
+
 
 # EXECUTABLES
 include_directories("${EXT_PROJECTS_DIR}/martinus/src")
