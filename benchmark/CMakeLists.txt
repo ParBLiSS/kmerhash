@@ -202,6 +202,9 @@ SET_TARGET_PROPERTIES(benchmark_hashtables_martinus
 	PROPERTIES COMPILE_FLAGS "-DENABLE_PREFETCH")
 target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
 
+add_executable(benchmark_hashtables_martinus_nopref martinus_test_robinhood.cpp)
+target_link_libraries(benchmark_hashtables_martinus_nopref ${EXTRA_LIBS})
+
 
 
 #add_executable(hash_vs_sort hash_vs_sort.cpp)
