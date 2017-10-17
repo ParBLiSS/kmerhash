@@ -1334,6 +1334,40 @@ public:
 		return this->hll;
 	}
 
+	::std::pair<Key, V> *getData(int32_t *resultCount)
+	{
+        if((coherence != COHERENT))
+        {
+            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
+            return NULL;
+        }
+		::std::pair<Key, V> *result = (::std::pair<Key, V> *)_mm_malloc(totalKeyCount * sizeof(::std::pair<Key, V>), 64);
+
+	    int32_t i, j;
+		int32_t elemCount = 0;
+		for(i = 0; i < numBins; i++)
+		{
+			int count = countArray[i];
+			int y = std::min(count, binSize - 1);
+			for(j = 0; j < y; j++)
+			{
+				HashElement he = hashTable[i * binSize + j];
+				result[elemCount] = ::std::make_pair(he.key, he.val);
+				elemCount++;
+			}
+            int32_t overflowBufId;
+            overflowBufId = hashTable[i * binSize + binSize - 1].bucketId;
+            for(; j < count; j++)
+            {
+                HashElement he = overflowBuf[overflowBufId * binSize + j - (binSize - 1)];
+				result[elemCount] = ::std::make_pair(he.key, he.val);
+				elemCount++;
+            }
+		}
+		(*resultCount) = elemCount;
+		return result;
+	}
+
 };
 }  // namespace fsc
 #endif /* KMERHASH_HASHMAP_RADIXSORT_HPP_ */
