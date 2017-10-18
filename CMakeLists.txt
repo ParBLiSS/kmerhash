@@ -5,6 +5,14 @@ cmake_minimum_required(VERSION 2.8)
 
 # project settings
 project(kmerhash)
+
+
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/ext/cotire/CMake")
+include(cotire)
+
+set(COTIRE_UNITY_SOURCE_MAXIMUM_NUMBER_OF_INCLUDES "-j4" CACHE STRING "maximum number of cotire compilation threads.")
+
+
 set (kmerhash_VERSION_MAJOR 0)
 set (kmerhash_VERSION_MINOR 1)
 
@@ -682,6 +690,8 @@ if (BUILD_TESTS)
 	if (ENABLE_VTUNE_PROFILING)
 	  target_link_libraries(${test_target_name} ittnotify dl)
 	endif(ENABLE_VTUNE_PROFILING)
+	
+	cotire(${test_target_name})
 
     # generate google test XML results, to be parsed by Jenkins
     # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
@@ -733,6 +743,7 @@ if (BUILD_TESTS)
 	  target_link_libraries(${test_target_name} ittnotify dl)
 	endif(ENABLE_VTUNE_PROFILING)
 
+	cotire(${test_target_name})
 
       # generate google test XML results, to be parsed by Jenkins
       # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
@@ -788,6 +799,8 @@ if (BUILD_TESTS)
 	  target_link_libraries(${test_target_name} ittnotify dl)
 	endif(ENABLE_VTUNE_PROFILING)
     
+    cotire(${test_target_name})
+    
         # generate google test XML results, to be parsed by Jenkins
         # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
         add_test(NAME ${test_target_name} WORKING_DIRECTORY ${TEST_BINARY_OUTPUT_DIR} COMMAND ${test_target_name})
@@ -831,6 +844,8 @@ if (BUILD_TESTS)
     	if (ENABLE_VTUNE_PROFILING)
 	  target_link_libraries(${test_target_name} ittnotify dl)
 	endif(ENABLE_VTUNE_PROFILING)
+    
+    cotire(${test_target_name})
     
         # generate google test XML results, to be parsed by Jenkins
         # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)
@@ -881,6 +896,8 @@ if (BUILD_BENCHMARKS)
 	if (ENABLE_VTUNE_PROFILING)
 	  target_link_libraries(${test_target_name} ittnotify dl)
 	endif(ENABLE_VTUNE_PROFILING)
+	
+	cotire(${test_target_name})
 
     # generate google test XML results, to be parsed by Jenkins
     # additionally to the CTest generated xml, the gtest xml is much more detailed (listing all single tests)

@@ -20,6 +20,7 @@ function(add_hashmap_target prefix storehash extra)
 	if (ENABLE_VTUNE_PROFILING)
 		target_link_libraries(benchmark_hashtables_${prefix}_${storehash} ittnotify dl)
 	endif (ENABLE_VTUNE_PROFILING)
+	cotire(benchmark_hashtables_${prefix}_${storehash})
 
 endfunction(add_hashmap_target)
 
@@ -35,7 +36,10 @@ function(add_dist_hashmap_target prefix map disthash storehash extra extra2)
        
 	if (ENABLE_VTUNE_PROFILING)
 		target_link_libraries(${prefix}-FASTQ-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash} ittnotify dl)
-	endif (ENABLE_VTUNE_PROFILING)       
+	endif (ENABLE_VTUNE_PROFILING)
+	
+	cotire(${prefix}-FASTQ-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash})
+	
 endfunction(add_dist_hashmap_target)
 
 
@@ -50,7 +54,9 @@ function(add_dist_hashmap_kmer_target prefix k dna map disthash storehash extra 
        
 	if (ENABLE_VTUNE_PROFILING)
 		target_link_libraries(${prefix}-FASTQ-a${dna}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash} ittnotify dl)
-	endif (ENABLE_VTUNE_PROFILING)       
+	endif (ENABLE_VTUNE_PROFILING)
+	
+	cotire(${prefix}-FASTQ-a${dna}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash})
 endfunction(add_dist_hashmap_kmer_target)
 
 
@@ -65,6 +71,7 @@ if (BUILD_BENCHMARKS)
 	if (ENABLE_VTUNE_PROFILING)
 		target_link_libraries(benchmark_hashes ittnotify dl)
 	endif(ENABLE_VTUNE_PROFILING)
+	cotire(benchmark_hashes)
 
 	# benchmark executable, FARM and MURMUR
 	foreach(hash STD IDEN FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
@@ -169,6 +176,7 @@ if (BUILD_BENCHMARKS)
 if (ENABLE_VTUNE_PROFILING)
 	target_link_libraries(testKmerPairIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR ittnotify dl)
 endif(ENABLE_VTUNE_PROFILING)
+	cotire(testKmerPairIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR)
 
 # dump k-mers
   add_executable(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
@@ -180,6 +188,7 @@ endif(ENABLE_VTUNE_PROFILING)
 if (ENABLE_VTUNE_PROFILING)
 	target_link_libraries(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR ittnotify dl)
 endif(ENABLE_VTUNE_PROFILING)
+	cotire(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR)
 
 # dump kmer-count pair.
   add_executable(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
@@ -191,7 +200,7 @@ endif(ENABLE_VTUNE_PROFILING)
 if (ENABLE_VTUNE_PROFILING)
 	target_link_libraries(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR ittnotify dl)
 endif(ENABLE_VTUNE_PROFILING)
-
+	cotire(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR)
 
 # kmer counter builds
 foreach(map BROBINHOOD RADIXSORT)
@@ -205,6 +214,7 @@ foreach(map BROBINHOOD RADIXSORT)
 	if (ENABLE_VTUNE_PROFILING)
 		target_link_libraries(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} ittnotify dl)
 	endif(ENABLE_VTUNE_PROFILING)
+	cotire(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash})
 
 	foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
 	  add_executable(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} BenchmarkKmerCounter.cpp)
@@ -216,6 +226,8 @@ foreach(map BROBINHOOD RADIXSORT)
 		if (ENABLE_VTUNE_PROFILING)
 			target_link_libraries(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} ittnotify dl)
 		endif(ENABLE_VTUNE_PROFILING)
+		
+		cotire(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash})
 	endforeach(k)
 	endforeach(hash)
 endforeach(map)
@@ -230,10 +242,11 @@ add_executable(benchmark_hashtables_martinus martinus_test_robinhood.cpp)
 SET_TARGET_PROPERTIES(benchmark_hashtables_martinus
 	PROPERTIES COMPILE_FLAGS "-DENABLE_PREFETCH")
 target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
+cotire(benchmark_hashtables_martinus)
 
 add_executable(benchmark_hashtables_martinus_nopref martinus_test_robinhood.cpp)
 target_link_libraries(benchmark_hashtables_martinus_nopref ${EXTRA_LIBS})
-
+cotire(benchmark_hashtables_martinus_nopref)
 
 
 #add_executable(hash_vs_sort hash_vs_sort.cpp)
