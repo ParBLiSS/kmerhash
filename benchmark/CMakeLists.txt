@@ -194,7 +194,7 @@ endif(ENABLE_VTUNE_PROFILING)
 
 
 # kmer counter builds
-foreach(map BROBINHOOD)
+foreach(map BROBINHOOD RADIXSORT)
 	foreach(hash MURMUR32avx CRC32C) 
 	  add_executable(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} BenchmarkKmerCounter.cpp)
 	  SET_TARGET_PROPERTIES(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash}

@@ -1076,7 +1076,7 @@ int main(int argc, char** argv) {
 
 
       // =========== update the parameters
-#if (pMAP == SORTED)
+#if (pMAP == SORTED) || (pMAP == RADIXSORT)
     buckets = idx.get_map().get_local_container().capacity();
       max_load = buckets;
 #else
@@ -1279,11 +1279,8 @@ int main(int argc, char** argv) {
 
 	    // now insert.
       BL_BENCH_LOOP_RESUME(test, 4);
-#if (pMAP == RADIXSORT)
-      idx.insert_no_finalize(temp);
-#else
+
 	    idx.insert(temp);
-#endif
       BL_BENCH_LOOP_PAUSE(test, 4);
 
 
@@ -1328,7 +1325,7 @@ int main(int argc, char** argv) {
             " prev distinct " << avg_distinct_before <<
             " distinct " << avg_distinct_count <<
             " max load before " << max_load << " after " <<
-#if (pMAP == SORTED)
+#if (pMAP == SORTED) || (pMAP == RADIXSORT)
             static_cast<size_t>(idx.get_map().get_local_container().capacity()) <<
             " buckets " << buckets << " after " << idx.get_map().get_local_container().capacity() <<
 #else
@@ -1342,7 +1339,7 @@ int main(int argc, char** argv) {
     } // filename loop.
 
 #if (pMAP == RADIXSORT)
-      idx.finalize_insert();
+      idx.get_map().get_local_container().finalize_insert();
 #endif
   } // scoped to clear temp.
 
@@ -1376,7 +1373,7 @@ int main(int argc, char** argv) {
 
 
   // get block size.
-#if (pMAP == SORTED)
+#if (pMAP == SORTED) || (pMAP == RADIXSORT)
 	size_t target_size = idx.local_size() * sizeof(typename IndexType::TupleType);
 #else 
     size_t target_size = idx.local_size() * (KmerType::nWords * sizeof(typename KmerType::KmerWordType) + sizeof(typename IndexType::ValueType));
@@ -1386,6 +1383,11 @@ int main(int argc, char** argv) {
 	  BL_BENCH_START(test);
 #if (pMAP == SORTED)
 	  write_mpiio(out_filename, reinterpret_cast<unsigned char*>(idx.get_map().get_local_container().data()), target_size, comm);
+#elif (pMAP == RADIXSORT)
+  int count = 0;
+  auto values = idx.get_map().get_local_container().getData(&count);
+  write_mpiio(out_filename, reinterpret_cast<unsigned char*>(values), count * sizeof(decltype(*values)), comm);
+  free(values);
 #else
 	  unsigned char *p, *q;
 	  std::size_t sz;
@@ -1433,7 +1435,7 @@ int main(int argc, char** argv) {
 
                 void *p;
 
-#if (pMAP == SORTED)
+#if (pMAP == SORTED) || (pMAP == RADIXSORT)
 #else
 		unsigned char *q;
 		auto iter_end = idx.get_map().get_local_container().end();
@@ -1448,6 +1450,11 @@ int main(int argc, char** argv) {
 				}
 #if (pMAP == SORTED)
 	memcpy(p, idx.get_map().get_local_container().data(), target_size);
+#elif (pMAP == RADIXSORT)
+  int count = 0;
+  auto values = idx.get_map().get_local_container().getData(&count);
+  memcpy(p, values, count * sizeof(decltype(*values)));
+  free(values);
 #else
  
 				q = (unsigned char*)p;
@@ -1487,7 +1494,7 @@ int main(int argc, char** argv) {
     long block_size = 512;
 
     void *p;
-#if (pMAP == SORTED)
+#if (pMAP == SORTED) || (pMAP == RADIXSORT)
 #else
    unsigned char *q;
     auto iter_end = idx.get_map().get_local_container().end();
@@ -1499,6 +1506,11 @@ int main(int argc, char** argv) {
 
 #if (pMAP == SORTED)
 	memcpy(p, idx.get_map().get_local_container().data(), target_size);
+#elif (pMAP == RADIXSORT)
+  int count = 0;
+  auto values = idx.get_map().get_local_container().getData(&count);
+  memcpy(p, values, count * sizeof(decltype(*values)));
+  free(values);
 #else
         q = (unsigned char*)p;
 
@@ -1533,7 +1545,7 @@ int main(int argc, char** argv) {
     int max_group_size = group.size();
     max_group_size = mxx::allreduce(max_group_size, comm);
 
-#if (pMAP == SORTED)
+#if (pMAP == SORTED) || (pMAP == RADIXSORT)
 #else
     void *p;
     unsigned char *q;
@@ -1546,6 +1558,11 @@ int main(int argc, char** argv) {
       if (i == group.rank()) {
 #if (pMAP == SORTED)
 	write_posix(out_filename, reinterpret_cast<unsigned char*>(idx.get_map().get_local_container().data()), target_size);
+#elif (pMAP == RADIXSORT)
+  int count = 0;
+  auto values = idx.get_map().get_local_container().getData(&count);
+  write_posix(out_filename, reinterpret_cast<unsigned char*>(values), count * sizeof(decltype(*values)));
+  free(values);
 #else
         int res = posix_memalign(&p, block_size, target_size);
         if (res != 0) {
@@ -1585,7 +1602,11 @@ int main(int argc, char** argv) {
     // std::cout << "rank " << comm.rank() << " out file name " << out_filename << " target size " << target_size << std::endl;
 #if (pMAP == SORTED)
 	write_posix(out_filename, reinterpret_cast<unsigned char*>(idx.get_map().get_local_container().data()), target_size);
-
+#elif (pMAP == RADIXSORT)
+  int count = 0;
+  auto values = idx.get_map().get_local_container().getData(&count);
+  write_posix(out_filename, reinterpret_cast<unsigned char*>(values), count * sizeof(decltype(*values)));
+  free(values);
 #else 
 
     long block_size = 512;
@@ -1644,7 +1665,11 @@ int main(int argc, char** argv) {
       if (i == group.rank()) {
 #if (pMAP == SORTED)
 	memcpy(q, idx.get_map().get_local_container().data(), target_size);	
-
+#elif (pMAP == RADIXSORT)
+  int count = 0;
+  auto values = idx.get_map().get_local_container().getData(&count);
+  memcpy(q, values, count * sizeof(decltype(*values)));
+  free(values);
 #else
  
     auto iter_end = idx.get_map().get_local_container().end();
@@ -1680,7 +1705,11 @@ int main(int argc, char** argv) {
     unsigned char *q = p + (offset - pa_offset);
 #if (pMAP == SORTED)
 	memcpy(q, idx.get_map().get_local_container().data(), target_size);	
-
+#elif (pMAP == RADIXSORT)
+	int count = 0;
+	auto values = idx.get_map().get_local_container().getData(&count);
+	memcpy(q, values, count * sizeof(decltype(*values)));
+	free(values);
 #else
 	auto iter_end = idx.get_map().get_local_container().end();
 

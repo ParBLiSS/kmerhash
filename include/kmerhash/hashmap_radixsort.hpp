@@ -1330,6 +1330,11 @@ public:
         return totalKeyCount;
     }
 
+    size_t capacity() const {
+      return numBuckets;
+    }
+
+
 	inline hyperloglog64<Key, Hash<Key>, 12>& get_hll() {
 		return this->hll;
 	}

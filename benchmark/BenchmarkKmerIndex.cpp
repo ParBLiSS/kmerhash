@@ -69,6 +69,7 @@ static int measure_mode = MEASURE_DISABLED;
 
 #include "io/sequence_iterator.hpp"
 #include "io/sequence_id_iterator.hpp"
+#include "io/filtered_sequence_iterator.hpp"
 
 #include "iterators/transform_iterator.hpp"
 
@@ -690,15 +691,17 @@ int main(int argc, char** argv) {
 //	  } else
 	  if (reader_algo == 5) {
 		if (comm.rank() == 0) printf("reading %s via mmap\n", filename.c_str());
-		::bliss::io::KmerFileHelper::read_file_mmap<typename IndexType::KmerParserType, PARSER_TYPE, bliss::io::SequencesIterator>(filename, temp, comm);
+		::bliss::io::KmerFileHelper::read_file_mmap<typename IndexType::KmerParserType, PARSER_TYPE,
+		 bliss::io::NSplitSequencesIterator
+		 >(filename, temp, comm);
 
 	  } else if (reader_algo == 7) {
 		if (comm.rank() == 0) printf("reading %s via posix\n", filename.c_str());
-		::bliss::io::KmerFileHelper::read_file_posix<typename IndexType::KmerParserType, PARSER_TYPE, bliss::io::SequencesIterator>(filename, temp, comm);
+		::bliss::io::KmerFileHelper::read_file_posix<typename IndexType::KmerParserType, PARSER_TYPE, bliss::io::NSplitSequencesIterator>(filename, temp, comm);
 
 	  } else if (reader_algo == 10){
 		if (comm.rank() == 0) printf("reading %s via mpiio\n", filename.c_str());
-		::bliss::io::KmerFileHelper::read_file_mpiio<typename IndexType::KmerParserType, PARSER_TYPE, bliss::io::SequencesIterator>(filename, temp, comm);
+		::bliss::io::KmerFileHelper::read_file_mpiio<typename IndexType::KmerParserType, PARSER_TYPE, bliss::io::NSplitSequencesIterator>(filename, temp, comm);
 	  } else {
 		throw std::invalid_argument("missing file reader type");
 	  }
