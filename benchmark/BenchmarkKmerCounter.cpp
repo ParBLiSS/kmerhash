@@ -1279,9 +1279,12 @@ int main(int argc, char** argv) {
 
 	    // now insert.
       BL_BENCH_LOOP_RESUME(test, 4);
-
+#if (pMAP == RADIXSORT)
+      idx.get_map().insert_no_finalize(temp);
+#else
 	    idx.insert(temp);
-      BL_BENCH_LOOP_PAUSE(test, 4);
+#endif
+	    BL_BENCH_LOOP_PAUSE(test, 4);
 
 
       BL_BENCH_LOOP_RESUME(test, 5);
