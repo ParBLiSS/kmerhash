@@ -383,8 +383,10 @@ public:
         binShift = log2(sortBufSize);
         info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
         curOverflowBufId = 0;
+#ifndef NDEBUG
         printf("numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
                 numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
+#endif
         coherence = COHERENT;
         seed = 43;
     }
@@ -397,6 +399,10 @@ public:
 		_mm_free(sortBuf);
 		_mm_free(countSortBuf);
 		_mm_free(info_container);
+	}
+
+	double get_max_load_factor() const {
+	   return 0.9;
 	}
 
 	void set_novalue(V _noValue) const { noValue = _noValue; }
@@ -428,9 +434,20 @@ public:
 	// return fail or success
 	bool resize(uint32_t _newNumBuckets )
 	{
-    int PFD = 16;
+    if(coherence == INSERT)
+    {
+        printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+        finalize_insert();
+    } else if (coherence == ERASE) {
+      printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+      finalize_erase();
+	}
 
+    int PFD = 16;
+    //::std::cout << "key count " << totalKeyCount << " elem size " << sizeof(HashElement) << std::endl;
 		HashElement *oldElemArray = (HashElement *)_mm_malloc((totalKeyCount + PFD) * sizeof(HashElement), 64);
+    //printf("CURR numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
+    //        numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
 
 	  int32_t i, j;
 		int32_t elemCount = 0;
@@ -449,14 +466,16 @@ public:
                 oldElemArray[elemCount++] = overflowBuf[overflowBufId * binSize + j - (binSize - 1)];
             }
 		}
+#ifndef NDEBUG
 		printf("elemCount = %d\n", elemCount);
+#endif
 
 
 		bool resize_success = true;
 
-		if (! resize_insert(oldElemArray, _newNumBuckets, binSize)) {
+		if (! resize_insert(oldElemArray, elemCount, _newNumBuckets, binSize)) {
 		  // failed resize.  happens when binSize is not big enough, or overflow is not big enough.
-		  resize_success = resize_insert(oldElemArray, _newNumBuckets, binSize << 1);  // double binSize, which returns to old number of bin.
+		  resize_success = resize_insert(oldElemArray, elemCount, _newNumBuckets, binSize << 1);  // double binSize, which returns to old number of bin.
 		}
 
 
@@ -470,11 +489,10 @@ public:
 	}
 
   // return fail or success
-  bool resize_insert(HashElement * oldElemArray, uint32_t _newNumBuckets, int32_t _binSize)
+  bool resize_insert(HashElement * oldElemArray, int32_t elemCount, uint32_t _newNumBuckets, int32_t _binSize)
   {
         int PFD = 16;
         int32_t i;
-        int32_t elemCount = 0;
 
         numBuckets = next_power_of_2(_newNumBuckets);
         bucketMask = numBuckets - 1;
@@ -506,8 +524,10 @@ public:
     _mm_free(info_container);
         info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
         curOverflowBufId = 0;
+#ifndef NDEBUG
         printf("numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
                 numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
+#endif
 
     // insert the elements again
         coherence = INSERT;

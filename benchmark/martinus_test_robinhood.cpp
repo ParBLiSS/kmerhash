@@ -45,6 +45,7 @@
 #include <3rdparty/tessil/hopscotch_map.h>
 #include <3rdparty/sherwood_map/sherwood_map.hpp>
 
+
 #ifdef _WIN32
 #include <Windows.h>
 #include <psapi.h>
@@ -892,7 +893,8 @@ void print(O& out, const std::vector<std::vector<Stats>>& s) {
     for (size_t e = 0; e < elems; ++e) {
         for (size_t i = 1; i < s.size(); ++i) {
             if (s[i][e].num != s[0][e].num) {
-                throw std::runtime_error("num not equal!");
+            	out << i << ": " << s[i][e].num << "!=" << s[0][e].num << std::endl;
+                //throw std::runtime_error("num not equal!");
             }
         }
     }
@@ -2255,7 +2257,7 @@ int main(int argc, char** argv) {
     benchRng<Pcg32>("Pcg32");
 
 //    test1_std<RobinHoodInfobytePairNoOverflow::Map<int, int> >(100000);
-    size_t iterations = 1000;
+    size_t iterations = 200;
     size_t cnt_per_iter = 100 * 1000;
     {
         // using murmur32avx, as farmhash impl is sensitive to prefetch on/off.

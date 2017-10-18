@@ -2431,7 +2431,9 @@ protected:
 
 			// estimate the number of unique entries in input.
 			//#if defined(REPROBE_STAT)
+#ifndef NDEBUG
 			std::cout << " batch estimate cardinality as " << this->hll.estimate() << std::endl;
+#endif
 			//#endif
 			// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
 			this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));   // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
@@ -2504,7 +2506,9 @@ protected:
 		  }
   // estimate the number of unique entries in input.
 //#if defined(REPROBE_STAT)
+#ifndef NDEBUG
 		  std::cout << " estimate cardinality as " << this->hll.estimate() << std::endl;
+#endif
 //#endif
 		  // assume one element per bucket as ideal, resize now.  should not resize if don't need to.
 		  this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));
@@ -2574,7 +2578,9 @@ protected:
 
 			// estimate the number of unique entries in input.
 			//#if defined(REPROBE_STAT)
+#ifndef NDEBUG
 			std::cout << " estimate cardinality as " << this->hll.estimate() << std::endl;
+#endif
 			//#endif
 			// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
 			this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));
@@ -2640,8 +2646,9 @@ protected:
 
 			// estimate the number of unique entries in input.
 	//#if defined(REPROBE_STAT)
+#ifndef NDEBUG
 			std::cout << " estimate cardinality as " << this->hll.estimate() << std::endl;
-	//#endif
+#endif
 
 			// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
 			this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));
