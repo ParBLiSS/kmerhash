@@ -1153,7 +1153,7 @@ int main(int argc, char** argv) {
         kmer_iter_est += kmer_est;
         iter_file_size += file_size;
 #if (pMAP == SORTED)
-	mem_use_est += idx.local_size();
+        mem_use_est += idx.local_size();
 #else
 	    if (buckets > orig_buckets) {
 	    	if (comm.rank() == 0) std::cout << " SCALING UP from " << orig_buckets << " to " << buckets << ", mem from " << mem_use_est << " to ";
@@ -1197,6 +1197,8 @@ int main(int argc, char** argv) {
 #if (pMAP == SORTED)
 	    idx.get_map().get_local_container().reserve(idx.local_size() + kmer_est);
 	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
+#elif (pMAP == RADIXSORT)
+	    // do nothing.
 #else
 	    idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
 	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
@@ -1280,7 +1282,7 @@ int main(int argc, char** argv) {
 	    // now insert.
       BL_BENCH_LOOP_RESUME(test, 4);
 #if (pMAP == RADIXSORT)
-      idx.get_map().insert_no_finalize(temp);
+      idx.get_map().insert(temp);  // should be insert_no_finalize but just to be safe don't do it right now...
 #else
 	    idx.insert(temp);
 #endif
@@ -1342,7 +1344,7 @@ int main(int argc, char** argv) {
     } // filename loop.
 
 #if (pMAP == RADIXSORT)
-      idx.get_map().get_local_container().finalize_insert();
+      // idx.get_map().get_local_container().finalize_insert();
 #endif
   } // scoped to clear temp.
 
@@ -1353,11 +1355,7 @@ int main(int argc, char** argv) {
   BL_BENCH_LOOP_END(test, 0, "estimate", total_file_size);
   BL_BENCH_LOOP_END(test, 1, "reserve", iters );
   BL_BENCH_LOOP_END(test, 2, "read", kmer_total);
-#if (pMAP == SORTED)
   BL_BENCH_LOOP_END(test, 3, "resize", idx.get_map().get_local_container().capacity() );
-#else
-  BL_BENCH_LOOP_END(test, 3, "resize", idx.get_map().get_local_container().capacity() );
-#endif
   BL_BENCH_LOOP_END(test, 4, "insert", idx.local_size() );
   BL_BENCH_LOOP_END(test, 5, "measure", chars_per_kmer);
 

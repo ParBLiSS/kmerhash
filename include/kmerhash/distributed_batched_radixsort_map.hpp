@@ -2703,6 +2703,7 @@ if (measure_mode == MEASURE_INSERT)
     // insert.  linear read
     // free buffer
 
+    //std::cout << "dist insert: rank " << this->comm.rank() << " insert " << input.size() << std::endl;
 
         BL_BENCH_COLLECTIVE_START(insert, "alloc", this->comm);
       // get mapping to proc
@@ -2788,9 +2789,12 @@ if (measure_mode == MEASURE_A2A)
 	  	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
 	  	        if (this->comm.rank() == 0) std::cout << "local estimated size " << this->hll.estimate() << std::endl;
 	  			size_t est = this->hll.estimate_average_per_rank(this->comm);
-	  	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate)));
-	  	        if (this->comm.rank() == 0) std::cout << " estimated size " << est << std::endl;
-	  	        BL_BENCH_END(insert, "alloc_hashtable", est);
+	  			if (this->comm.rank() == 0)
+	  				std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
+				this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate)));
+				// if (this->comm.rank() == 0)
+				//	std::cout << "rank " << this->comm.rank() << " reserved " << this->c.capacity() << std::endl;
+				BL_BENCH_END(insert, "alloc_hashtable", est);
 
 	        size_t before = this->c.size();
 

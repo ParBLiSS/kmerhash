@@ -434,23 +434,23 @@ public:
 	// return fail or success
 	bool resize(uint32_t _newNumBuckets )
 	{
-    if(coherence == INSERT)
-    {
-        printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
-        finalize_insert();
-    } else if (coherence == ERASE) {
-      printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
-      finalize_erase();
-	}
+		if(coherence == INSERT)
+		{
+			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+			finalize_insert();
+		} else if (coherence == ERASE) {
+		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+		  finalize_erase();
+		}
 
-    int PFD = 16;
-    //::std::cout << "key count " << totalKeyCount << " elem size " << sizeof(HashElement) << std::endl;
-		HashElement *oldElemArray = (HashElement *)_mm_malloc((totalKeyCount + PFD) * sizeof(HashElement), 64);
-    //printf("CURR numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
-    //        numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
+		int PFD = 16;
+		//::std::cout << "key count " << totalKeyCount << " elem size " << sizeof(HashElement) << std::endl;
+			HashElement *oldElemArray = (HashElement *)_mm_malloc((totalKeyCount + PFD) * sizeof(HashElement), 64);
+		//printf("CURR numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
+		//        numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
 
-	  int32_t i, j;
-		int32_t elemCount = 0;
+		  int32_t i, j;
+		uint32_t elemCount = 0;
 		for(i = 0; i < numBins; i++)
 		{
 			int count = countArray[i];
@@ -470,29 +470,42 @@ public:
 		printf("elemCount = %d\n", elemCount);
 #endif
 
+		while (elemCount > _newNumBuckets)  _newNumBuckets <<= 1;
+		//ssstd::cout << "before " << numBuckets << std::endl;
+		resize_alloc(_newNumBuckets, binSize);
+		//std::cout << "allocated " << _newNumBuckets << std::endl;
+		int resize_result = resize_insert(oldElemArray, elemCount);
+		//std::cout << "inserted " << std::endl;
 
-		bool resize_success = true;
 
-		if (! resize_insert(oldElemArray, elemCount, _newNumBuckets, binSize)) {
-		  // failed resize.  happens when binSize is not big enough, or overflow is not big enough.
-		  resize_success = resize_insert(oldElemArray, elemCount, _newNumBuckets, binSize << 1);  // double binSize, which returns to old number of bin.
+		int tries = 2;
+		while ( (resize_result > 0) && (tries > 0)) {
+			std::cout << "resizing again and reinserting " << std::endl;
+
+			if (resize_result == 1) {
+			  // failed resize.  happens when binSize is not big enough, or overflow is not big enough.
+				resize_alloc(_newNumBuckets << 1, binSize);
+				std::cout << "try to resize increasing buckets" << std::endl;
+			} else if (resize_result == 2) {
+				resize_alloc(_newNumBuckets, binSize << 1);
+				std::cout << "try to resize increasing binsize" << std::endl;
+			}
+
+			--tries;
+			resize_result = resize_insert(oldElemArray, elemCount);  // double binSize, which returns to old number of bin.
 		}
+		_mm_free(oldElemArray);
+
+		if (resize_result == 0) finalize_insert();
+		else throw std::logic_error("ERROR: failed to resize, binSize doubled and still failed.");
 
 
-    _mm_free(oldElemArray);
-
-    if (resize_success) finalize_insert();
-    else throw std::logic_error("failed to resize, binSize doubled and still failed.");
-
-
-		return resize_success;
+		return true;
 	}
 
-  // return fail or success
-  bool resize_insert(HashElement * oldElemArray, int32_t elemCount, uint32_t _newNumBuckets, int32_t _binSize)
-  {
-        int PFD = 16;
-        int32_t i;
+	  // return fail or success
+	  void resize_alloc(uint32_t _newNumBuckets, int32_t _binSize)
+	  {
 
         numBuckets = next_power_of_2(_newNumBuckets);
         bucketMask = numBuckets - 1;
@@ -528,7 +541,13 @@ public:
         printf("numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
                 numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
 #endif
+	  }
 
+        // return fail or success
+        bool resize_insert(HashElement * oldElemArray, int32_t elemCount)
+        {
+              int PFD = 16;
+              int32_t i;
     // insert the elements again
         coherence = INSERT;
 
@@ -548,18 +567,19 @@ public:
           oldElemArray[i].bucketId = bucketIdArray[i];
         }
 
-
-        max = elemCount - (elemCount & (PFD - 1)) - PFD;
+        //max = elemCount - (elemCount & (PFD - 1)) - PFD;
+        max = elemCount - (PFD << 1);
         for(i = 0; i < max; i++)
         {
           if ((i & (PFD - 1)) == 0)
             hash_mod2(keyArray + ((i + PFD) & 31), PFD, bucketIdArray + ((i+PFD) & 31));
           // prep the key array for the next PFD
-          keyArray[i & 31] = oldElemArray[(i + (PFD << 1)) & 31].key;
+          keyArray[i & 31] = oldElemArray[(i + (PFD << 1))].key;
           // copy out the bucketIdArray
 
             HashElement he = oldElemArray[i];
             int binId = he.bucketId >> binShift;
+            //std::cout << "bucket id " << he.bucketId << " binShift " << binShift << std::endl;
             int count = countArray[binId];
             oldElemArray[(i + PFD)].bucketId =  bucketIdArray[ (i + PFD) & 31 ];
 #if ENABLE_PREFETCH
@@ -575,16 +595,18 @@ public:
                     count = radixSort(hashTable + binId * binSize,
                             count);
                     countArray[binId] = count;
+                    std::cout << "resize insert block 1.1: binId " << binId << " count " << count << " binsize " << binSize << std::endl;
                 }
 
                 if(count == (binSize - 1))
                 {
+                    std::cout << "resize insert block 1.2" << std::endl;
                     if(curOverflowBufId == overflowBufSize)
                     {
                         printf("ERROR! Ran out of overflowBuf, curOverflowBufId = %d.\n"
                                 "Try increasing numBins, binSize or overflowBufSize\n",
                                 curOverflowBufId);
-                        return false;
+                        return 1;
                         // exit(1);
                     }
                     int32_t overflowBufId = curOverflowBufId;
@@ -605,6 +627,8 @@ public:
                 overflowBufId = hashTable[binId * binSize + binSize - 1].bucketId;
                 if(count == (2 * binSize - 1))
                 {
+                    std::cout << "resize insert block 1.3" << std::endl;
+
                     int32_t c = radixSort(overflowBuf + overflowBufId * binSize,
                                           count - (binSize - 1));
                     count = merge(hashTable + binId * binSize, binSize - 1,
@@ -614,7 +638,7 @@ public:
                 if(count == (2 * binSize - 1))
                 {
                     printf("ERROR! binId = %d, count = 2 * binSize - 1. Please use larger binSize or numBins\n", binId);
-                    return false;
+                    return 2;
                     // exit(1);
                 }
                 overflowBuf[overflowBufId * binSize + count - (binSize - 1)] = he;
@@ -653,7 +677,7 @@ public:
                                 "Try increasing numBins, binSize or overflowBufSize\n",
                                 curOverflowBufId);
 
-                        return false;
+                        return 1;
                         //exit(1);
                     }
                     int32_t overflowBufId = curOverflowBufId;
@@ -683,7 +707,7 @@ public:
                 if(count == (2 * binSize - 1))
                 {
                     printf("ERROR! binId = %d, count = 2 * binSize - 1. Please use larger binSize or numBins\n", binId);
-                    return false;
+                    return 2;
                     //exit(1);
                 }
                 overflowBuf[overflowBufId * binSize + count - (binSize - 1)] = he;
@@ -692,7 +716,7 @@ public:
         }
 
 
-        for(; i < (elemCount); i++)
+        for(; i < elemCount; i++)
         {
             HashElement he = oldElemArray[i];
             int binId = he.bucketId >> binShift;
@@ -714,7 +738,7 @@ public:
                                 "Try increasing numBins, binSize or overflowBufSize\n", 
                                 curOverflowBufId);
 
-                        return false;
+                        return 1;
                         //exit(1);
                     }
                     int32_t overflowBufId = curOverflowBufId;
@@ -744,7 +768,7 @@ public:
                 if(count == (2 * binSize - 1))
                 {
                     printf("ERROR! binId = %d, count = 2 * binSize - 1. Please use larger binSize or numBins\n", binId);
-                    return false;
+                    return 2;
                     // exit(1);
                 }
                 overflowBuf[overflowBufId * binSize + count - (binSize - 1)] = he;
@@ -752,7 +776,7 @@ public:
             }
         }
 
-    return true;
+    return 0;
   }
 
     //uint64_t hash(uint64_t x)
@@ -772,7 +796,7 @@ public:
         int PFD = 16;
         int32_t i;
         coherence = INSERT;
-		int32_t hash_batch_size = 1024;
+		int32_t hash_batch_size = 512;
         hash_val_type bucketIdArray[2 * hash_batch_size];
 		memset(bucketIdArray, 0, 2 * hash_batch_size * sizeof(hash_val_type));
 		int32_t hash_mask = 2 * hash_batch_size - 1;
@@ -883,17 +907,25 @@ public:
       int32_t inserted = 0;
       bool resize_succeeded = true;
 
-      inserted += insert_impl(keyArray + inserted, numKeys - inserted);
+      //std::cout << "inserting " << numKeys << std::endl;
+
+      int32_t delta = insert_impl(keyArray + inserted, numKeys - inserted);
+      inserted += delta;
       while ((inserted < numKeys) && resize_succeeded) {
+  		std::cout << "insert try to resize.  last iter inserted " << delta << std::endl;
         // did not complete, so must need to resize.
         if (! resize(numBuckets << 1)) {  // failed resizing.
           // try 1 more time.
           resize_succeeded = resize(numBuckets << 1);
         }
+
+
         if (resize_succeeded)   // successful resize, so keep inserting.
-          inserted += insert_impl(keyArray + inserted, numKeys - inserted);
+          delta = insert_impl(keyArray + inserted, numKeys - inserted);
         else
           throw ::std::logic_error("FAILED TO RESIZE 2 consecutive times.  There is probably a full bin.");
+
+        inserted += delta;
       }
 
       return inserted;
@@ -1003,17 +1035,26 @@ public:
       int32_t inserted = 0;
       bool resize_succeeded = true;
 
-      inserted += insert_impl(keyArray + inserted, hashArray + inserted, numKeys - inserted);
+      //std::cout << "inserting " << numKeys << std::endl;
+
+
+      int32_t delta = insert_impl(keyArray + inserted, hashArray + inserted, numKeys - inserted);
+      inserted += delta;
       while ((inserted < numKeys) && resize_succeeded) {
+  		std::cout << "insert try to resize.  last iter inserted " << delta << std::endl;
         // did not complete, so must need to resize.
         if (! resize(numBuckets << 1)) {  // failed resizing.
           // try 1 more time.
           resize_succeeded = resize(numBuckets << 1);
         }
+
+
         if (resize_succeeded)   // successful resize, so keep inserting.
-          inserted += insert_impl(keyArray + inserted, hashArray + inserted, numKeys - inserted);
+          delta = insert_impl(keyArray + inserted, hashArray + inserted, numKeys - inserted);
         else
           throw ::std::logic_error("FAILED TO RESIZE 2 consecutive times.  There is probably a full bin.");
+
+        inserted += delta;
       }
 
       return inserted;
