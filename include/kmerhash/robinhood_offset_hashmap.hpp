@@ -2456,7 +2456,7 @@ protected:
 		do {
 		  finished += insert_batch_by_hash(begin + finished, hash_vals + finished, input_size - finished);
 	        if (finished < input_size)  {
-	        	std::cout << "rehashing to "  << (buckets <<1) << std::endl;
+	        	std::cout << "rehashing to "  << (buckets << 1) << std::endl;
 	        	rehash(buckets << 1);  // failed to completely insert (overflow, or max_load).  need to rehash.
 	        }
 		} while (finished < input_size);

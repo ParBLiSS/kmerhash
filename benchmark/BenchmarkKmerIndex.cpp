@@ -115,6 +115,7 @@ static int measure_mode = MEASURE_DISABLED;
 #define MURMUR32sse 27
 #define MURMUR32avx 28
 #define CRC32C 29
+#define CLHASH 30
 
 #define POS 31
 #define POSQUAL 32
@@ -224,6 +225,9 @@ using CountType = uint32_t;
 #elif (pDistHash == CRC32C)
   template <typename KM>
   using DistHash = ::fsc::hash::crc32c<KM>;
+#elif (pDistHash == CLHASH)
+  template <typename KM>
+  using DistHash = ::fsc::hash::clhash<KM>;
 #elif (pDistHash == FARM32)
 	template <typename KM>
 	using DistHash = ::fsc::hash::farm32<KM>;
@@ -258,6 +262,9 @@ using CountType = uint32_t;
 #elif (pStoreHash == CRC32C)
   template <typename KM>
   using StoreHash = ::fsc::hash::crc32c<KM>;
+#elif (pStoreHash == CLHASH)
+  template <typename KM>
+  using StoreHash = ::fsc::hash::clhash<KM>;
 #elif (pStoreHash == FARM32)
 	template <typename KM>
 	using StoreHash = ::fsc::hash::farm32<KM>;

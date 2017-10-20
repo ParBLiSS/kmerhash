@@ -2791,7 +2791,9 @@ if (measure_mode == MEASURE_A2A)
 	  			size_t est = this->hll.estimate_average_per_rank(this->comm);
 	  			if (this->comm.rank() == 0)
 	  				std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
-				this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate)));
+	  			if (est > this->c.capacity())
+	  				// add 10% just to be safe.
+	  				this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
 				// if (this->comm.rank() == 0)
 				//	std::cout << "rank " << this->comm.rank() << " reserved " << this->c.capacity() << std::endl;
 				BL_BENCH_END(insert, "alloc_hashtable", est);

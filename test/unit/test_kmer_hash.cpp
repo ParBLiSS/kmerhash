@@ -270,6 +270,54 @@ class KmerHashTest : public ::testing::Test {
 
 
     template <template <typename> class H, typename OT = uint32_t>
+    void hash_clhsah(std::string name) {
+
+       H<T> op;
+
+       std::vector<OT> test(this->iterations, 0);
+
+
+
+  // make sure that seeds do something.
+      H<T> op2(9876543);
+      std::vector<OT> test2(this->iterations, 0);
+
+	for (size_t i = 0; i < this->iterations; ++i) {
+		test[i] = op(this->kmers[i]);
+		test2[i] = op2(this->kmers[i]);
+	}
+
+
+
+	bool diff = (test[0] != test2[0]);
+
+	bool no_collision1 = true;
+	bool no_collision2 = true;
+
+	for (size_t i = 1; i < this->iterations; ++i) {
+        diff &= (test[i] != test2[i]);
+
+        no_collision1 &= (this->kmers[i-1] == this->kmers[i]) || (test[i] != test[i-1]);
+        no_collision2 &= (this->kmers[i-1] == this->kmers[i]) || (test2[i] != test2[i-1]);
+
+	if (!no_collision1) {
+		std::cout << "test1: i-1 " << (i-1) << ":" << this->kmers[i-1] << "->" << test[i-1] << " i " << i << ":" << this->kmers[i] << "->" << test[i] << std::endl;
+	}
+
+	if (!no_collision2) {
+		std::cout << "test2: i-1 " << (i-1) << ":" << this->kmers[i-1] << "->" << test2[i-1] << " i " << i << ":" << this->kmers[i] << "->" << test2[i] << std::endl;
+	}
+
+      ASSERT_TRUE(diff);
+	ASSERT_TRUE(no_collision1);
+	ASSERT_TRUE(no_collision2);
+	}
+
+
+    }
+
+
+    template <template <typename> class H, typename OT = uint32_t>
     void hash_crc32c(std::string name) {
 
        H<T> op;
@@ -315,6 +363,7 @@ class KmerHashTest : public ::testing::Test {
 
 
     }
+
 
     template <template <typename> class H, typename OT = uint32_t>
     void hash_crc32c_batch(std::string name) {
@@ -436,10 +485,16 @@ TYPED_TEST_P(KmerHashTest, murmur32sse_batch)
 
 #if defined(__AVX2__)
 
+TYPED_TEST_P(KmerHashTest, clhash)
+{
+	  this->template hash_clhsah<::fsc::hash::clhash>(std::string("clhash_seed"));
+}
+
 TYPED_TEST_P(KmerHashTest, murmur32avx)
 {
   this->template hash_vector_vs_sse<fsc::hash::murmur32, fsc::hash::murmur3avx32>(std::string("murmur3_32_vs_avx"));
 }
+
 
 TYPED_TEST_P(KmerHashTest, murmur32avx_batch)
 {
@@ -468,7 +523,7 @@ REGISTER_TYPED_TEST_CASE_P(KmerHashTest, iden, murmur, farm,
 //                           murmur64sse, murmur64sse_batch,   unimplemented.
 #endif
 #if defined(__AVX2__)
-                           murmur32avx, murmur32avx_batch,
+                           murmur32avx, murmur32avx_batch, clhash,
 #endif
 #if defined(__SSE4_2__)
 			crc32c, crc32c_batch,

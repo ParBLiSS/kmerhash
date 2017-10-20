@@ -74,32 +74,37 @@ if (BUILD_BENCHMARKS)
 	#cotire(benchmark_hashes)
 
 	# benchmark executable, FARM and MURMUR
-	foreach(hash STD IDEN FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
+	foreach(hash STD IDEN FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C CLHASH)
 		add_hashmap_target(noPref ${hash} KH_DUMMY)
 		add_hashmap_target(Pref ${hash} ENABLE_PREFETCH)
 	endforeach(hash)
 	
 	# distributed benchmarks.
 	foreach(map DENSEHASH)
-		foreach(hash FARM MURMUR32)
+		foreach(hash FARM MURMUR32 CLHASH)
 			add_dist_hashmap_target(testKmerIndex ${map} ${hash} ${hash} KH_DUMMY KH_DUMMY2)
 		endforeach(hash)
 		add_dist_hashmap_target(testKmerIndex ${map} MURMUR32 CRC32C KH_DUMMY KH_DUMMY2)
+		add_dist_hashmap_target(testKmerIndex ${map} CLHASH CRC32C KH_DUMMY KH_DUMMY2)
 
 		foreach(k 15 21 63)
 			add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} MURMUR32 CRC32C KH_DUMMY KH_DUMMY2)
 			add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} MURMUR32 MURMUR32 KH_DUMMY KH_DUMMY2)
+			add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} CLHASH CRC32C KH_DUMMY KH_DUMMY2)
+			add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} CLHASH CLHASH KH_DUMMY KH_DUMMY2)
 		endforeach(k)
 		foreach(dna 5 16)
 			add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} MURMUR32 CRC32C KH_DUMMY KH_DUMMY2)
 			add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} MURMUR32 MURMUR32 KH_DUMMY KH_DUMMY2)
+			add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} CLHASH CRC32C KH_DUMMY KH_DUMMY2)
+			add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} CLHASH CLHASH KH_DUMMY KH_DUMMY2)
 		endforeach(dna)
 	endforeach(map)
 	
 	foreach(map BROBINHOOD RADIXSORT)
 		# with prefetch
 		add_dist_hashmap_target(testKmerIndex ${map} FARM FARM KH_DUMMY1 ENABLE_PREFETCH)
-		foreach(hash MURMUR32 MURMUR32avx)
+		foreach(hash MURMUR32 MURMUR32avx CLHASH)
 			add_dist_hashmap_target(testKmerIndex ${map} ${hash} ${hash} KH_DUMMY1 ENABLE_PREFETCH)
 			add_dist_hashmap_target(testKmerIndex ${map} ${hash} CRC32C KH_DUMMY1 ENABLE_PREFETCH)
 		endforeach(hash)
@@ -107,7 +112,7 @@ if (BUILD_BENCHMARKS)
 			
 		# without prefetch		
 		add_dist_hashmap_target(noPref_KmerIndex ${map} FARM FARM KH_DUMMY1 KH_DUMMY2)
-		foreach(hash MURMUR32 MURMUR32avx)
+		foreach(hash MURMUR32 MURMUR32avx CLHASH)
 			add_dist_hashmap_target(noPref_KmerIndex ${map} ${hash} ${hash} KH_DUMMY1 KH_DUMMY2)
 			add_dist_hashmap_target(noPref_KmerIndex ${map} ${hash} CRC32C KH_DUMMY1 KH_DUMMY2)
 		endforeach(hash)
@@ -115,20 +120,20 @@ if (BUILD_BENCHMARKS)
 		# with overlap and no prefetch
 		#overlapped comm and insert/find/count/erase.
 		add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} FARM FARM OVERLAPPED_COMM KH_DUMMY2)
-		foreach(hash MURMUR32 MURMUR32avx)
+		foreach(hash MURMUR32 MURMUR32avx CLHASH)
 			add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM KH_DUMMY2)
 			add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM KH_DUMMY2)
 		endforeach(hash)
 	
 		#with overlap and prefetch
 		add_dist_hashmap_target(overlap-KmerIndex ${map} FARM FARM OVERLAPPED_COMM ENABLE_PREFETCH)
-		foreach(hash MURMUR32 MURMUR32avx)
+		foreach(hash MURMUR32 MURMUR32avx CLHASH)
 			add_dist_hashmap_target(overlap-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
 			add_dist_hashmap_target(overlap-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM ENABLE_PREFETCH)
 		endforeach(hash)
 		
 		foreach(k 15 21 63)
-			foreach(hash MURMUR32 MURMUR32avx)
+			foreach(hash MURMUR32 MURMUR32avx CLHASH)
 				add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} ${hash} ${hash} KH_DUMMY1 ENABLE_PREFETCH)
 				add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} ${hash} CRC32C KH_DUMMY1 ENABLE_PREFETCH)
 				add_dist_hashmap_kmer_target(overlap-KmerIndex ${k} 4 ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
@@ -136,7 +141,7 @@ if (BUILD_BENCHMARKS)
 			endforeach(hash)
 		endforeach(k)
 		foreach(dna 5 16)
-			foreach(hash MURMUR32 MURMUR32avx)
+			foreach(hash MURMUR32 MURMUR32avx CLHASH)
 				add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} ${hash} ${hash} KH_DUMMY1 ENABLE_PREFETCH)
 				add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} ${hash} CRC32C KH_DUMMY1 ENABLE_PREFETCH)
 				add_dist_hashmap_kmer_target(overlap-KmerIndex 31 ${dna} ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
@@ -147,19 +152,19 @@ if (BUILD_BENCHMARKS)
 
 	foreach(map BROBINHOOD RADIXSORT)
 		# lz4 distributed benchmarks.
-		foreach(hash MURMUR32avx) 
+		foreach(hash MURMUR32avx CLHASH) 
 		 # FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C
 			add_dist_hashmap_target(testLZ4KmerIndex ${map} ${hash} ${hash} ENABLE_LZ4_RESULT ENABLE_PREFETCH)
 		endforeach(hash)
 	
 		#overlapped comm using full array
-		foreach(hash MURMUR32avx) 
+		foreach(hash MURMUR32avx CLHASH) 
 		# FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
 			add_dist_hashmap_target(overlapFull-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_FULLBUFFER ENABLE_PREFETCH)
 		endforeach(hash)
 	
 		#overlapped comm 2 phase.
-		foreach(hash MURMUR32avx) 
+		foreach(hash MURMUR32avx CLHASH) 
 		#FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
 			add_dist_hashmap_target(overlap2P-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_2P ENABLE_PREFETCH)
 		endforeach(hash)
@@ -211,25 +216,84 @@ foreach(map BROBINHOOD RADIXSORT)
 	     "-DpPARSER=FASTA -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR32avx -DpStoreHash=${hash} -DENABLE_PREFETCH")
 	  target_link_libraries(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash}
 	   ${EXTRA_LIBS})
-	if (ENABLE_VTUNE_PROFILING)
-		target_link_libraries(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} ittnotify dl)
-	endif(ENABLE_VTUNE_PROFILING)
-	#cotire(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash})
+		if (ENABLE_VTUNE_PROFILING)
+			target_link_libraries(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} ittnotify dl)
+		endif(ENABLE_VTUNE_PROFILING)
+		#cotire(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash})
 
-	foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
-	  add_executable(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} BenchmarkKmerCounter.cpp)
-	  SET_TARGET_PROPERTIES(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash}
+
+		foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
+		  add_executable(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} BenchmarkKmerCounter.cpp)
+		  SET_TARGET_PROPERTIES(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash}
+		     PROPERTIES COMPILE_FLAGS 
+		     "-DpPARSER=FASTQ -DpDNA=4 -DpK=${k} -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR32avx -DpStoreHash=${hash} -DENABLE_PREFETCH")
+		  target_link_libraries(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash}
+		   ${EXTRA_LIBS})
+			if (ENABLE_VTUNE_PROFILING)
+				target_link_libraries(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} ittnotify dl)
+			endif(ENABLE_VTUNE_PROFILING)
+			
+			#cotire(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash})
+		endforeach(k)
+	endforeach(hash)
+
+	foreach(hash MURMUR CRC32C) 
+	  add_executable(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR-sh${hash} BenchmarkKmerCounter.cpp)
+	  SET_TARGET_PROPERTIES(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR-sh${hash}
 	     PROPERTIES COMPILE_FLAGS 
-	     "-DpPARSER=FASTQ -DpDNA=4 -DpK=${k} -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR32avx -DpStoreHash=${hash} -DENABLE_PREFETCH")
-	  target_link_libraries(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash}
+	     "-DpPARSER=FASTA -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=${hash} -DENABLE_PREFETCH")
+	  target_link_libraries(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR-sh${hash}
 	   ${EXTRA_LIBS})
 		if (ENABLE_VTUNE_PROFILING)
-			target_link_libraries(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash} ittnotify dl)
+			target_link_libraries(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR-sh${hash} ittnotify dl)
 		endif(ENABLE_VTUNE_PROFILING)
-		
-		#cotire(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR32avx-sh${hash})
-	endforeach(k)
+		#cotire(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR-sh${hash})
+
+		foreach(k 31 255)
+		#foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
+		  add_executable(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR-sh${hash} BenchmarkKmerCounter.cpp)
+		  SET_TARGET_PROPERTIES(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR-sh${hash}
+		     PROPERTIES COMPILE_FLAGS 
+		     "-DpPARSER=FASTQ -DpDNA=4 -DpK=${k} -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=MURMUR -DpStoreHash=${hash} -DENABLE_PREFETCH")
+		  target_link_libraries(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR-sh${hash}
+		   ${EXTRA_LIBS})
+			if (ENABLE_VTUNE_PROFILING)
+				target_link_libraries(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR-sh${hash} ittnotify dl)
+			endif(ENABLE_VTUNE_PROFILING)
+			
+			#cotire(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhMURMUR-sh${hash})
+		endforeach(k)
 	endforeach(hash)
+
+	foreach(hash CLHASH CRC32C) 
+	  add_executable(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhCLHASH-sh${hash} BenchmarkKmerCounter.cpp)
+	  SET_TARGET_PROPERTIES(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhCLHASH-sh${hash}
+	     PROPERTIES COMPILE_FLAGS 
+	     "-DpPARSER=FASTA -DpDNA=4 -DpK=31 -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=CLHASH -DpStoreHash=${hash} -DENABLE_PREFETCH")
+	  target_link_libraries(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhCLHASH-sh${hash}
+	   ${EXTRA_LIBS})
+		if (ENABLE_VTUNE_PROFILING)
+			target_link_libraries(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhCLHASH-sh${hash} ittnotify dl)
+		endif(ENABLE_VTUNE_PROFILING)
+		#cotire(testKmerCounter-FASTA-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dhCLHASH-sh${hash})
+
+		foreach(k 31 255)
+		#foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
+		  add_executable(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhCLHASH-sh${hash} BenchmarkKmerCounter.cpp)
+		  SET_TARGET_PROPERTIES(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhCLHASH-sh${hash}
+		     PROPERTIES COMPILE_FLAGS 
+		     "-DpPARSER=FASTQ -DpDNA=4 -DpK=${k} -DpKmerStore=CANONICAL -DpMAP=${map} -DpINDEX=COUNT -DpDistTrans=IDEN -DpDistHash=CLHASH -DpStoreHash=${hash} -DENABLE_PREFETCH")
+		  target_link_libraries(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhCLHASH-sh${hash}
+		   ${EXTRA_LIBS})
+			if (ENABLE_VTUNE_PROFILING)
+				target_link_libraries(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhCLHASH-sh${hash} ittnotify dl)
+			endif(ENABLE_VTUNE_PROFILING)
+			
+			#cotire(testKmerCounter-FASTQ-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dhCLHASH-sh${hash})
+		endforeach(k)
+	endforeach(hash)
+
+
 endforeach(map)
 
 

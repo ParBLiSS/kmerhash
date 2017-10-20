@@ -19,6 +19,7 @@
 #define MEASURE_MURMURSSE 10
 #define MEASURE_MURMURAVX 11
 #define MEASURE_CRC32C 12
+#define MEASURE_CLHSH 13
 
 //#define MEASURE_MURMURSSSE64 13
 
@@ -172,6 +173,25 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
 #endif
   }
   BL_BENCH_END(benchmark, "murmur32avx8", count);
+
+  BL_BENCH_START(benchmark);
+  {
+
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_CLHASH)
+      __itt_resume();
+#endif
+    ::fsc::hash::clhash<DataStruct<N> > h;
+     benchmark_hash(h, data, out, count);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_CLHASH)
+      __itt_pause();
+#endif
+  }
+  BL_BENCH_END(benchmark, "clhash", count);
+
+
+
 #endif
 
 #if defined(__SSE4_2__)
@@ -240,6 +260,7 @@ int main(int argc, char** argv) {
         measure_modes.push_back("murmur_avx");
 //        measure_modes.push_back("murmur64_sse");
         measure_modes.push_back("crc32c");
+        measure_modes.push_back("clhash");
         measure_modes.push_back("disabled");
         TCLAP::ValuesConstraint<std::string> measureModeVals( measure_modes );
         TCLAP::ValueArg<std::string> measureModeArg("","measured_op","hash function to measure (default disabled)",false,"disabled",&measureModeVals, cmd);
@@ -267,6 +288,8 @@ int main(int argc, char** argv) {
 //          measure_mode = MEASURE_MURMURSSE64;
         } else if (measure_mode_str == "crc32c") {
           measure_mode = MEASURE_CRC32C;
+        } else if (measure_mode_str == "clhash") {
+          measure_mode = MEASURE_CLHASH;
         } else {
           measure_mode = MEASURE_DISABLED;
         }

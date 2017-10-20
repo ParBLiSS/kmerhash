@@ -941,6 +941,7 @@ include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/mxx/ext")
 include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/tclap-1.2.1/include")
 include_directories("${EXT_PROJECTS_DIR}/kmerind/ext/sparsehash-c11")
 include_directories("${EXT_PROJECTS_DIR}/lz4/lib")
+include_directories("${EXT_PROJECTS_DIR}/clhash/include")
 
 
 #for when the linker (ld) has problem finding librt, e.g. error: undefined referecne clock_gettime@@GLIBC_2.2.5.  this needs to be close to the end of the ld list.

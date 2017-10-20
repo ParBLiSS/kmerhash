@@ -993,7 +993,9 @@ namespace dsc  // distributed std container
 
   	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
   			size_t est = this->hll.estimate_average_per_rank(this->comm);
-  	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate)));
+  			if (est > (this->c.get_max_load_factor() * this->c.capacity()))
+  				// add 10% just to be safe.
+  	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
   	        //std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
   	        BL_BENCH_END(insert, "alloc_hashtable", est);
 
@@ -3179,8 +3181,10 @@ if (measure_mode == MEASURE_A2A)
 
 	  	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
 	  	        size_t est = this->hll.estimate_average_per_rank(this->comm);
-	  	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate)));
-	  	        //std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
+	  			if (est > (this->c.get_max_load_factor() * this->c.capacity()))
+	  				// add 10% just to be safe.
+	  	        	this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
+	  	        if (this->comm.rank() == 0) std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
 	  	        BL_BENCH_END(insert, "alloc_hashtable", est);
 
 	        size_t before = this->c.size();

@@ -401,10 +401,6 @@ public:
 		_mm_free(info_container);
 	}
 
-	double get_max_load_factor() const {
-	   return 0.9;
-	}
-
 	void set_novalue(V _noValue) const { noValue = _noValue; }
 
 	const_iterator cbegin() const {

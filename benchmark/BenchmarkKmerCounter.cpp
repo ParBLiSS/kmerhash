@@ -104,6 +104,7 @@
 #define MURMUR32sse 27
 #define MURMUR32avx 28
 #define CRC32C 29
+#define CLHASH 30
 
 #define POS 31
 #define POSQUAL 32
@@ -222,6 +223,9 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 	#elif (pDistHash == CRC32C)
 	  template <typename KM>
 	  using DistHash = ::fsc::hash::crc32c<KM>;
+	#elif (pDistHash == CLHASH)
+	  template <typename KM>
+	  using DistHash = ::fsc::hash::clhash<KM>;
 	#elif (pDistHash == FARM32)
 	  template <typename KM>
 	  using DistHash = ::fsc::hash::farm32<KM>;
@@ -256,6 +260,9 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 	#elif (pStoreHash == CRC32C)
 	  template <typename KM>
 	  using StoreHash = ::fsc::hash::crc32c<KM>;
+	#elif (pStoreHash == CLHASH)
+	  template <typename KM>
+	  using StoreHash = ::fsc::hash::clhash<KM>;
 	#elif (pStoreHash == FARM32)
 	  template <typename KM>
 	  using StoreHash = ::fsc::hash::farm32<KM>;
@@ -1197,8 +1204,8 @@ int main(int argc, char** argv) {
 #if (pMAP == SORTED)
 	    idx.get_map().get_local_container().reserve(idx.local_size() + kmer_est);
 	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
-#elif (pMAP == RADIXSORT)
-	    // do nothing.
+#elif (pMAP == RADIXSORT) || (pMAP == BROBINHOOD)
+	    // do nothing, since on insertion we reserve.
 #else
 	    idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
 	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
@@ -1211,7 +1218,7 @@ int main(int argc, char** argv) {
 
 	    // now reserve space.
 	    {
-	      kmer_vec_type().swap(temp);
+	      kmer_vec_type().swap(temp);   // clear and destroy, so when we resize we are starting from scratch.
 	    }
 	    temp.reserve( static_cast<size_t>(static_cast<float>(iter_file_size) / chars_per_kmer) );   // initially, (empty index), assume (3 * size(kmer) + 2 + size(count)) * N
 
@@ -1238,15 +1245,15 @@ int main(int argc, char** argv) {
 
 	      // ---- now read each file
   	  if (reader_algo == 5) {
-  		if (comm.rank() == 0) printf("reading %s via mmap\n", filename.c_str());
+  		if (comm.rank() == 0) printf("reading %s via mmap\n", filenames[i].c_str());
   		::bliss::io::KmerFileHelper::read_file_mmap<typename IndexType::KmerParserType, PARSER_TYPE, bliss::io::NSplitSequencesIterator>(filenames[i], temp, comm);
 
   	  } else if (reader_algo == 7) {
-  		if (comm.rank() == 0) printf("reading %s via posix\n", filename.c_str());
+  		if (comm.rank() == 0) printf("reading %s via posix\n", filenames[i].c_str());
   		::bliss::io::KmerFileHelper::read_file_posix<typename IndexType::KmerParserType, PARSER_TYPE, bliss::io::NSplitSequencesIterator>(filenames[i], temp, comm);
 
   	  } else if (reader_algo == 10){
-  		if (comm.rank() == 0) printf("reading %s via mpiio\n", filename.c_str());
+  		if (comm.rank() == 0) printf("reading %s via mpiio\n", filenames[i].c_str());
   		::bliss::io::KmerFileHelper::read_file_mpiio<typename IndexType::KmerParserType, PARSER_TYPE, bliss::io::NSplitSequencesIterator>(filenames[i], temp, comm);
   	  } else {
   		throw std::invalid_argument("missing file reader type");
@@ -1311,6 +1318,9 @@ int main(int argc, char** argv) {
             std::endl;
         std::cout <<
             " FILE STAT chars_per_kmer " << chars_per_kmer <<
+			" avg distinct " << avg_distinct_count <<
+			" avg distinct b4 " << avg_distinct_before <<
+			" kmer iter total " << kmer_iter_total <<
             " distinct_ratio " << distinct_ratio <<
             " delta_distinct " << delta_distinct <<
             " avg iter file size " << iter_file_size <<
@@ -1339,7 +1349,6 @@ int main(int argc, char** argv) {
 #endif
             std::endl;
       }
-
 
     } // filename loop.
 

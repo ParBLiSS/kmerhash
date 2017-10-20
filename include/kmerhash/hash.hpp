@@ -87,6 +87,13 @@
 #include <farmhash/src/farmhash.cc>
 #endif
 
+#if defined(__AVX2__)
+
+	#ifndef INCLUDE_CLHASH_H_
+	#include <clhash/src/clhash.c>
+	#endif
+#endif
+
 #if defined(_MSC_VER)
 
 #define FSC_FORCE_INLINE  __forceinline
@@ -2285,12 +2292,39 @@ namespace fsc {
 #endif
 
 
+#if defined(__AVX2__)
 
     /**
      * @brief  farm hash
      *
      * MAY NOT WORK CONSISTENTLY between prefetching on and off.
      */
+    template <typename T>
+    class clhash {
+
+      protected:
+    	 mutable size_t rand_numbers[RANDOM_64BITWORDS_NEEDED_FOR_CLHASH] __attribute__((aligned(16)));
+
+      public:
+        static constexpr uint8_t batch_size = 1;
+        using result_type = uint64_t;
+        using argument_type = T;
+
+        clhash(uint64_t const & _seed = 43 ) {
+        	srand(_seed);
+        	for (int i = 0; i < RANDOM_64BITWORDS_NEEDED_FOR_CLHASH; ++i) {
+        		rand_numbers[i] = (static_cast<unsigned long>(rand()) << 32) | static_cast<unsigned long>(rand());
+        	}
+        };
+
+        /// operator to compute hash.  64 bit again.
+        inline uint64_t operator()(const T & key) const {
+          return ::clhash(reinterpret_cast<const void *>(rand_numbers), reinterpret_cast<const char*>(&key), sizeof(T));
+        }
+    };
+    template <typename T> constexpr uint8_t clhash<T>::batch_size;
+#endif
+
     template <typename T>
     class farm {
 
@@ -2310,6 +2344,7 @@ namespace fsc {
         }
     };
     template <typename T> constexpr uint8_t farm<T>::batch_size;
+
 
     template <typename T>
     class farm32 {
