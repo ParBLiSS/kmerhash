@@ -73,26 +73,49 @@ inline uint8_t leftmost_set_bit(uint64_t x) {
 	return (x == 0) ? 65 : static_cast<uint8_t>(::__builtin_clzl(x) + 1);
 }
 
+inline uint8_t leftmost_set_bit(uint32_t x) {
+	return (x == 0) ? 33 : static_cast<uint8_t>(::__builtin_clz(x) + 1);
+}
+
 #else
 
 #if defined (_MSC_VER)
+
 inline uint8_t leftmost_set_bit(uint64_t x) {
 	if (x == 0) return 65;
     uint64_t b = 64;
     ::_BitScanReverse64(&b, x);
     return static_cast<uint8_t>(b);
 }
+
+inline uint8_t leftmost_set_bit(uint32_t x) {
+	if (x == 0) return 33;
+    uint32_t b = 32;
+    ::_BitScanReverse(&b, x);
+    return static_cast<uint8_t>(b);
+}
+
 #else
 // from https://en.wikipedia.org/wiki/Find_first_set, extended to 64 bit
 static const uint8_t clz_table_4bit[16] = { 4, 3, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0 };
 inline uint8_t leftmost_set_bit(uint64_t x) {
   if (x == 0) return 65;
-  uint8_t n;
-  if ((x & 0xFFFFFFFF00000000ULL) == 0) {n  = 32; x <<= 32;} else {n = 0;}
+  uint8_t n = 0;
+  if ((x & 0xFFFFFFFF00000000ULL) == 0) {n += 32; x <<= 32;}
   if ((x & 0xFFFF000000000000ULL) == 0) {n += 16; x <<= 16;}
   if ((x & 0xFF00000000000000ULL) == 0) {n +=  8; x <<=  8;}
   if ((x & 0xF000000000000000ULL) == 0) {n +=  4; x <<=  4;}
   n += clz_table_4bit[x >> 60];  // 64 - 4
+  return n+1;
+}
+
+inline uint8_t leftmost_set_bit(uint32_t x) {
+  if (x == 0) return 33;
+  uint8_t n = 0;
+  if ((x & 0xFFFF0000U) == 0) {n += 16; x <<= 16;}
+  if ((x & 0xFF000000U) == 0) {n +=  8; x <<=  8;}
+  if ((x & 0xF0000000U) == 0) {n +=  4; x <<=  4;}
+  n += clz_table_4bit[x >> 28];  // 32 - 4
   return n+1;
 }
 
@@ -120,48 +143,41 @@ inline uint8_t leftmost_set_bit(uint64_t x) {
 //   64 bit.  0xIIRRVVVVVV  // MSB: ignored bits II;  high bits: register index RR;  low: values VVVVVV
 template <typename T, typename Hash, uint8_t precision = 12U>
 class hyperloglog64 {
-	  static_assert((precision >= 4ULL) && (precision <= 16ULL),
-			  "ERROR: precision for hyperloglog should be in [4, 16].");
+	  static_assert((precision >= 4ULL) && (precision <= 18ULL),
+			  "ERROR: precision for hyperloglog should be in [4, 18].");
 
 public:
 		using REG_T = uint8_t;
 		using HVT = decltype(::std::declval<Hash>().operator()(::std::declval<T>()));
+		static constexpr uint8_t hvt_size = sizeof(HVT) * 8U;
+
+		static_assert(hvt_size == 32 || hvt_size == 64, "Only allow 4 or 8 byte hash values");
 
 protected:
-		static constexpr uint64_t nRegisters = 0x1ULL << precision;   // e.g. 0x00000100
+		static constexpr uint32_t nRegisters = 0x1U << precision;   // e.g. 0x00000100
 		static constexpr uint8_t unused_msb =
 				(std::is_same<::std::hash<T>, Hash>::value) ?
-				((sizeof(T) >= 8ULL) ? 0U : (64U - (sizeof(T) * 8ULL))) :   // if std::hash then via input size.
-				(64U - (sizeof(decltype(::std::declval<Hash>().operator()(::std::declval<T>()))) << 3));   // if not, check Hash operator return type.
+				((sizeof(T) >= sizeof(HVT)) ? 0U : (sizeof(HVT) - sizeof(T)) * 8U) :   // if std::hash then via input size.
+				0U;
+				//(64U - (sizeof(decltype(::std::declval<Hash>().operator()(::std::declval<T>()))) << 3));   // if not, check Hash operator return type.
 		// 64 bit.  0xIIRRVVVVVV  // MSB: ignored bits II,  high bits: reg, RR.  low: values, VVVVVV
-		static constexpr uint8_t no_ignore_value_bits = 64U - precision;  // e.g. 0x00FFFFFF
+		static constexpr uint8_t no_ignore_value_bits = hvt_size - precision;  // e.g. 0x00FFFFFF
+			// assumes that ignored part has be left shifted out, so no_ignore_value_bits is basically all bits except precision.
 
 		mutable ::std::vector<REG_T> registers;  // stores count of leading zeros
 
 	mutable double amm;
-	mutable uint64_t lzc_mask;   // lowest bits set to 1 to prevent counting into that region.
+	mutable HVT lzc_mask;   // lowest bits set to 1 to prevent counting into that region.
 
 	mutable uint8_t ignored_msb; // MSB to ignore.
-
 	Hash h;
 
-	inline void internal_update(::std::vector<REG_T> & regs, uint64_t const & no_ignore) {
-		// no_ignore has bits 0xRRVVVVVV00, not that the II bits had already been shifted away.
-		// extract RR:      0x0000000000RR
-        uint64_t i = no_ignore >> no_ignore_value_bits;   // first precision bits are for register id
-        // next count:  want to count 0xVVVVVV1111.
-        // compute lzcnt +1 from VVVVVV
-        REG_T rank = leftmost_set_bit((no_ignore << precision) | lzc_mask);  // then find leading 1 in remaining
-        if (rank > regs[i]) {
-            regs[i] = rank;
-        }
-		//::std::cout << "v=" << std::hex << no_ignore << std::endl;
-	}
 
-  inline void internal_update(REG_T* regs, uint64_t const & no_ignore) {
+
+  inline void internal_update(REG_T* regs, HVT const & no_ignore) {
     // no_ignore has bits 0xRRVVVVVV00, not that the II bits had already been shifted away.
     // extract RR:      0x0000000000RR
-        uint64_t i = no_ignore >> no_ignore_value_bits;   // first precision bits are for register id
+        HVT i = no_ignore >> no_ignore_value_bits;   // first precision bits are for register id
         // next count:  want to count 0xVVVVVV1111.
         // compute lzcnt +1 from VVVVVV
         REG_T rank = leftmost_set_bit((no_ignore << precision) | lzc_mask);  // then find leading 1 in remaining
@@ -171,7 +187,11 @@ protected:
 		//::std::cout << "v=" << std::hex << no_ignore << std::endl;
   }
 
-  inline void internal_merge(REG_T* target, const REG_T* src) {
+	inline void internal_update(::std::vector<REG_T> & regs, HVT const & no_ignore) {
+		internal_update(regs.data(), no_ignore);
+	}
+
+  inline void internal_merge(REG_T * target, const REG_T* src) {
     // precisions identical, so don't need to check number of registers either.
 
     // iterate over both, merge, and update the zero count.
@@ -181,73 +201,57 @@ protected:
   }
 
 
+  double internal_estimate(const REG_T* regs) const {
+        double estimate = static_cast<double>(0.0);
+        double sum = static_cast<double>(0.0);
+
+        // compute the denominator of the harmonic mean
+        for (size_t i = 0; i < nRegisters; i++) {
+            sum += static_cast<double>(1.0) / static_cast<double>(1ULL << regs[i]);
+        }
+        estimate = amm / sum; // E in the original paper
+//        std::cout << static_cast<size_t>(hvt_size) << " bit, mask " << lzc_mask << " ignored " << static_cast<size_t>(ignored_msb)
+//        		<< " no ignore " << static_cast<size_t>(no_ignore_value_bits) << " unused " << static_cast<size_t>(unused_msb) <<std::endl;
+
+        if (estimate <= static_cast<double>(5ULL * (nRegisters >> 1ULL))) {  // 5m/2
+          size_t zeros = count_zeros(regs);
+          if (zeros > 0ULL) {
+//              std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
+        	  return linear_count(zeros);
+          } else {
+//        	   std::cout << "linear_count: no zero: " << zeros << " estimate " << estimate << std::endl;
+        	   return estimate;
+          }
+        } else if ((hvt_size == 32) && (estimate > (static_cast<double>(1ULL << 31U) / static_cast<double>(15.0)))) {
+          // don't need this because of 64bit.
+        	estimate = log(static_cast<double>(1.0) - (estimate / static_cast<double>(1ULL << 32U))) / static_cast<double>(1ULL << 32U);
+//            std::cout << "32bit large estimate correctiont: " << estimate << std::endl;
+            return estimate;
+        } else {
+//        	   std::cout << "normal estimate: " << estimate << std::endl;
+        	          return estimate;
+        }
+  }
+
+
   double internal_estimate(::std::vector<REG_T> const & regs) const {
-        double estimate = static_cast<double>(0.0);
-        double sum = static_cast<double>(0.0);
-
-        assert(regs.size() == nRegisters);
-
-        // compute the denominator of the harmonic mean
-        for (size_t i = 0; i < nRegisters; i++) {
-            sum += static_cast<double>(1.0) / static_cast<double>(1ULL << regs[i]);
-        }
-        estimate = amm / sum; // E in the original paper
-
-        if (estimate <= static_cast<double>(5ULL * (nRegisters >> 1ULL))) {  // 5m/2
-          size_t zeros = count_zeros(regs);
-          if (zeros > 0ULL) {
-//            std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
-        return linear_count(zeros);
-          } else
-            return estimate;
-//        } else if (estimate > (1.0 / 30.0) * pow_2_32) {
-          // don't need this because of 64bit.
-//            estimate = neg_pow_2_32 * log(1.0 - (estimate / pow_2_32));
-        } else
-          return estimate;
+	  return internal_estimate(regs.data());
   }
 
-  double internal_estimate(REG_T* regs) const {
-        double estimate = static_cast<double>(0.0);
-        double sum = static_cast<double>(0.0);
-
-        // compute the denominator of the harmonic mean
-        for (size_t i = 0; i < nRegisters; i++) {
-            sum += static_cast<double>(1.0) / static_cast<double>(1ULL << regs[i]);
-        }
-        estimate = amm / sum; // E in the original paper
-
-        if (estimate <= static_cast<double>(5ULL * (nRegisters >> 1ULL))) {  // 5m/2
-          size_t zeros = count_zeros(regs);
-          if (zeros > 0ULL) {
-//            std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
-        return linear_count(zeros);
-          } else
-            return estimate;
-//        } else if (estimate > (1.0 / 30.0) * pow_2_32) {
-          // don't need this because of 64bit.
-//            estimate = neg_pow_2_32 * log(1.0 - (estimate / pow_2_32));
-        } else
-          return estimate;
-  }
-
-  inline uint64_t count_zeros(::std::vector<REG_T> const & regs) const {
-    uint64_t zeros = 0;
+  inline uint32_t count_zeros(const REG_T* regs) const {
+    uint32_t zeros = 0;
     for (size_t i = 0; i < nRegisters; i++) {
       if (regs[i] == 0) ++zeros;
     }
     return zeros;
   }
 
-  inline uint64_t count_zeros(REG_T* regs) const {
-    uint64_t zeros = 0;
-    for (size_t i = 0; i < nRegisters; i++) {
-      if (regs[i] == 0) ++zeros;
-    }
-    return zeros;
+
+  inline uint32_t count_zeros(::std::vector<REG_T> const & regs) const {
+	  return count_zeros(regs.data());
   }
 
-  inline double linear_count(uint64_t const & zeros) const {
+  inline double linear_count(uint32_t const & zeros) const {
     return static_cast<double>(nRegisters) *
         std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
   }
@@ -255,13 +259,13 @@ protected:
 
 public:
 
-  static constexpr double est_error_rate = static_cast<double>(1.04) / static_cast<double>(0x1ULL << (precision >> 1ULL));   // avoid std::sqrt in constexpr.
+  static constexpr double est_error_rate = static_cast<double>(1.04) / static_cast<double>(0x1U << (precision >> 1U));   // avoid std::sqrt in constexpr.
 
   	/// constructor.  ignore_leading does not count the leading bits.  ignore_trailing does not count the trailing bits.
   	  /// these are for use when the leading and/or trailing bits are identical in an input set.
 	hyperloglog64(uint8_t const & ignore_msb = 0) :
 		registers(nRegisters),
-		lzc_mask( ~(0x0ULL) >> (64 - precision - ignore_msb - unused_msb)),
+		lzc_mask( (~(static_cast<HVT>(0))) >> (hvt_size - precision - ignore_msb - unused_msb)),
 		ignored_msb(ignore_msb + unused_msb)
 		{
 
@@ -279,7 +283,7 @@ public:
                 amm = static_cast<double>(0.7213) / (static_cast<double>(1.0) + (static_cast<double>(1.079) / static_cast<double>(nRegisters)));
                 break;
         }
-        amm *= static_cast<double>(0x1ULL << (precision << 1ULL));  // 2^(2*precision)
+        amm *= static_cast<double>(0x1ULL << (precision << 1U));  // 2^(2*precision)
 
 //        std::cout << " ignore msb = " << static_cast<size_t>(ignore_msb) <<
 //        		" unused_msb = " << static_cast<size_t>(unused_msb) << std::endl;
@@ -340,23 +344,24 @@ public:
 
 
 	inline void update(T const & val) {
-      internal_update(this->registers, static_cast<uint64_t>(h(val)) << ignored_msb);
+      internal_update(this->registers, h(val) << ignored_msb);
 	}
 
 	inline void update_via_hashval(HVT const & hval) {
 	//	::std::cout << ::std::hex << static_cast<uint64_t>(hval) << ", unused msb " << static_cast<size_t>(unused_msb) << " ignored msb  " << static_cast<size_t>(ignored_msb) << " val " <<  (static_cast<uint64_t>(hval) << ignored_msb) << std::endl;
-      internal_update(this->registers, static_cast<uint64_t>(hval) << ignored_msb);
+      internal_update(this->registers, hval << ignored_msb);
 	}
 
-
+	// if batch mode not present.
   template <typename H = Hash, typename TT>
   inline auto update_impl(TT const * vals, size_t const & count, long)
   -> decltype(::std::declval<H>()(::std::declval<TT>()), void()) {
     for (size_t i = 0; i < count; ++i) {
-      internal_update(this->registers, static_cast<uint64_t>(h(vals[i])) << ignored_msb);
+      internal_update(this->registers, h(vals[i]) << ignored_msb);
     }
   }
 
+  // int as last parameter preferred.  batch mode avaialble
   template <typename H = Hash, typename HTT = HVT, typename TT>
   inline auto update_impl(TT const * vals, size_t const & count, int)
   -> decltype(::std::declval<H>()(vals, count, ::std::declval<HTT*>()), void()) {
@@ -372,12 +377,12 @@ public:
       h(vals + i, h.batch_size, buf);
 
       for (j = 0; j < h.batch_size; ++j) {
-        internal_update(this->registers, static_cast<uint64_t>(buf[j]) << ignored_msb);
+        internal_update(this->registers, buf[j] << ignored_msb);
       }
     }
     // last part, do linearly.
     for (; i < count; ++i) {
-      internal_update(this->registers, static_cast<uint64_t>(h(vals[i])) << ignored_msb);
+      internal_update(this->registers, h(vals[i]) << ignored_msb);
     }
 
     free(buf);
@@ -386,13 +391,13 @@ public:
   template <typename TT>
   inline auto update(TT const * vals, size_t const & count)
   -> decltype(this->update_impl(vals, count, 0), void()) {
-    update_impl(vals, count, 0);
+    update_impl(vals, count, 0);   // prefer integer as 0 defaults to int.
   }
 
   inline void update_via_hashval(HVT const * hashes, size_t const & count) {
 //  	std::cout << "h0: " << hashes[0] << std::endl;
     for (size_t i = 0; i < count; ++i) {
-      internal_update(this->registers, static_cast<uint64_t>(hashes[i]) << ignored_msb);
+      internal_update(this->registers, hashes[i] << ignored_msb);
     }
   }
 
@@ -438,7 +443,7 @@ public:
 
     // perform updates on the registers.
     for (; first != last; ++first) {
-      internal_update(regs, static_cast<uint64_t>(*first) << ignored_msb);
+      internal_update(regs, *first << ignored_msb);
     }
 
     // now merge distributed and estimate
@@ -454,7 +459,7 @@ public:
 
     // perform updates on the registers.
     for (; first != last; ++first) {
-      internal_update(regs, static_cast<uint64_t>(*first) << ignored_msb);
+      internal_update(regs, *first << ignored_msb);
     }
 
     // now merge distributed and estimate
@@ -500,7 +505,7 @@ public:
     if (comm.size() == 1) {
       // perform updates on the registers.
       for (; first != last; ++first) {
-        internal_update(accumulating, static_cast<uint64_t>(*first) << ignored_msb);
+        internal_update(accumulating, *first << ignored_msb);
       }
       return;
     }
@@ -515,12 +520,7 @@ public:
 
     // setup the temporary storage.  double buffered.
     // allocate recv
-    REG_T* buffers = nullptr;
-    int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, nRegisters * 4ULL * sizeof(REG_T));
-    if (ret) {
-      free(buffers);
-      throw std::length_error("failed to allocate aligned memory");
-    }
+    REG_T* buffers = ::utils::mem::aligned_alloc<REG_T>(nRegisters * 4ULL);
     REG_T* updating = buffers;
     REG_T* sending = buffers + nRegisters;
     REG_T* recving = buffers + 2UL * nRegisters;
@@ -541,7 +541,7 @@ public:
     auto max = first + send_displs[prev_peer + 1];
     memset(recved, 0, nRegisters * sizeof(REG_T));
     for (auto it = first + send_displs[prev_peer]; it != max; ++it) {
-      internal_update(recved,  static_cast<uint64_t>(*it) << ignored_msb);
+      internal_update(recved, *it << ignored_msb);
     }
 
     //=== for curr_peer:
@@ -554,7 +554,7 @@ public:
     max = first + send_displs[curr_peer + 1];
     memset(sending, 0, nRegisters * sizeof(REG_T));
     for (auto it = first + send_displs[curr_peer]; it != max; ++it) {
-      internal_update(sending,  static_cast<uint64_t>(*it) << ignored_msb);
+      internal_update(sending,  *it << ignored_msb);
     }
 
     size_t step;
@@ -587,7 +587,7 @@ public:
       memset(updating, 0, nRegisters * sizeof(REG_T));
       max = first + send_displs[next_peer + 1];
       for (auto it = first + send_displs[next_peer]; it != max; ++it) {
-        internal_update(updating,  static_cast<uint64_t>(*it) << ignored_msb);
+        internal_update(updating,  *it << ignored_msb);
       }
 
       //=== and accumulate
@@ -665,7 +665,7 @@ public:
 
     // perform updates on the registers.
     for (; first != last; ++first) {
-      internal_update(regs,  static_cast<uint64_t>(*first) << ignored_msb);
+      internal_update(regs, *first << ignored_msb);
     }
 
     // now compute send counts.  each rank ends up with 2^precision number of entries.
@@ -695,7 +695,9 @@ public:
 
 };
 template <typename T, typename Hash, uint8_t precision>
-constexpr size_t hyperloglog64<T, Hash, precision>::nRegisters;
+constexpr uint32_t hyperloglog64<T, Hash, precision>::nRegisters;
+template <typename T, typename Hash, uint8_t precision>
+constexpr uint8_t hyperloglog64<T, Hash, precision>::hvt_size;
 template <typename T, typename Hash, uint8_t precision>
 constexpr uint8_t hyperloglog64<T, Hash, precision>::no_ignore_value_bits;
 template <typename T, typename Hash, uint8_t precision>
