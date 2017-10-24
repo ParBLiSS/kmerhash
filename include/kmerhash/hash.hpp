@@ -59,7 +59,8 @@
  *
  *      	however, clearing all registers would also clear all stored constants, which would then need to be reloaded.
  *      	this can be done, but will require  some code change.
- *  TODO: [ ] proper AVX transition that respects avx constants.
+ *  TODO: [ ] proper AVX state transition, with load.
+ *        [ ] tuning to avoid skipped reading - avoid cache set contention.
  */
 #ifndef HASH_HPP_
 #define HASH_HPP_
@@ -104,8 +105,6 @@
 
 #endif // !defined(_MSC_VER)
 
-// may want to check out CLHash, which uses carryless multiply instead of multiply.
-
 #include <x86intrin.h>
 
 namespace fsc
@@ -141,7 +140,7 @@ protected:
   const __m256i offs;
   mutable __m256i seed;
 
-  // input is 4 unsigned ints.
+  // input is 8 unsigned ints.
   FSC_FORCE_INLINE __m256i rotl32(__m256i x, int8_t r) const
   {
     // return (x << r) | (x >> (32 - r));
