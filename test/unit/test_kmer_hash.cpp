@@ -30,7 +30,7 @@
 // include google test
 #include <gtest/gtest.h>
 #include "index/kmer_hash.hpp"
-#include "kmerhash/hash.hpp"
+#include "kmerhash/hash_new.hpp"
 
 #include <random>
 #include <cstdint>
@@ -159,7 +159,7 @@ class KmerHashTest : public ::testing::Test {
         same &= (truth[i] == test[i]);
 
         if (truth[i] != test[i]) {
-           std::cout << " iteration " << i << " kmer " << this->kmers[i] << std::endl;
+           std::cout << "sse iteration " << i << " kmer " << this->kmers[i] << std::endl;
         }
 
 
@@ -210,7 +210,7 @@ class KmerHashTest : public ::testing::Test {
         same &= (truth[i] == test[i]);
 
         if (truth[i] != test[i]) {
-           std::cout << " iteration " << i << " kmer " << this->kmers[i] << std::endl;
+           std::cout << "sse batch iteration " << i << " kmer " << this->kmers[i] << std::endl;
         }
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2015 Georgia Institute of Technology
+ * Copyri 1:ght 2015 Georgia Institute of Technology
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,13 +61,16 @@
  *      	this can be done, but will require  some code change.
  *  TODO: [ ] proper AVX state transition, with load.
  *        [ ] tuning to avoid skipped reading - avoid cache set contention.
+ *        [ ] try to stick to some small multiples of 64 bytes.
+ *        [ ] schedule instructions to maximize usage of ALU and other vector units.
+ *        [ ] at 64 bytes per element, we are at limit of 8-way set associative cache (L1)...
  */
 #ifndef HASH_HPP_
 #define HASH_HPP_
 
 #include <type_traits> // enable_if
 #include <cstring>     // memcpy
-#include <stdexcept>   //logic error
+#include <stdexcept>   // logic error
 #include <stdint.h>    // std int strings
 #include <iostream>    // cout
 
@@ -121,12 +124,21 @@ namespace sse
 // for 32 bit buckets
 // original: body: 16 inst per iter of 4 bytes; tail: 15 instr. ; finalization:  8 instr.
 // about 4 inst per byte + 8, for each hash value.
+
 template <typename T, size_t bytes = sizeof(T)>
 class Murmur32AVX
 {
+// LATENCIES for instruction with latency > 1
+// 1. mullo_epi16 has latency of 5 cycles, CPI of 1 to 0.5 cycles - need unroll 2x to hide latency, since rotl32 has 3 instructions with 1 cycle latency.
+// 2. mullo_epi32 has latency of 10 cycles, CPI of 1 to 0.5 cycles - need unroll 3-4x to hide latency, since rotl32 has 3 instructions with 1 cycle latency.
+// 3. _mm256_permutevar8x32_epi32, _mm256_permute4x64_epi64, and _mm256_insertf128_si256  have latency of 3, CPI of 1.
+// 4. note that most extract calls have latency of 3 and CPI of 1, except for _mm256_extracti128_si256, which has latency of 1.
 
 protected:
   // make static so initialization at beginning of class...
+  // static constexpr uint32_t BLISS_ALIGNED_ARRAY(mix_const1, 8, 64) = {
+  //   0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,
+  //   0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,0x85ebca6bU};
   const __m256i mix_const1;
   const __m256i mix_const2;
   const __m256i c1;
@@ -139,6 +151,7 @@ protected:
   const __m256i length;
   const __m256i offs;
   mutable __m256i seed;
+  
 
   // input is 8 unsigned ints.
   FSC_FORCE_INLINE __m256i rotl32(__m256i x, int8_t r) const
@@ -149,6 +162,7 @@ protected:
         _mm256_srli_epi32(x, (32 - r))); // sse2
   }
 
+  // unroll 2x to hide latency of 1st and 2nd, 5 times for 3rd
   FSC_FORCE_INLINE __m256i update32(__m256i h, __m256i k) const
   {
     // preprocess the 4 streams
@@ -164,6 +178,7 @@ protected:
   }
 
   // count cannot be zero.
+  // unroll 1x to hide latency of first, and 5x to hide latency of second mullo.
   FSC_FORCE_INLINE __m256i update32_zeroing(__m256i h, __m256i k, uint8_t const &count) const
   {
     assert((count > 0) && (count < 4) && "count should be between 1 and 3");
@@ -182,6 +197,7 @@ protected:
   }
 
   // count cannot be zero.
+  // unroll 2x to hide latency of first, and 5x to hide latency of second mullo.
   FSC_FORCE_INLINE __m256i update32_partial(__m256i h, __m256i k, uint8_t const &count) const
   {
 
@@ -233,6 +249,8 @@ protected:
   }
 
 public:
+  static constexpr uint8_t batch_size = 8;
+
   explicit Murmur32AVX(uint32_t _seed) : Murmur32AVX(_mm256_set1_epi32(_seed))
   {
   }
@@ -274,7 +292,7 @@ public:
     assert((nstreams <= 8) && "maximum number of streams is 8");
     assert((nstreams > 0) && "minimum number of streams is 1");
 
-    __m256i h1 = hash8(key);
+    __m256i h1 = hash(key);
 
     // store all 8 out
     switch (nstreams)
@@ -306,16 +324,16 @@ public:
   // TODO: [ ] hash1, do the k transform in parallel.  also use mask to keep only part wanted, rest of update and finalize do sequentially.
   // above 2, the finalize and updates will dominate and better to do those in parallel.
 
-  FSC_FORCE_INLINE void hash8(T const *key, uint32_t *out) const
+  FSC_FORCE_INLINE void hash(T const *key, uint32_t *out) const
   {
-    __m256i res = hash8(key);
+    __m256i res = hash(key);
     _mm256_storeu_si256((__m256i *)out, res);
   }
 
   /// NOTE: non-power of 2 length keys ALWAYS use AVX gather, which may be slower.
   template <size_t len = bytes,
             typename std::enable_if<((len & (len - 1)) > 0) && ((len & 31) > 0), int>::type = 1>
-  FSC_FORCE_INLINE __m256i hash8(T const *key) const
+  FSC_FORCE_INLINE __m256i hash(T const *key) const
   {
     // process 8 streams at a time.  all should be the same length.
 
@@ -394,7 +412,7 @@ public:
           /// NOTE: multiples of 32.
           template <size_t len = bytes,
               typename std::enable_if<((len & 31) == 0), int>::type = 1>
-          FSC_FORCE_INLINE __m256i hash8_old(T const *  key) const {
+          FSC_FORCE_INLINE __m256i hash_old(T const *  key) const {
             // process 8 streams at a time.  all should be the same length.
 
             // at this point, i32gather with its 20 cycle latency and 5 to 10 cycle CPI, no additional cost,
@@ -444,7 +462,7 @@ public:
   /// NOTE: multiples of 32.
   template <size_t len = bytes,
             typename std::enable_if<((len & 31) == 0), int>::type = 1>
-  FSC_FORCE_INLINE __m256i hash8(T const *key) const
+  FSC_FORCE_INLINE __m256i hash(T const *key) const
   {
     // process 8 streams at a time.  all should be the same length.
 
@@ -516,7 +534,7 @@ public:
 
   template <size_t len = bytes,
             typename std::enable_if<(len == 16), int>::type = 1>
-  FSC_FORCE_INLINE __m256i hash8(T const *key) const
+  FSC_FORCE_INLINE __m256i hash(T const *key) const
   {
     // process 4 streams at a time.  all should be the same length.
 
@@ -601,7 +619,7 @@ public:
 
   template <size_t len = bytes,
             typename std::enable_if<(len == 8), int>::type = 1>
-  FSC_FORCE_INLINE __m256i hash8(T const *key) const
+  FSC_FORCE_INLINE __m256i hash(T const *key) const
   {
     // example layout, with each dash representing 4 bytes
     //     aAbBcCdD eEfFgGhH
@@ -647,86 +665,1030 @@ public:
     return h1;
   }
 
-  template <size_t len = bytes,
-            typename std::enable_if<(len == 4), int>::type = 1>
-  FSC_FORCE_INLINE __m256i hash8(T const *key) const
+//  template <size_t len = bytes,
+//            typename std::enable_if<(len == 4), int>::type = 1>
+//  FSC_FORCE_INLINE __m256i hash(T const *key) const
+//  {
+//    // process 4 streams at a time.  all should be the same length.
+//
+//    // example layout, with each dash representing 4 bytes
+//    //     abcd efgh
+//    // k0  ---- ----
+//
+//    __m256i k0;
+//    __m256i h1 = seed;
+//
+//    // no extra inst
+//    // 8 keys per vector, so perfect match.
+//    k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
+//
+//    // row 0.  unpacklo puts it to aabbccdd
+//    h1 = update32(h1, k0); // transpose 4x2  SSE2
+//
+//    //----------
+//    // finalization
+//    // or the length.
+//    h1 = _mm256_xor_si256(h1, length); // sse
+//
+//    h1 = fmix32(h1); // ***** SSE4.1 **********
+//
+//    return h1;
+//  }
+
+  // template <size_t len = bytes,
+  //           typename std::enable_if<(len == 2), int>::type = 1>
+  // FSC_FORCE_INLINE __m256i hash(T const *key) const
+  // {
+  //   // process 4 streams at a time.  all should be the same length.
+  //   __m256i zero = _mm256_setzero_si256();
+
+  //   // example layout, with each dash representing 2 bytes
+  //   //     abcdefgh ijklmnop
+  //   // k0  -------- --------
+
+  //   __m256i k0;
+  //   __m256i h1 = seed;
+
+  //   // 16 keys per vector. can potentially do 2 iters.
+  //   k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
+
+  //   // 2 extra inst
+
+  //   // permute across lane, 64bits at a time, with pattern 0 2 1 3 -> 11011000 == 0xD8
+  //   k0 = _mm256_permute4x64_epi64(k0, 0xd8); // AVX2, latency 3, CPI 1
+  //   // result abcd ijkl efgh mnop
+
+  //   // TODO: can potentially reuse a little more.
+
+  //   // transform to a0b0c0d0 e0f0g0h0.  interleave with 0.
+  //   h1 = update32_partial(h1, _mm256_unpacklo_epi16(k0, zero), 2); // transpose 4x2. unpacklo has latency 1, CPI 1.  AVX2
+
+  //   //----------
+  //   // finalization
+  //   // or the length.
+  //   h1 = _mm256_xor_si256(h1, length); // sse
+
+  //   h1 = fmix32(h1); // ***** SSE4.1 **********
+
+  //   return h1;
+  // }
+
+  // template <size_t len = bytes,
+  //           typename std::enable_if<(len == 1), int>::type = 1>
+  // FSC_FORCE_INLINE __m256i hash(T const *key) const
+  // {
+  //   // process 32 streams at a time, each 1 byte.  all should be the same length.
+
+  //   // example layout, with each dash representing 1 bytes
+  //   //     abcdefghijklmnop qrstuvwxyz123456
+  //   // k0  ---------------- ----------------
+
+  //   __m256i k0, t0;
+  //   __m256i h1 = seed;
+
+  //   // 32 keys per vector, can potentially do 4 rounds.
+  //   k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
+
+  //   // 2 extra calls.
+  //   // need to permute with permutevar8x32, idx = [0 2 4 6 1 3 5 7]
+  //   k0 = _mm256_permutevar8x32_epi32(k0, permute1); // AVX2, latency of 3, CPI 1
+  //   // abcd ijkl qrst yz12 efgh mnop uvwx 3456
+
+  //   // TODO: can potentially reuse a little more.
+
+  //   // USE shuffle_epi8, with mask.
+  //   // transform to a000b000c000d000 e000f000g000h000.  interleave with 0.
+  //   t0 = _mm256_shuffle_epi8(k0, shuffle1); // AVX2, latency 1, CPI 1
+
+  //   // row 0.
+  //   h1 = update32_partial(h1, t0, 1); // transpose 4x2  SSE2
+
+  //   //----------
+  //   // finalization
+  //   // or the length.
+  //   h1 = _mm256_xor_si256(h1, length); // sse
+
+  //   h1 = fmix32(h1); // ***** SSE4.1 **********
+
+  //   return h1;
+  // }
+};
+
+template <typename T>
+class Murmur32AVX<T, 4>
+{
+// VERSION FOR T size of 1 byte.  try to do 16 bits at a time, so 16 elements at a time.
+
+// LATENCIES for instruction with latency > 1
+// 1. mullo_epi16 has latency of 5 cycles, CPI of 1 to 0.5 cycles - need unroll 2x to hide latency, since rotl32 has 3 instructions with 1 cycle latency.
+// 2. mullo_epi32 has latency of 10 cycles, CPI of 1 to 0.5 cycles - need unroll 3-4x to hide latency, since rotl32 has 3 instructions with 1 cycle latency.
+// 3. _mm256_permutevar8x32_epi32, _mm256_permute4x64_epi64, and _mm256_insertf128_si256  have latency of 3, CPI of 1.
+// 4. note that most extract calls have latency of 3 and CPI of 1, except for _mm256_extracti128_si256, which has latency of 1.
+
+protected:
+  // make static so initialization at beginning of class...
+  // static constexpr uint32_t BLISS_ALIGNED_ARRAY(mix_const1, 8, 64) = {
+  //   0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,
+  //   0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,0x85ebca6bU};
+  const __m256i mix_const1;
+  const __m256i mix_const2;
+  const __m256i c1;
+  const __m256i c2;
+  const __m256i c3;
+  const __m256i c4;
+  const __m256i length;
+  mutable __m256i seed;
+
+  // input is 8 unsigned ints.
+  FSC_FORCE_INLINE __m256i rotl32(__m256i x, int8_t r) const
   {
-    // process 4 streams at a time.  all should be the same length.
-
-    // example layout, with each dash representing 4 bytes
-    //     abcd efgh
-    // k0  ---- ----
-
-    __m256i k0;
-    __m256i h1 = seed;
-
-    // no extra inst
-    // 8 keys per vector, so perfect match.
-    k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
-
-    // row 0.  unpacklo puts it to aabbccdd
-    h1 = update32(h1, k0); // transpose 4x2  SSE2
-
-    //----------
-    // finalization
-    // or the length.
-    h1 = _mm256_xor_si256(h1, length); // sse
-
-    h1 = fmix32(h1); // ***** SSE4.1 **********
-
-    return h1;
+    // return (x << r) | (x >> (32 - r));
+    return _mm256_or_si256(              // sse2
+        _mm256_slli_epi32(x, r),         // sse2
+        _mm256_srli_epi32(x, (32 - r))); // sse2
   }
 
-  template <size_t len = bytes,
-            typename std::enable_if<(len == 2), int>::type = 1>
-  FSC_FORCE_INLINE __m256i hash8(T const *key) const
+  // unroll 2x to hide latency of 1st and 2nd, 5 times for 3rd
+  FSC_FORCE_INLINE __m256i update32(__m256i h, __m256i k) const
+  {
+    // preprocess the 4 streams
+    k = _mm256_mullo_epi32(k, c1); // SSE2
+    k = rotl32(k, 15);             // sse2
+    k = _mm256_mullo_epi32(k, c2); // SSE2
+    // merge with existing.
+    h = _mm256_xor_si256(h, k); // SSE
+    // this is done per block of 4 bytes.  the last block (smaller than 4 bytes) does not do this.  do for every byte except last,
+    h = rotl32(h, 13);                                   // sse2
+    h = _mm256_add_epi32(_mm256_mullo_epi32(h, c3), c4); // SSE
+    return h;
+  }
+
+  // input is 4 unsigned ints.
+  // is ((h ^ f) * c) carryless multiplication with (f = h >> d)?
+  FSC_FORCE_INLINE __m256i fmix32(__m256i h) const
+  {
+    h = _mm256_xor_si256(h, _mm256_srli_epi32(h, 16)); // h ^= h >> 16;      sse2
+    h = _mm256_mullo_epi32(h, mix_const1);             // h *= 0x85ebca6b;   sse4.1
+    h = _mm256_xor_si256(h, _mm256_srli_epi32(h, 13)); // h ^= h >> 13;      sse2
+    h = _mm256_mullo_epi32(h, mix_const2);             // h *= 0xc2b2ae35;   sse4.1
+    h = _mm256_xor_si256(h, _mm256_srli_epi32(h, 16)); // h ^= h >> 16;      sse2
+
+    return h;
+  }
+
+  explicit Murmur32AVX(__m256i _seed) : mix_const1(_mm256_set1_epi32(0x85ebca6bU)),
+                                        mix_const2(_mm256_set1_epi32(0xc2b2ae35U)),
+                                        c1(_mm256_set1_epi32(0xcc9e2d51U)),
+                                        c2(_mm256_set1_epi32(0x1b873593U)),
+                                        c3(_mm256_set1_epi32(0x5U)),
+                                        c4(_mm256_set1_epi32(0xe6546b64U)),
+                                        length(_mm256_set1_epi32(static_cast<uint32_t>(sizeof(T)))),
+                                        seed(_seed)
+
+  {
+  }
+
+public:
+  static constexpr uint8_t batch_size = 32;
+
+  explicit Murmur32AVX(uint32_t _seed) : Murmur32AVX(_mm256_set1_epi32(_seed))
+  {
+  }
+
+  explicit Murmur32AVX(Murmur32AVX const &other) : Murmur32AVX(other.seed)
+  {
+  }
+
+  explicit Murmur32AVX(Murmur32AVX &&other) : Murmur32AVX(other.seed)
+  {
+  }
+
+  Murmur32AVX &operator=(Murmur32AVX const &other)
+  {
+    seed = other.seed;
+
+    return *this;
+  }
+
+  Murmur32AVX &operator=(Murmur32AVX &&other)
+  {
+    seed = other.seed;
+    return *this;
+  }
+
+
+
+  // hash up to 32 elements at a time. at a time.  each is 1 byte
+  FSC_FORCE_INLINE void hash(T const *key, uint8_t nstreams, uint32_t *out) const
   {
     // process 4 streams at a time.  all should be the same length.
-    __m256i zero = _mm256_setzero_si256();
+	    // process 4 streams at a time.  all should be the same length.
 
-    // example layout, with each dash representing 2 bytes
-    //     abcdefgh ijklmnop
-    // k0  -------- --------
+	    assert((nstreams <= 32) && "maximum number of streams is 31");
+	    assert((nstreams > 0) && "minimum number of streams is 1");
 
-    __m256i k0;
-    __m256i h1 = seed;
+	    __m256i h0, h1, h2, h3;
 
+	    // do the full ones first.
+	    uint8_t blocks = (nstreams + 7) >> 3;  // divide by 8.
+	    switch (blocks) {
+	       case 1:
+	    	    hash<1>(key, h0, h1, h2, h3); break;
+	       case 2:
+	    	    hash<2>(key, h0, h1, h2, h3); break;
+	       case 3:
+	    	    hash<3>(key, h0, h1, h2, h3); break;
+	       case 4:
+	    	    hash<4>(key, h0, h1, h2, h3); break;
+	       default:
+	         break;
+	     }
+
+	    blocks = nstreams >> 3;
+	    switch (blocks) {
+	      case 4:
+	        _mm256_storeu_si256((__m256i *)(out + 24), h3);
+	      case 3:
+	        _mm256_storeu_si256((__m256i *)(out + 16), h2);
+	      case 2:
+	        _mm256_storeu_si256((__m256i *)(out + 8), h1);
+	      case 1:
+	        _mm256_storeu_si256((__m256i *)out, h0);
+	      default:
+	        break;
+	    }
+
+	    uint8_t rem = nstreams & 7;  // remainder.
+	    if (rem > 0) {
+			// write remainders
+			switch (blocks) {
+			  case 3:
+				memcpy(out + 24, reinterpret_cast<uint32_t *>(&h3), rem << 2); // copy bytes
+				break;
+			  case 2:
+				memcpy(out + 16, reinterpret_cast<uint32_t *>(&h2), rem << 2); // copy bytes
+				break;
+			  case 1:
+				memcpy(out + 8, reinterpret_cast<uint32_t *>(&h1), rem << 2); // copy bytes
+				break;
+			  case 0:
+				memcpy(out, reinterpret_cast<uint32_t *>(&h0), rem << 2); // copy bytes
+				break;
+			  default:
+				break;
+
+			}
+	    }
+  }
+
+  // TODO: [ ] hash1, do the k transform in parallel.  also use mask to keep only part wanted, rest of update and finalize do sequentially.
+  // above 2, the finalize and updates will dominate and better to do those in parallel.
+
+  FSC_FORCE_INLINE void hash(T const *key, uint32_t *out) const
+  {
+    __m256i h0, h1, h2, h3;
+    hash<4>(key, h0, h1, h2, h3);
+    _mm256_storeu_si256((__m256i *)out, h0);
+    _mm256_storeu_si256((__m256i *)(out + 8), h1);
+    _mm256_storeu_si256((__m256i *)(out + 16), h2);
+    _mm256_storeu_si256((__m256i *)(out + 24), h3);
+  }
+
+
+  // hashing 64 bytes worth of keys at a time.
+  // first latency cycles are hidden.  the second latency cycles will remain the same for double the number of elements.
+  template <uint8_t CNT>
+  FSC_FORCE_INLINE void hash2(T const *key, __m256i & h0, __m256i & h1, __m256i & h2, __m256i & h3 ) const
+  {
+
+	// example layout, with each dash representing 4 bytes
+	//     abcd efgh
+	// k0  ---- ----
+
+	__m256i t0, t1, t2, t3;
+	h0 = h1 = h2 = h3 = seed;
+
+	// 16 keys per vector. can potentially do 2 iters.
+	switch (CNT) {
+	case 4:
+		t3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 24)); // SSE3
+	case 3:
+		t2 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 16)); // SSE3
+	case 2:
+		t1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 8)); // SSE3
+	case 1:
+		t0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
+	default:
+		break;
+	}
+
+	// transform to a0b0c0d0 e0f0g0h0.  interleave with 0.
+	switch (CNT) {
+	case 4:  h3 = update32(h3, t3);
+	case 3:  h2 = update32(h2, t2);
+	case 2:  h1 = update32(h1, t1);
+	case 1:  h0 = update32(h0, t0);
+	default:
+		break;
+	}
+
+	//----------
+	// finalization
+	// or the length.
+	switch (CNT) {
+	case 4: 	h3 = _mm256_xor_si256(h3, length); // sse
+	case 3: 	h2 = _mm256_xor_si256(h2, length); // sse
+	case 2: 	h1 = _mm256_xor_si256(h1, length); // sse
+	case 1: 	h0 = _mm256_xor_si256(h0, length); // sse
+	default:
+		break;
+	}
+
+	switch (CNT) {
+	case 4:	h3 = fmix32(h3); // ***** SSE4.1 **********
+	case 3:	h2 = fmix32(h2); // ***** SSE4.1 **********
+	case 2:	h1 = fmix32(h1); // ***** SSE4.1 **********
+	case 1:	h0 = fmix32(h0); // ***** SSE4.1 **********
+	default:
+		break;
+	}
+  }
+
+
+  // hashing 32 elements worth of keys at a time.  uses 10 to 11 registers.
+  // if we go to 64 bytes, then we'd be using 20 to 21 registers
+  // first latency cycles are hidden.  the second latency cycles will remain the same for double the number of elements.
+  template <uint8_t CNT>
+  FSC_FORCE_INLINE void hash(T const *key, __m256i & h0, __m256i & h1, __m256i & h2, __m256i & h3 ) const
+  {
+    // process 32 streams at a time, each 1 byte.  all should be the same length.
+
+	    // example layout, with each dash representing 4 bytes
+	    //     abcd efgh
+	    // k0  ---- ----
+
+    __m256i t0, t1, t2, t3;
+
+	// MERGED SHUFFLE AND UPDATE_PARTIAL
+	// h1 = update32_partial(h1, t0, 1); // transpose 4x2  SSE2
+
+	// 16 keys per vector. can potentially do 2 iters.
+    switch (CNT) {
+    case 4:  		t3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 24)); // SSE3
+        	 	 	t3 = _mm256_mullo_epi32(t3, c1); // avx  // Lat3, CPI2
+    case 3:			t2 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 16)); // SSE3
+        			t2 = _mm256_mullo_epi32(t2, c1); // avx  // Lat3, CPI2
+    case 2:			t1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 8)); // SSE3
+        			t1 = _mm256_mullo_epi32(t1, c1); // avx  // Lat3, CPI2
+    case 1:			t0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
+    				t0 = _mm256_mullo_epi32(t0, c1); // avx  // Lat3, CPI2
+    }
+
+
+    // should have 4 idle latency cycles and 2 CPI cycles here.  initialize here.
+    h0 = h1 = h2 = h3 = seed;
+
+    // rotl32
+    //t0 = rotl32(t0, 15);
+    switch (CNT) {
+    case 4:  		t3 = _mm256_or_si256(_mm256_slli_epi32(t3, 15), _mm256_srli_epi32(t3, 17));
+        	 	 	t3 = _mm256_mullo_epi32(t3, c2); // avx   // Lat3, CPI2
+    case 3:			t2 = _mm256_or_si256(_mm256_slli_epi32(t2, 15), _mm256_srli_epi32(t2, 17));
+        			t2 = _mm256_mullo_epi32(t2, c2); // avx   // Lat3, CPI2
+    case 2:			t1 = _mm256_or_si256(_mm256_slli_epi32(t1, 15), _mm256_srli_epi32(t1, 17));
+        			t1 = _mm256_mullo_epi32(t1, c2); // avx   // Lat3, CPI2
+    case 1:			t0 = _mm256_or_si256(_mm256_slli_epi32(t0, 15), _mm256_srli_epi32(t0, 17));
+    				t0 = _mm256_mullo_epi32(t0, c2); // avx   // Lat3, CPI2
+    }
+    // merge with existing.
+
+    // should have 0 idle latency cyles and 0 cpi cycles here.
+
+    // final step of update, xor the length, and fmix32.
+    // finalization
+    switch (CNT) {
+    case 4:
+    h3 = _mm256_xor_si256(h3, t3); // avx
+    h3 = _mm256_or_si256(_mm256_slli_epi32(h3, 13), _mm256_srli_epi32(h3, 19));
+    h3 = _mm256_mullo_epi32(h3, c3);
+    case 3:
+    h2 = _mm256_xor_si256(h2, t2); // avx
+    h2 = _mm256_or_si256(_mm256_slli_epi32(h2, 13), _mm256_srli_epi32(h2, 19));
+    h2 = _mm256_mullo_epi32(h2, c3);
+    case 2:
+    h1 = _mm256_xor_si256(h1, t1); // avx
+    h1 = _mm256_or_si256(_mm256_slli_epi32(h1, 13), _mm256_srli_epi32(h1, 19));
+    h1 = _mm256_mullo_epi32(h1, c3);
+    case 1:
+    h0 = _mm256_xor_si256(h0, t0); // avx
+    h0 = _mm256_or_si256(_mm256_slli_epi32(h0, 13), _mm256_srli_epi32(h0, 19));
+    h0 = _mm256_mullo_epi32(h0, c3);
+    }
+    // should have 0 idle latency cyles and 0 cpi cycles here.
+    switch (CNT) {
+    case 4:
+    h3 = _mm256_add_epi32(h3, c4);
+    h3 = _mm256_xor_si256(h3, length); // sse
+    h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+    h3 = _mm256_mullo_epi32(h3, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
+    case 3:
+    h2 = _mm256_add_epi32(h2, c4);
+    h2 = _mm256_xor_si256(h2, length); // sse
+    h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    h2 = _mm256_mullo_epi32(h2, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
+    case 2:
+    h1 = _mm256_add_epi32(h1, c4);
+    h1 = _mm256_xor_si256(h1, length); // sse
+    h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    h1 = _mm256_mullo_epi32(h1, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
+    case 1:
+    h0 = _mm256_add_epi32(h0, c4);
+    h0 = _mm256_xor_si256(h0, length); // sse
+    h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    h0 = _mm256_mullo_epi32(h0, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
+    }
+    // should have 0 idle latency cyles and 0 cpi cycles here.
+
+    //h1 = fmix32(h1); // ***** SSE4.1 **********
+    switch (CNT) {
+    case 4:  		h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
+        	 	 	h3 = _mm256_mullo_epi32(h3, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+    case 3:			h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
+        			h2 = _mm256_mullo_epi32(h2, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+    case 2:			h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 13)); // h ^= h >> 13;      sse2
+        			h1 = _mm256_mullo_epi32(h1, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+    case 1:			h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 13)); // h ^= h >> 13;      sse2
+    				h0 = _mm256_mullo_epi32(h0, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+    }
+
+    // latencies.
+    // h3  Lat 4, cpi 2
+    switch (CNT) {
+    case 4: h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+    case 3: h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    case 2: h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    case 1: h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    }
+  }
+
+
+};
+
+
+template <typename T>
+class Murmur32AVX<T, 2>
+{
+// VERSION FOR T size of 1 byte.  try to do 16 bits at a time, so 16 elements at a time.
+
+// LATENCIES for instruction with latency > 1
+// 1. mullo_epi16 has latency of 5 cycles, CPI of 1 to 0.5 cycles - need unroll 2x to hide latency, since rotl32 has 3 instructions with 1 cycle latency.
+// 2. mullo_epi32 has latency of 10 cycles, CPI of 1 to 0.5 cycles - need unroll 3-4x to hide latency, since rotl32 has 3 instructions with 1 cycle latency.
+// 3. _mm256_permutevar8x32_epi32, _mm256_permute4x64_epi64, and _mm256_insertf128_si256  have latency of 3, CPI of 1.
+// 4. note that most extract calls have latency of 3 and CPI of 1, except for _mm256_extracti128_si256, which has latency of 1.
+
+protected:
+  // make static so initialization at beginning of class...
+  // static constexpr uint32_t BLISS_ALIGNED_ARRAY(mix_const1, 8, 64) = {
+  //   0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,
+  //   0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,0x85ebca6bU};
+  const __m256i mix_const1;
+  const __m256i mix_const2;
+  const __m256i c1;
+  const __m256i c2;
+  const __m256i c3;
+  const __m256i c4;
+  const __m256i length;
+  mutable __m256i seed;
+  
+  // input is 8 unsigned ints.
+  FSC_FORCE_INLINE __m256i rotl32(__m256i x, int8_t r) const
+  {
+    // return (x << r) | (x >> (32 - r));
+    return _mm256_or_si256(              // sse2
+        _mm256_slli_epi32(x, r),         // sse2
+        _mm256_srli_epi32(x, (32 - r))); // sse2
+  }
+
+  // count cannot be zero.
+  // unroll 2x to hide latency of first, and 5x to hide latency of second mullo.
+  FSC_FORCE_INLINE __m256i update32_partial(__m256i h, __m256i k, uint8_t const &count) const
+  {
+
+    // preprocess the 4 streams
+    k = _mm256_mullo_epi32(k, c1); // SSE2
+    k = rotl32(k, 15);             // sse2
+    k = _mm256_mullo_epi32(k, c2); // SSE2
+    // merge with existing.
+    h = _mm256_xor_si256(h, k); // SSE
+    return h;
+  }
+
+  // input is 4 unsigned ints.
+  // is ((h ^ f) * c) carryless multiplication with (f = h >> d)?
+  FSC_FORCE_INLINE __m256i fmix32(__m256i h) const
+  {
+    h = _mm256_xor_si256(h, _mm256_srli_epi32(h, 16)); // h ^= h >> 16;      sse2
+    h = _mm256_mullo_epi32(h, mix_const1);             // h *= 0x85ebca6b;   sse4.1
+    h = _mm256_xor_si256(h, _mm256_srli_epi32(h, 13)); // h ^= h >> 13;      sse2
+    h = _mm256_mullo_epi32(h, mix_const2);             // h *= 0xc2b2ae35;   sse4.1
+    h = _mm256_xor_si256(h, _mm256_srli_epi32(h, 16)); // h ^= h >> 16;      sse2
+
+    return h;
+  }
+  explicit Murmur32AVX(__m256i _seed) : mix_const1(_mm256_set1_epi32(0x85ebca6bU)),
+                                        mix_const2(_mm256_set1_epi32(0xc2b2ae35U)),
+                                        c1(_mm256_set1_epi32(0xcc9e2d51U)),
+                                        c2(_mm256_set1_epi32(0x1b873593U)),
+                                        c3(_mm256_set1_epi32(0x5U)),
+                                        c4(_mm256_set1_epi32(0xe6546b64U)),
+                                        length(_mm256_set1_epi32(static_cast<uint32_t>(sizeof(T)))),
+                                        seed(_seed)
+
+  {
+  }
+
+public:
+  static constexpr uint8_t batch_size = 32;
+
+  explicit Murmur32AVX(uint32_t _seed) : Murmur32AVX(_mm256_set1_epi32(_seed))
+  {
+  }
+
+  explicit Murmur32AVX(Murmur32AVX const &other) : Murmur32AVX(other.seed)
+  {
+  }
+
+  explicit Murmur32AVX(Murmur32AVX &&other) : Murmur32AVX(other.seed)
+  {
+  }
+
+  Murmur32AVX &operator=(Murmur32AVX const &other)
+  {
+    seed = other.seed;
+
+    return *this;
+  }
+
+  Murmur32AVX &operator=(Murmur32AVX &&other)
+  {
+    seed = other.seed;
+    return *this;
+  }
+
+
+
+  // hash up to 32 elements at a time. at a time.  each is 2 byte
+  FSC_FORCE_INLINE void hash(T const *key, uint8_t nstreams, uint32_t *out) const
+  {
+    // process 4 streams at a time.  all should be the same length.
+
+    assert((nstreams <= 32) && "maximum number of streams is 31");
+    assert((nstreams > 0) && "minimum number of streams is 1");
+
+    __m256i h0, h1, h2, h3;
+
+    // do the full ones first.
+    uint8_t blocks = (nstreams + 15) >> 4;  // divide by 16.
+    switch (blocks) {
+       case 1:
+    	    hash<2>(key, h0, h1, h2, h3); break;
+       case 2:
+    	    hash<4>(key, h0, h1, h2, h3); break;
+       default:
+         break;
+     }
+
+    blocks = nstreams >> 3;
+    switch (blocks) {
+      case 4:
+        _mm256_storeu_si256((__m256i *)(out + 24), h3);
+      case 3:
+        _mm256_storeu_si256((__m256i *)(out + 16), h2);
+      case 2:
+        _mm256_storeu_si256((__m256i *)(out + 8), h1);
+      case 1:
+        _mm256_storeu_si256((__m256i *)out, h0);
+      default:
+        break;
+    }
+
+    uint8_t rem = nstreams & 7;  // remainder.
+    if (rem > 0) {
+		// write remainders
+		switch (blocks) {
+		  case 3:
+			memcpy(out + 24, reinterpret_cast<uint32_t *>(&h3), rem << 2); // copy bytes
+			break;
+		  case 2:
+			memcpy(out + 16, reinterpret_cast<uint32_t *>(&h2), rem << 2); // copy bytes
+			break;
+		  case 1:
+			memcpy(out + 8, reinterpret_cast<uint32_t *>(&h1), rem << 2); // copy bytes
+			break;
+		  case 0:
+			memcpy(out, reinterpret_cast<uint32_t *>(&h0), rem << 2); // copy bytes
+			break;
+		  default:
+			break;
+
+		}
+    }
+  }
+
+  // TODO: [ ] hash1, do the k transform in parallel.  also use mask to keep only part wanted, rest of update and finalize do sequentially.
+  // above 2, the finalize and updates will dominate and better to do those in parallel.
+
+  FSC_FORCE_INLINE void hash(T const *key, uint32_t *out) const
+  {
+    __m256i h0, h1, h2, h3;
+    hash<4>(key, h0, h1, h2, h3);
+    _mm256_storeu_si256((__m256i *)out, h0);
+    _mm256_storeu_si256((__m256i *)(out + 8), h1);
+    _mm256_storeu_si256((__m256i *)(out + 16), h2);
+    _mm256_storeu_si256((__m256i *)(out + 24), h3);
+  }
+
+
+  // hashing 16 bytes worth of keys at a time.
+  // first latency cycles are hidden.  the second latency cycles will remain the same for double the number of elements.
+  template <uint8_t CNT>
+  FSC_FORCE_INLINE void hash2(T const *key, __m256i & h0, __m256i & h1, __m256i & h2, __m256i & h3 ) const
+  {
+    
+        // example layout, with each dash representing 2 bytes
+        //     abcdefgh ijklmnop
+        // k0  -------- --------
+    
+        __m256i k0, k1;
+    
+        // 16 keys per vector. can potentially do 2 iters.
+        switch (CNT) {
+        case 4:
+        case 3: k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 16)); // SSE3
+        case 2:
+        case 1: k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
+        default:
+        	break;
+        }
+        
+        // permute across lane, 64bits at a time, with pattern 0 2 1 3 -> 11011000 == 0xD8
+        switch (CNT) {
+        case 4:
+        case 3:        k1 = _mm256_permute4x64_epi64(k1, 0xd8); // AVX2, latency 3, CPI 1
+        case 2:
+        case 1:        k0 = _mm256_permute4x64_epi64(k0, 0xd8); // AVX2, latency 3, CPI 1
+        default:
+        	break;
+        }
+        // result abcd ijkl efgh mnop
+
+        __m256i zero = _mm256_setzero_si256();
+        h0 = h1 = h2 = h3 = seed;
+        
+        switch (CNT) {// transform to a0b0c0d0 e0f0g0h0.  interleave with 0.
+        case 4:
+        case 3: h3 = update32_partial(h3, _mm256_unpackhi_epi16(k1, zero), 2); // transpose 4x2. unpacklo has latency 1, CPI 1.  AVX2
+                h2 = update32_partial(h2, _mm256_unpacklo_epi16(k1, zero), 2); // transpose 4x2. unpacklo has latency 1, CPI 1.  AVX2
+        case 2:
+        case 1: h1 = update32_partial(h1, _mm256_unpackhi_epi16(k0, zero), 2); // transpose 4x2. unpacklo has latency 1, CPI 1.  AVX2
+                h0 = update32_partial(h0, _mm256_unpacklo_epi16(k0, zero), 2); // transpose 4x2. unpacklo has latency 1, CPI 1.  AVX2
+        default:
+        	break;    //----------
+        }             // finalization
+        // or the length.
+    	switch (CNT) {
+    	case 4:
+    	case 3: 	h3 = _mm256_xor_si256(h3, length); // sse
+    	 			h2 = _mm256_xor_si256(h2, length); // sse
+    	case 2:
+    	case 1: 	h1 = _mm256_xor_si256(h1, length); // sse
+    	        	h0 = _mm256_xor_si256(h0, length); // sse
+    	default:
+    		break;
+    	}
+    
+    	switch (CNT) {
+    	case 4:
+    	case 3:        h3 = fmix32(h3); // ***** SSE4.1 **********
+    				   h2 = fmix32(h2); // ***** SSE4.1 **********
+    	case 2:
+    	case 1:        h1 = fmix32(h1); // ***** SSE4.1 **********
+    	               h0 = fmix32(h0); // ***** SSE4.1 **********
+    	default:
+    		break;
+    	}
+  }
+
+  // hashing 32 elements worth of keys at a time.  uses 10 to 11 registers.
+  // if we go to 64 bytes, then we'd be using 20 to 21 registers
+  // first latency cycles are hidden.  the second latency cycles will remain the same for double the number of elements.
+  template <uint8_t CNT>
+  FSC_FORCE_INLINE void hash(T const *key, __m256i & h0, __m256i & h1, __m256i & h2, __m256i & h3 ) const
+  {
+    // process 32 streams at a time, each 1 byte.  all should be the same length.
+
+      // example layout, with each dash representing 2 bytes
+      //     abcdefgh ijklmnop
+      // k0  -------- --------
+
+    __m256i k0, k1;
+    __m256i t0, t1, t2, t3;
+    
     // 16 keys per vector. can potentially do 2 iters.
     k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
-
-    // 2 extra inst
-
+    if (CNT > 2) k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 16)); // SSE3
+    
     // permute across lane, 64bits at a time, with pattern 0 2 1 3 -> 11011000 == 0xD8
     k0 = _mm256_permute4x64_epi64(k0, 0xd8); // AVX2, latency 3, CPI 1
+    if (CNT > 2) k1 = _mm256_permute4x64_epi64(k1, 0xd8); // AVX2, latency 3, CPI 1
     // result abcd ijkl efgh mnop
+    __m256i zero = _mm256_setzero_si256();
 
-    // TODO: can potentially reuse a little more.
-
+    
+    // MERGED SHUFFLE AND UPDATE_PARTIAL
     // transform to a0b0c0d0 e0f0g0h0.  interleave with 0.
-    h1 = update32_partial(h1, _mm256_unpacklo_epi16(k0, zero), 2); // transpose 4x2  AVX2
+    t0 = _mm256_unpacklo_epi16(k0, zero); // AVX2, latency 1, CPI 1
+    // h1 = update32_partial(h1, t0, 1); // transpose 4x2  SSE2
+    t0 = _mm256_mullo_epi32(t0, c1); // avx  // Lat3, CPI2
+    // ijkl
+    t1 = _mm256_unpackhi_epi16(k0, zero); // AVX2, latency 1, CPI 1
+    t1 = _mm256_mullo_epi32(t1, c1); // avx  // Lat3, CPI2
+    // qrst
+    if (CNT > 2) {
+		t2 = _mm256_unpacklo_epi16(k1, zero); // AVX2, latency 1, CPI 1
+		t2 = _mm256_mullo_epi32(t2, c1); // avx  // Lat3, CPI2
+		// yz12
+		t3 = _mm256_unpackhi_epi16(k1, zero); // AVX2, latency 1, CPI 1
+		t3 = _mm256_mullo_epi32(t3, c1); // avx  // Lat3, CPI2
+    }
+    // should have 4 idle latency cycles and 2 CPI cycles here.  initialize here.
+    h0 = h1 = h2 = h3 = seed;   
 
-    //----------
+    // rotl32
+    //t0 = rotl32(t0, 15);               
+    t0 = _mm256_or_si256(_mm256_slli_epi32(t0, 15), _mm256_srli_epi32(t0, 17)); 
+    t0 = _mm256_mullo_epi32(t0, c2); // avx   // Lat3, CPI2
+    t1 = _mm256_or_si256(_mm256_slli_epi32(t1, 15), _mm256_srli_epi32(t1, 17));
+    t1 = _mm256_mullo_epi32(t1, c2); // avx   // Lat3, CPI2
+    if (CNT > 2) {
+		t2 = _mm256_or_si256(_mm256_slli_epi32(t2, 15), _mm256_srli_epi32(t2, 17));
+		t2 = _mm256_mullo_epi32(t2, c2); // avx   // Lat3, CPI2
+		t3 = _mm256_or_si256(_mm256_slli_epi32(t3, 15), _mm256_srli_epi32(t3, 17));
+		t3 = _mm256_mullo_epi32(t3, c2); // avx   // Lat3, CPI2
+    }
+    // merge with existing.
+
+    // should have 0 idle latency cyles and 0 cpi cycles here.
+
+    // final step of update, xor the length, and fmix32.
     // finalization
-    // or the length.
+    h0 = _mm256_xor_si256(h0, t0); // avx
+    h0 = _mm256_xor_si256(h0, length); // sse
+    h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    h0 = _mm256_mullo_epi32(h0, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
+
+    h1 = _mm256_xor_si256(h1, t1); // avx
     h1 = _mm256_xor_si256(h1, length); // sse
+    h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    h1 = _mm256_mullo_epi32(h1, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
 
-    h1 = fmix32(h1); // ***** SSE4.1 **********
+    if (CNT > 2) {
+    	h2 = _mm256_xor_si256(h2, t2); // avx
+		h2 = _mm256_xor_si256(h2, length); // sse
+		h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+		h2 = _mm256_mullo_epi32(h2, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
 
-    return h1;
+		h3 = _mm256_xor_si256(h3, t3); // avx
+		h3 = _mm256_xor_si256(h3, length); // sse
+		h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+		h3 = _mm256_mullo_epi32(h3, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
+    }
+    
+    // should have 0 idle latency cyles and 0 cpi cycles here.
+    
+    //h1 = fmix32(h1); // ***** SSE4.1 **********
+    h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 13)); // h ^= h >> 13;      sse2
+    h0 = _mm256_mullo_epi32(h0, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+
+    h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 13)); // h ^= h >> 13;      sse2
+    h1 = _mm256_mullo_epi32(h1, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+
+    if (CNT > 2) {
+		h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
+		h2 = _mm256_mullo_epi32(h2, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+
+		h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
+		h3 = _mm256_mullo_epi32(h3, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+    }
+    // latencies.
+    // h3  Lat 4, cpi 2
+
+    h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    if (CNT > 2) {
+    	h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    	h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+    }
   }
 
-  template <size_t len = bytes,
-            typename std::enable_if<(len == 1), int>::type = 1>
-  FSC_FORCE_INLINE __m256i hash8(T const *key) const
+
+};
+
+
+template <typename T>
+class Murmur32AVX<T, 1>
+{
+// VERSION FOR T size of 1 byte.  try to do 16 bits at a time, so 16 elements at a time.
+
+// LATENCIES for instruction with latency > 1
+// 1. mullo_epi16 has latency of 5 cycles, CPI of 1 to 0.5 cycles - need unroll 2x to hide latency, since rotl32 has 3 instructions with 1 cycle latency.
+// 2. mullo_epi32 has latency of 10 cycles, CPI of 1 to 0.5 cycles - need unroll 3-4x to hide latency, since rotl32 has 3 instructions with 1 cycle latency.
+// 3. _mm256_permutevar8x32_epi32, _mm256_permute4x64_epi64, and _mm256_insertf128_si256  have latency of 3, CPI of 1.
+// 4. note that most extract calls have latency of 3 and CPI of 1, except for _mm256_extracti128_si256, which has latency of 1.
+
+protected:
+  // make static so initialization at beginning of class...
+  // static constexpr uint32_t BLISS_ALIGNED_ARRAY(mix_const1, 8, 64) = {
+  //   0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,
+  //   0x85ebca6bU,0x85ebca6bU,0x85ebca6bU,0x85ebca6bU};
+  const __m256i mix_const1;
+  const __m256i mix_const2;
+  const __m256i c1;
+  const __m256i c2;
+  const __m256i c3;
+  const __m256i c4;
+  const __m256i permute1;
+  const __m256i shuffle0; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
+  const __m256i shuffle1; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
+  const __m256i shuffle2; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
+  const __m256i shuffle3; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
+  const __m256i length;
+  mutable __m256i seed;
+  
+  // input is 8 unsigned ints.
+  FSC_FORCE_INLINE __m256i rotl32(__m256i x, int8_t r) const
+  {
+    // return (x << r) | (x >> (32 - r));
+    return _mm256_or_si256(              // sse2
+        _mm256_slli_epi32(x, r),         // sse2
+        _mm256_srli_epi32(x, (32 - r))); // sse2
+  }
+
+  // count cannot be zero.
+  // unroll 2x to hide latency of first, and 5x to hide latency of second mullo.
+  FSC_FORCE_INLINE __m256i update32_partial(__m256i h, __m256i k, uint8_t const &count) const
+  {
+
+    // preprocess the 4 streams
+    k = _mm256_mullo_epi32(k, c1); // SSE2
+    k = rotl32(k, 15);             // sse2
+    k = _mm256_mullo_epi32(k, c2); // SSE2
+    // merge with existing.
+    h = _mm256_xor_si256(h, k); // SSE
+    return h;
+  }
+
+  // input is 4 unsigned ints.
+  // is ((h ^ f) * c) carryless multiplication with (f = h >> d)?
+  FSC_FORCE_INLINE __m256i fmix32(__m256i h) const
+  {
+    h = _mm256_xor_si256(h, _mm256_srli_epi32(h, 16)); // h ^= h >> 16;      sse2
+    h = _mm256_mullo_epi32(h, mix_const1);             // h *= 0x85ebca6b;   sse4.1
+    h = _mm256_xor_si256(h, _mm256_srli_epi32(h, 13)); // h ^= h >> 13;      sse2
+    h = _mm256_mullo_epi32(h, mix_const2);             // h *= 0xc2b2ae35;   sse4.1
+    h = _mm256_xor_si256(h, _mm256_srli_epi32(h, 16)); // h ^= h >> 16;      sse2
+
+    return h;
+  }
+  explicit Murmur32AVX(__m256i _seed) : mix_const1(_mm256_set1_epi32(0x85ebca6bU)),
+                                        mix_const2(_mm256_set1_epi32(0xc2b2ae35U)),
+                                        c1(_mm256_set1_epi32(0xcc9e2d51U)),
+                                        c2(_mm256_set1_epi32(0x1b873593U)),
+                                        c3(_mm256_set1_epi32(0x5U)),
+                                        c4(_mm256_set1_epi32(0xe6546b64U)),
+                                        permute1(_mm256_setr_epi32(0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U)),
+                                        shuffle0(_mm256_setr_epi32(0x80808000U, 0x80808001U, 0x80808002U, 0x80808003U,
+                                                                   0x80808000U, 0x80808001U, 0x80808002U, 0x80808003U)),
+                                        shuffle1(_mm256_setr_epi32(0x80808004U, 0x80808005U, 0x80808006U, 0x80808007U,
+                                                                   0x80808004U, 0x80808005U, 0x80808006U, 0x80808007U)),
+                                        shuffle2(_mm256_setr_epi32(0x80808008U, 0x80808009U, 0x8080800AU, 0x8080800BU,
+                                                                   0x80808008U, 0x80808009U, 0x8080800AU, 0x8080800BU)),
+                                        shuffle3(_mm256_setr_epi32(0x8080800CU, 0x8080800DU, 0x8080800EU, 0x8080800FU,
+                                                                   0x8080800CU, 0x8080800DU, 0x8080800EU, 0x8080800FU)),
+                                        length(_mm256_set1_epi32(static_cast<uint32_t>(sizeof(T)))),
+                                        seed(_seed)
+
+  {
+  }
+
+public:
+  static constexpr uint8_t batch_size = 32;
+
+  explicit Murmur32AVX(uint32_t _seed) : Murmur32AVX(_mm256_set1_epi32(_seed))
+  {
+  }
+
+  explicit Murmur32AVX(Murmur32AVX const &other) : Murmur32AVX(other.seed)
+  {
+  }
+
+  explicit Murmur32AVX(Murmur32AVX &&other) : Murmur32AVX(other.seed)
+  {
+  }
+
+  Murmur32AVX &operator=(Murmur32AVX const &other)
+  {
+    seed = other.seed;
+
+    return *this;
+  }
+
+  Murmur32AVX &operator=(Murmur32AVX &&other)
+  {
+    seed = other.seed;
+    return *this;
+  }
+
+
+  // hash up to 32 elements at a time. at a time.  each is 1 byte
+  FSC_FORCE_INLINE void hash(T const *key, uint8_t nstreams, uint32_t *out) const
   {
     // process 4 streams at a time.  all should be the same length.
+
+	    // process 4 streams at a time.  all should be the same length.
+
+	    assert((nstreams <= 32) && "maximum number of streams is 31");
+	    assert((nstreams > 0) && "minimum number of streams is 1");
+
+	    __m256i h0, h1, h2, h3;
+
+	    // do the full ones first.
+	    hash(key, h0, h1, h2, h3);
+
+	    uint8_t blocks = nstreams >> 3;
+	    switch (blocks) {
+	      case 4:
+	        _mm256_storeu_si256((__m256i *)(out + 24), h3);
+	      case 3:
+	        _mm256_storeu_si256((__m256i *)(out + 16), h2);
+	      case 2:
+	        _mm256_storeu_si256((__m256i *)(out + 8), h1);
+	      case 1:
+	        _mm256_storeu_si256((__m256i *)out, h0);
+	      default:
+	        break;
+	    }
+
+	    uint8_t rem = nstreams & 7;  // remainder.
+	    if (rem > 0) {
+			// write remainders
+			switch (blocks) {
+			  case 3:
+				memcpy(out + 24, reinterpret_cast<uint32_t *>(&h3), rem << 2); // copy bytes
+				break;
+			  case 2:
+				memcpy(out + 16, reinterpret_cast<uint32_t *>(&h2), rem << 2); // copy bytes
+				break;
+			  case 1:
+				memcpy(out + 8, reinterpret_cast<uint32_t *>(&h1), rem << 2); // copy bytes
+				break;
+			  case 0:
+				memcpy(out, reinterpret_cast<uint32_t *>(&h0), rem << 2); // copy bytes
+				break;
+			  default:
+				break;
+
+			}
+	    }
+
+  }
+
+  // TODO: [ ] hash1, do the k transform in parallel.  also use mask to keep only part wanted, rest of update and finalize do sequentially.
+  // above 2, the finalize and updates will dominate and better to do those in parallel.
+
+  FSC_FORCE_INLINE void hash(T const *key, uint32_t *out) const
+  {
+    __m256i h0, h1, h2, h3;
+    hash(key, h0, h1, h2, h3);
+    _mm256_storeu_si256((__m256i *)out, h0);
+    _mm256_storeu_si256((__m256i *)(out + 8), h1);
+    _mm256_storeu_si256((__m256i *)(out + 16), h2);
+    _mm256_storeu_si256((__m256i *)(out + 24), h3);
+  }
+
+  // hashing 32 bytes worth of keys at a time.  uses 10 to 11 registers.
+  // if we go to 64 bytes, then we'd be using 20 to 21 registers
+  // first latency cycles are hidden.  the second latency cycles will remain the same for double the number of elements.
+  // SEE IF COMPILER CAN REORGANIZE THIS.
+  FSC_FORCE_INLINE void hash2(T const *key, __m256i & h0, __m256i & h1, __m256i & h2, __m256i & h3 ) const
+  {
+    // process 32 streams at a time, each 1 byte.  all should be the same length.
 
     // example layout, with each dash representing 1 bytes
     //     abcdefghijklmnop qrstuvwxyz123456
     // k0  ---------------- ----------------
 
-    __m256i k0, t0;
-    __m256i h1 = seed;
+    __m256i k0;
 
     // 32 keys per vector, can potentially do 4 rounds.
     k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
@@ -736,27 +1698,140 @@ public:
     k0 = _mm256_permutevar8x32_epi32(k0, permute1); // AVX2, latency of 3, CPI 1
     // abcd ijkl qrst yz12 efgh mnop uvwx 3456
 
+    h0 = h1 = h2 = h3 = seed;   
+    
     // TODO: can potentially reuse a little more.
 
     // USE shuffle_epi8, with mask.
     // transform to a000b000c000d000 e000f000g000h000.  interleave with 0.
-    t0 = _mm256_shuffle_epi8(k0, shuffle1); // AVX2, latency 3, CPI 1
+    h0 = update32_partial(h0, _mm256_shuffle_epi8(k0, shuffle0), 1); // transpose 4x2  SSE2
+    h1 = update32_partial(h1, _mm256_shuffle_epi8(k0, shuffle1), 1); // transpose 4x2  SSE2
+    h2 = update32_partial(h2, _mm256_shuffle_epi8(k0, shuffle2), 1); // transpose 4x2  SSE2
+    h3 = update32_partial(h3, _mm256_shuffle_epi8(k0, shuffle3), 1); // transpose 4x2  SSE2
 
-    // row 0.
-    h1 = update32_partial(h1, t0, 1); // transpose 4x2  SSE2
-
-    //----------
-    // finalization
+     //----------
+      // finalization
     // or the length.
+	h0 = _mm256_xor_si256(h0, length); // sse
+	h1 = _mm256_xor_si256(h1, length); // sse
+	h2 = _mm256_xor_si256(h2, length); // sse
+	h3 = _mm256_xor_si256(h3, length); // sse
+
+	h0 = fmix32(h0); // ***** SSE4.1 **********
+	h1 = fmix32(h1); // ***** SSE4.1 **********
+	h2 = fmix32(h2); // ***** SSE4.1 **********
+	h3 = fmix32(h3); // ***** SSE4.1 **********
+  }
+
+  // hashing 32 bytes worth of keys at a time.  uses 10 to 11 registers.
+  // if we go to 64 bytes, then we'd be using 20 to 21 registers
+  // first latency cycles are hidden.  the second latency cycles will remain the same for double the number of elements.
+  FSC_FORCE_INLINE void hash(T const *key, __m256i & h0, __m256i & h1, __m256i & h2, __m256i & h3 ) const
+  {
+    // process 32 streams at a time, each 1 byte.  all should be the same length.
+
+    // example layout, with each dash representing 1 bytes
+    //     abcdefghijklmnop qrstuvwxyz123456
+    // k0  ---------------- ----------------
+
+    __m256i k0, t0, t1, t2, t3;
+
+    // 32 keys per vector, can potentially do 4 rounds.
+    k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
+
+    // 2 extra calls.
+    // need to permute with permutevar8x32, idx = [0 2 4 6 1 3 5 7]
+    k0 = _mm256_permutevar8x32_epi32(k0, permute1); // AVX2, latency of 3, CPI 1
+    // abcd ijkl qrst yz12 efgh mnop uvwx 3456
+
+    
+    // MERGED SHUFFLE AND UPDATE_PARTIAL
+    // USE shuffle_epi8, with mask.
+    // transform to a000b000c000d000 e000f000g000h000.  interleave with 0.
+    t0 = _mm256_shuffle_epi8(k0, shuffle0); // AVX2, latency 1, CPI 1
+    // h1 = update32_partial(h1, t0, 1); // transpose 4x2  SSE2
+    t0 = _mm256_mullo_epi32(t0, c1); // avx  // Lat3, CPI2
+    // ijkl
+    t1 = _mm256_shuffle_epi8(k0, shuffle1); // AVX2, latency 1, CPI 1
+    t1 = _mm256_mullo_epi32(t1, c1); // avx  // Lat3, CPI2
+    // qrst
+    t2 = _mm256_shuffle_epi8(k0, shuffle2); // AVX2, latency 1, CPI 1
+    t2 = _mm256_mullo_epi32(t2, c1); // avx  // Lat3, CPI2
+    // yz12
+    t3 = _mm256_shuffle_epi8(k0, shuffle3); // AVX2, latency 1, CPI 1
+    t3 = _mm256_mullo_epi32(t3, c1); // avx  // Lat3, CPI2
+    
+    // should have 4 idle latency cycles and 2 CPI cycles here.  initialize here.
+    h0 = h1 = h2 = h3 = seed;   
+    
+    // rotl32
+    //t0 = rotl32(t0, 15);               
+    t0 = _mm256_or_si256(_mm256_slli_epi32(t0, 15), _mm256_srli_epi32(t0, 17)); 
+    t0 = _mm256_mullo_epi32(t0, c2); // avx   // Lat3, CPI2
+    t1 = _mm256_or_si256(_mm256_slli_epi32(t1, 15), _mm256_srli_epi32(t1, 17));
+    t1 = _mm256_mullo_epi32(t1, c2); // avx   // Lat3, CPI2
+    t2 = _mm256_or_si256(_mm256_slli_epi32(t2, 15), _mm256_srli_epi32(t2, 17));
+    t2 = _mm256_mullo_epi32(t2, c2); // avx   // Lat3, CPI2
+    t3 = _mm256_or_si256(_mm256_slli_epi32(t3, 15), _mm256_srli_epi32(t3, 17));
+    t3 = _mm256_mullo_epi32(t3, c2); // avx   // Lat3, CPI2
+    // merge with existing.
+
+    // should have 0 idle latency cyles and 0 cpi cycles here.
+
+    // final step of update, xor the length, and fmix32.
+    // finalization
+    h0 = _mm256_xor_si256(h0, t0); // avx
+    h0 = _mm256_xor_si256(h0, length); // sse
+    h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    h0 = _mm256_mullo_epi32(h0, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
+
+    h1 = _mm256_xor_si256(h1, t1); // avx
     h1 = _mm256_xor_si256(h1, length); // sse
+    h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    h1 = _mm256_mullo_epi32(h1, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
 
-    h1 = fmix32(h1); // ***** SSE4.1 **********
+    h2 = _mm256_xor_si256(h2, t2); // avx
+    h2 = _mm256_xor_si256(h2, length); // sse
+    h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    h2 = _mm256_mullo_epi32(h2, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
 
-    return h1;
+    h3 = _mm256_xor_si256(h3, t3); // avx
+    h3 = _mm256_xor_si256(h3, length); // sse
+    h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+    h3 = _mm256_mullo_epi32(h3, mix_const1);             // h *= 0x85ebca6b;   lat3, CPI2
+    
+    // should have 0 idle latency cyles and 0 cpi cycles here.
+    
+    //h1 = fmix32(h1); // ***** SSE4.1 **********
+    h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 13)); // h ^= h >> 13;      sse2
+    h0 = _mm256_mullo_epi32(h0, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+
+    h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 13)); // h ^= h >> 13;      sse2
+    h1 = _mm256_mullo_epi32(h1, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+
+    h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
+    h2 = _mm256_mullo_epi32(h2, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+
+    h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
+    h3 = _mm256_mullo_epi32(h3, mix_const2);             // h *= 0xc2b2ae35;   lat3, CPI2
+
+    // latencies.
+    // h3  Lat 4, cpi 2
+
+    h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+
   }
 };
+template <typename T, size_t bytes>
+constexpr uint8_t Murmur32AVX<T, bytes>::batch_size;
 
 #endif
+
+
+
 
 #if defined(__SSE4_1__)
 // for 32 bit buckets
@@ -1695,11 +2770,11 @@ class murmur3avx32
 {
 
 protected:
-  ::fsc::hash::sse::Murmur32AVX<T> hasher;
+  ::fsc::hash::sse::Murmur32AVX<T, sizeof(T)> hasher;
   mutable uint32_t temp[8];
 
 public:
-  static constexpr uint8_t batch_size = 8;
+  static constexpr uint8_t batch_size = ::fsc::hash::sse::Murmur32AVX<T, sizeof(T)>::batch_size;
   using result_type = uint32_t;
   using argument_type = T;
 
@@ -1722,13 +2797,12 @@ public:
   FSC_FORCE_INLINE void hash(T const *keys, size_t count, uint32_t *results) const
   {
 
-    size_t rem = count & 0x7;
+    size_t rem = count & (batch_size - 1);
     size_t max = count - rem;
     size_t i = 0;
-    for (; i < max; i += 8)
+    for (; i < max; i += batch_size)
     {
-
-      hasher.hash8(&(keys[i]), results + i);
+      hasher.hash(&(keys[i]), results + i);
     }
 
     if (rem > 0)
@@ -1739,43 +2813,22 @@ public:
   template <typename OT>
   FSC_FORCE_INLINE void hash_and_mod(T const *keys, size_t count, OT *results, uint32_t modulus) const
   {
-    size_t rem = count & 0x7;
+    size_t rem = count & (batch_size - 1);
     size_t max = count - rem;
-    size_t i = 0;
-    for (; i < max; i += 8)
+    size_t i = 0, j = 0;
+    for (; i < max; i += batch_size)
     {
-      hasher.hash8(&(keys[i]), temp);
-      results[i] = temp[0] % modulus;
-      results[i + 1] = temp[1] % modulus;
-      results[i + 2] = temp[2] % modulus;
-      results[i + 3] = temp[3] % modulus;
-      results[i + 4] = temp[4] % modulus;
-      results[i + 5] = temp[5] % modulus;
-      results[i + 6] = temp[6] % modulus;
-      results[i + 7] = temp[7] % modulus;
+      hasher.hash(&(keys[i]), temp);
+
+      for (j = 0; j < batch_size; ++j)
+    	  results[i + j] = temp[j] % modulus;
     }
 
-    if (rem > 0)
+    if (rem > 0) {
       hasher.hash(&(keys[i]), rem, temp);
 
-    switch (rem)
-    {
-    case 7:
-      results[i + 6] = temp[6] % modulus;
-    case 6:
-      results[i + 5] = temp[5] % modulus;
-    case 5:
-      results[i + 4] = temp[4] % modulus;
-    case 4:
-      results[i + 3] = temp[3] % modulus;
-    case 3:
-      results[i + 2] = temp[2] % modulus;
-    case 2:
-      results[i + 1] = temp[1] % modulus;
-    case 1:
-      results[i] = temp[0] % modulus;
-    default:
-      break;
+      for (j = 0; j < rem; ++j)
+    	  results[i + j] = temp[j] % modulus;
     }
   }
 
@@ -1787,43 +2840,21 @@ public:
     assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
     --modulus;
 
-    size_t rem = count & 0x7;
+    size_t rem = count & (batch_size - 1);
     size_t max = count - rem;
-    size_t i = 0;
-    for (; i < max; i += 8)
+    size_t i = 0, j = 0;
+    for (; i < max; i += batch_size)
     {
-      hasher.hash8(&(keys[i]), temp);
-      results[i] = temp[0] & modulus;
-      results[i + 1] = temp[1] & modulus;
-      results[i + 2] = temp[2] & modulus;
-      results[i + 3] = temp[3] & modulus;
-      results[i + 4] = temp[4] & modulus;
-      results[i + 5] = temp[5] & modulus;
-      results[i + 6] = temp[6] & modulus;
-      results[i + 7] = temp[7] & modulus;
+      hasher.hash(&(keys[i]), temp);
+      for (j = 0; j < batch_size; ++j)
+    	  results[i + j] = temp[j] & modulus;
     }
 
     // last part.
-    if (rem > 0)
+    if (rem > 0) {
       hasher.hash(&(keys[i]), rem, temp);
-    switch (rem)
-    {
-    case 7:
-      results[i + 6] = temp[6] & modulus;
-    case 6:
-      results[i + 5] = temp[5] & modulus;
-    case 5:
-      results[i + 4] = temp[4] & modulus;
-    case 4:
-      results[i + 3] = temp[3] & modulus;
-    case 3:
-      results[i + 2] = temp[2] & modulus;
-    case 2:
-      results[i + 1] = temp[1] & modulus;
-    case 1:
-      results[i] = temp[0] & modulus;
-    default:
-      break;
+      for (j = 0; j < rem; ++j)
+    	  results[i + j] = temp[j] & modulus;
     }
   }
 

@@ -271,7 +271,7 @@ int main(int argc, char** argv) {
 
         count = countArg.getValue();
         el_size = elSizeArg.getValue();
-        std::cout << "Executing for " << el_size << " element size. " << std::endl;
+        std::cout << "Executing for " << el_size << " element size. 0 means all" << std::endl;
 
     #ifdef VTUNE_ANALYSIS
         // set the default for query to filename, and reparse
