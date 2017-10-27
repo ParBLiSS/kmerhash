@@ -4,7 +4,7 @@
 #include <sstream>
 #include <exception>
 
-#include "kmerhash/hash.hpp"
+#include "kmerhash/hash_new.hpp"
 #include "utils/benchmark_utils.hpp"
 
 #include "tclap/CmdLine.h"
@@ -19,7 +19,7 @@
 #define MEASURE_MURMURSSE 10
 #define MEASURE_MURMURAVX 11
 #define MEASURE_CRC32C 12
-#define MEASURE_CLHSH 13
+#define MEASURE_CLHASH 13
 
 //#define MEASURE_MURMURSSSE64 13
 
@@ -312,13 +312,13 @@ int main(int argc, char** argv) {
   unsigned char* data = (unsigned char*) malloc(count * 256);
 
   if (data == nullptr) {
-    throw std::invalid_argument("count is too large, or 0, and cannot allocation memory");
+    throw std::invalid_argument("Unable to allocate for data.  count is too large, or 0.");
   }
 
   unsigned int* hashes = (unsigned int*) malloc(count * sizeof(unsigned int));
 
   if (hashes == nullptr) {
-    throw std::invalid_argument("count is too large, or 0, and cannot allocation memory");
+    throw std::invalid_argument("Unable to allocate for hash.  count is too large, or 0.");
   }
 
 

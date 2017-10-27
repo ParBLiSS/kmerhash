@@ -57,7 +57,7 @@
 #include <cstring>  // memcpy
 
 #include "kmerhash/io_utils.hpp"
-#include "kmerhash/hash.hpp"
+#include "kmerhash/hash_new.hpp"
 
 #ifdef VTUNE_ANALYSIS
 #include <ittnotify.h>
