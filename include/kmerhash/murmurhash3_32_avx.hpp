@@ -122,159 +122,158 @@ protected:
   const __m256i c4;
   const __m256i length;
 
+
+  // part of the update32() function, from second multiply to last multiply.
+  template <uint8_t VEC_CNT>
+  FSC_FORCE_INLINE void rotl(uint8_t const & rot, __m256i &t0, __m256i &t1, __m256i &t2, __m256i &t3) const
+  {
+
+    __m256i tt0, tt1, tt2, tt3;
+
+    if (VEC_CNT >= 1) {
+      tt1 = _mm256_slli_epi32(t0, rot);   // SLLI: L1 C1 p0
+      tt0 = _mm256_srli_epi32(t0, (32 - rot));   // SRLI: L1 C1 p0
+    }
+    if (VEC_CNT >= 2) {
+      tt3 = _mm256_slli_epi32(t1, rot);   // SLLI: L1 C1 p0
+      tt2 = _mm256_srli_epi32(t1, (32 - rot));   // SRLI: L1 C1 p0
+    }
+    if (VEC_CNT >= 1) t0 = _mm256_or_si256(tt1, tt0);  // OR: L1 C0.33 p015
+    if (VEC_CNT >= 2) t1 = _mm256_or_si256(tt3, tt2);  // OR: L1 C0.33 p015
+
+    if (VEC_CNT >= 3) {
+      tt1 = _mm256_slli_epi32(t2, rot);   // SLLI: L1 C1 p0
+      tt0 = _mm256_srli_epi32(t2, (32 - rot));   // SRLI: L1 C1 p0
+    }
+    if (VEC_CNT >= 4) {
+      tt3 = _mm256_slli_epi32(t3, rot);   // SLLI: L1 C1 p0
+      tt2 = _mm256_srli_epi32(t3, (32 - rot));   // SRLI: L1 C1 p0
+    }
+
+    if (VEC_CNT >= 3) t2 = _mm256_or_si256(tt1, tt0);  // OR: L1 C0.33 p015
+    if (VEC_CNT >= 4) t3 = _mm256_or_si256(tt3, tt2);  // OR: L1 C0.33 p015
+    // note that the next call needs to have at least 4 operations before using t3, 6 before using t2, 8 before t1, 10 before t0
+  }
+
+  // part of the update32() function, from second multiply to last multiply.
+  template <uint8_t VEC_CNT>
+  FSC_FORCE_INLINE void mul(__m256i const & mult, __m256i &t0, __m256i &t1, __m256i &t2, __m256i &t3) const
+  {
+    if (VEC_CNT >= 1) t0 = _mm256_mullo_epi32(t0, mult); // sse   // Lat10, CPI2
+    if (VEC_CNT >= 2) t1 = _mm256_mullo_epi32(t1, mult); // sse   // Lat10, CPI2
+    if (VEC_CNT >= 3) t2 = _mm256_mullo_epi32(t2, mult); // sse   // Lat10, CPI2
+    if (VEC_CNT >= 4) t3 = _mm256_mullo_epi32(t3, mult); // sse   // MULLO: L10 C2 2p0
+    // note that the next call needs to have at least 4 operations before using t3, 6 before using t2, 8 before t1, 10 before t0
+  }
+
+
   // part of the update32() function, from second multiply to last multiply.
   template <uint8_t VEC_CNT>
   FSC_FORCE_INLINE void update_part2(__m256i &t0, __m256i &t1, __m256i &t2, __m256i &t3) const
   {
-    switch (VEC_CNT)
-    {
-    case 4:
-      t3 = _mm256_or_si256(_mm256_slli_epi32(t3, 15), _mm256_srli_epi32(t3, 17));
-      t3 = _mm256_mullo_epi32(t3, this->c2); // avx   // Lat10, CPI2
-    case 3:
-      t2 = _mm256_or_si256(_mm256_slli_epi32(t2, 15), _mm256_srli_epi32(t2, 17));
-      t2 = _mm256_mullo_epi32(t2, this->c2); // avx   // Lat10, CPI2
-    case 2:
-      t1 = _mm256_or_si256(_mm256_slli_epi32(t1, 15), _mm256_srli_epi32(t1, 17));
-      t1 = _mm256_mullo_epi32(t1, this->c2); // avx   // Lat10, CPI2
-    case 1:
-      t0 = _mm256_or_si256(_mm256_slli_epi32(t0, 15), _mm256_srli_epi32(t0, 17));
-      t0 = _mm256_mullo_epi32(t0, this->c2); // avx   // Lat10, CPI2
-    }
+    
+    rotl<VEC_CNT>(15, t0, t1, t2, t3);
+    mul<VEC_CNT>(this->c2, t0, t1, t2, t3);
+    
+    // note that the next call needs to have at least 4 operations before using t3, 6 before using t2, 8 before t1, 10 before t0
   }
 
+
+
   // part of the update32() function, from second multiply to last multiply.
+  template <uint8_t VEC_CNT, bool add_prev_iter>
+  FSC_FORCE_INLINE void add_xor(__m256i const & adder, __m256i &h0, __m256i &h1, __m256i &h2, __m256i &h3,
+                                     __m256i const &t0, __m256i const &t1, __m256i const &t2, __m256i const &t3) const
+  {
+    // first do the add.
+    if (add_prev_iter) {
+      if (VEC_CNT >= 1) h0 = _mm256_add_epi32(h0, adder);
+      if (VEC_CNT >= 2) h1 = _mm256_add_epi32(h1, adder);
+    }
+    if (VEC_CNT >= 1) h0 = _mm256_xor_si256(h0, t0); // sse
+    if (VEC_CNT >= 2) h1 = _mm256_xor_si256(h1, t1); // sse
+
+    if (add_prev_iter) {
+      if (VEC_CNT >= 3) h2 = _mm256_add_epi32(h2, adder);
+      if (VEC_CNT >= 4) h3 = _mm256_add_epi32(h3, adder);                                   // ADD: L1 C0.5 p15
+    }
+    if (VEC_CNT >= 3) h2 = _mm256_xor_si256(h2, t2); // sse
+    if (VEC_CNT >= 4) h3 = _mm256_xor_si256(h3, t3); // sse                                    // XOR: L1 C0.33 p015
+  }
+
+
+
+      // part of the update32() function, from second multiply to last multiply.
   template <uint8_t VEC_CNT, bool add_prev_iter>
   FSC_FORCE_INLINE void update_part3(__m256i &h0, __m256i &h1, __m256i &h2, __m256i &h3,
                                      __m256i const &t0, __m256i const &t1, __m256i const &t2, __m256i const &t3) const
   {
-    switch (VEC_CNT)
-    {
-    case 4:
-      if (add_prev_iter)
-        h3 = _mm256_add_epi32(h3, this->c4);
-      h3 = _mm256_xor_si256(h3, t3); // avx
-      h3 = _mm256_or_si256(_mm256_slli_epi32(h3, 13), _mm256_srli_epi32(h3, 19));
-      h3 = _mm256_mullo_epi32(h3, this->c3);
-    case 3:
-      if (add_prev_iter)
-        h2 = _mm256_add_epi32(h2, this->c4);
-      h2 = _mm256_xor_si256(h2, t2); // avx
-      h2 = _mm256_or_si256(_mm256_slli_epi32(h2, 13), _mm256_srli_epi32(h2, 19));
-      h2 = _mm256_mullo_epi32(h2, this->c3);
-    case 2:
-      if (add_prev_iter)
-        h1 = _mm256_add_epi32(h1, this->c4);
-      h1 = _mm256_xor_si256(h1, t1); // avx
-      h1 = _mm256_or_si256(_mm256_slli_epi32(h1, 13), _mm256_srli_epi32(h1, 19));
-      h1 = _mm256_mullo_epi32(h1, this->c3);
-    case 1:
-      if (add_prev_iter)
-        h0 = _mm256_add_epi32(h0, this->c4);
-      h0 = _mm256_xor_si256(h0, t0); // avx
-      h0 = _mm256_or_si256(_mm256_slli_epi32(h0, 13), _mm256_srli_epi32(h0, 19));
-      h0 = _mm256_mullo_epi32(h0, this->c3);
-    }
+    add_xor<VEC_CNT, add_prev_iter>(this->c4, h0, h1, h2, h3, t0, t1, t2, t3);
+
+
+    rotl<VEC_CNT>(13, h0, h1, h2, h3);
+    mul<VEC_CNT>(this->c3, h0, h1, h2, h3);
   }
 
-  /// fmix32 for 32 elements at a time.
+    
+
+  template <uint8_t VEC_CNT>
+  FSC_FORCE_INLINE void shift_xor(uint8_t const & shift, __m256i &h0, __m256i &h1, __m256i &h2, __m256i &h3) const
+  {
+    __m256i tt0, tt1;
+    if (VEC_CNT >= 1) tt0 = _mm256_srli_epi32(h0, shift);
+    if (VEC_CNT >= 2) tt1 = _mm256_srli_epi32(h1, shift);
+    if (VEC_CNT >= 1) h0 = _mm256_xor_si256(h0, tt0); // h ^= h >> 16;      sse2
+    if (VEC_CNT >= 2) h1 = _mm256_xor_si256(h1, tt1); // h ^= h >> 16;      sse2
+
+    if (VEC_CNT >= 3) tt0 = _mm256_srli_epi32(h2, shift); 
+    if (VEC_CNT >= 4) tt1 = _mm256_srli_epi32(h3, shift);                         // SRLI: L1, C1, p0.  
+    if (VEC_CNT >= 3) h2 = _mm256_xor_si256(h2, tt0); // h ^= h >> 16;      sse2
+    if (VEC_CNT >= 4) h3 = _mm256_xor_si256(h3, tt1); // h ^= h >> 16;      sse2  // XOR: L1, C0.33, p015
+    
+  }
+
+
+  /// fmix32 for 16 elements at a time.
   template <uint8_t VEC_CNT>
   FSC_FORCE_INLINE void fmix32(__m256i &h0, __m256i &h1, __m256i &h2, __m256i &h3) const
   {
+    // // should have 0 idle latency cyles and 0 cpi cycles here.
+    shift_xor<VEC_CNT>(16, h0, h1, h2, h3);
+    mul<VEC_CNT>(this->mix_const1, h0, h1, h2, h3);
 
-    // should have 0 idle latency cyles and 0 cpi cycles here.
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-      h3 = _mm256_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 3:
-      h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-      h2 = _mm256_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 2:
-      h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-      h1 = _mm256_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 1:
-      h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-      h0 = _mm256_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    }
+    // // should have 1 idle latency cyles and 2 cpi cycles here.
 
-    // should have 1 idle latency cyles and 2 cpi cycles here.
+    shift_xor<VEC_CNT>(13, h0, h1, h2, h3);
+    mul<VEC_CNT>(this->mix_const2, h0, h1, h2, h3);
 
-    //h1 = fmix32(h1); // ***** SSE4.1 **********
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
-      h3 = _mm256_mullo_epi32(h3, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 3:
-      h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
-      h2 = _mm256_mullo_epi32(h2, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 2:
-      h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 13)); // h ^= h >> 13;      sse2
-      h1 = _mm256_mullo_epi32(h1, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 1:
-      h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 13)); // h ^= h >> 13;      sse2
-      h0 = _mm256_mullo_epi32(h0, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    }
+    // // latencies.
+    // // h3  Lat 1, cpi 2
+    // // h0  Lat 4, cpi 2
 
-    // latencies.
-    // h3  Lat 1, cpi 2
-    // h0  Lat 4, cpi 2
+    // // expect Lat 0, cycle 1
+    shift_xor<VEC_CNT>(16, h0, h1, h2, h3);
 
-    // expect Lat 0, cycle 1
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-    case 3:
-      h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-    case 2:
-      h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-    case 1:
-      h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-    }
   }
 
-  /// fmix32 for 32 elements at a time.
+
+
+  /// fmix32 for 16 elements at a time.
   template <uint8_t VEC_CNT>
   FSC_FORCE_INLINE void fmix32_part2(__m256i &h0, __m256i &h1, __m256i &h2, __m256i &h3) const
   {
     // should have 1 idle latency cyles and 2 cpi cycles here.
 
-    //h1 = fmix32(h1); // ***** SSE4.1 **********
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
-      h3 = _mm256_mullo_epi32(h3, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 3:
-      h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
-      h2 = _mm256_mullo_epi32(h2, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 2:
-      h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 13)); // h ^= h >> 13;      sse2
-      h1 = _mm256_mullo_epi32(h1, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 1:
-      h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 13)); // h ^= h >> 13;      sse2
-      h0 = _mm256_mullo_epi32(h0, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    }
+    shift_xor<VEC_CNT>(13, h0, h1, h2, h3);
+    mul<VEC_CNT>(this->mix_const2, h0, h1, h2, h3);
 
     // latencies.
     // h3  Lat 1, cpi 2
     // h0  Lat 4, cpi 2
 
     // expect Lat 0, cycle 1
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-    case 3:
-      h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-    case 2:
-      h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-    case 1:
-      h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-    }
+    shift_xor<VEC_CNT>(16, h0, h1, h2, h3);
+
   }
 
 protected:
@@ -386,19 +385,11 @@ public:
     }
 
     blocks = nstreams >> 3;
-    switch (blocks)
-    {
-    case 4:
-      _mm256_storeu_si256((__m256i *)(out + 24), h3);
-    case 3:
-      _mm256_storeu_si256((__m256i *)(out + 16), h2);
-    case 2:
-      _mm256_storeu_si256((__m256i *)(out + 8), h1);
-    case 1:
-      _mm256_storeu_si256((__m256i *)out, h0);
-    default:
-      break;
-    }
+    if (blocks >= 1) _mm256_storeu_si256((__m256i *)out, h0);
+    if (blocks >= 2) _mm256_storeu_si256((__m256i *)(out + 8), h1);
+    if (blocks >= 3) _mm256_storeu_si256((__m256i *)(out + 16), h2);
+    if (blocks >= 4) _mm256_storeu_si256((__m256i *)(out + 24), h3);
+    
 
     uint8_t rem = nstreams & 7; // remainder.
     if (rem > 0)
@@ -430,10 +421,10 @@ public:
   {
     __m256i h0, h1, h2, h3;
     hash<4>(key, h0, h1, h2, h3);
-    _mm256_storeu_si256((__m256i *)(out + 24), h3);
-    _mm256_storeu_si256((__m256i *)(out + 16), h2);
-    _mm256_storeu_si256((__m256i *)(out + 8), h1);
     _mm256_storeu_si256((__m256i *)out, h0);
+    _mm256_storeu_si256((__m256i *)(out + 8), h1);
+    _mm256_storeu_si256((__m256i *)(out + 16), h2);
+    _mm256_storeu_si256((__m256i *)(out + 24), h3);
   }
 
   /// NOTE: multiples of 32.
@@ -454,46 +445,64 @@ public:
     // an alternative might be using _mm256_set_m128i(_mm_lddqu_si128, _mm_lddqu_si128), which has about 5 cycles latency in total.
     // still need to shuffle more than 4 times.
 
-    __m256i k0, k1, k2, k3, tt1, tt3;
-    __m128i j0, j1, j2, j3, j4, j5, j6, j7;
+    __m256i k0, k1, k2, k3;
+    __m128i j0, j1, j2, j3;
+
+    // // load 8 keys at a time, 16 bytes each time,
+    // j0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key) + off);     // SSE3  // L3 C0.5 p23
+    // j2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 4) + off); // SSE3
+    // j1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 1) + off); // SSE3
+    // j3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 5) + off); // SSE3
+
+    // k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), (j2), 1); //aa'AA'ee'EE'  // L3 C1 p5
+    // k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), (j3), 1); //bb'BB'ff'FF'
+
+    // j0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 2) + off); // SSE3
+    // j2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 6) + off); // SSE3
+    // j1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 3) + off); // SSE3
+    // j3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 7) + off); // SSE3
+
+    // // get the 32 byte vector.
+    // // mixing 1st and 4th, so don't have to cross boundaries again  // AVX
+    // k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), (j2), 1); //CG
+    // k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), (j3), 1); //DH
 
     // load 8 keys at a time, 16 bytes each time,
-    j0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key) + off);     // SSE3
+    j0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key) + off);     // SSE3  // L3 C0.5 p23
     j1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 1) + off); // SSE3
     j2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 2) + off); // SSE3
     j3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 3) + off); // SSE3
-    j4 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 4) + off); // SSE3
-    j5 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 5) + off); // SSE3
-    j6 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 6) + off); // SSE3
-    j7 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 7) + off); // SSE3
 
     // get the 32 byte vector.
     // mixing 1st and 4th, so don't have to cross boundaries again  // AVX
-    k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j3), (j7), 1); //DH
-    k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j2), (j6), 1); //CG
-    k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), (j5), 1); //bb'BB'ff'FF'
-    k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), (j4), 1); //aa'AA'ee'EE'
+    // y m i version, L4, C0.5, p015 p23
+    k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), *(reinterpret_cast<const __m128i *>(key + 4) + off), 1); //aa'AA'ee'EE'
+    k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), *(reinterpret_cast<const __m128i *>(key + 5) + off), 1); //bb'BB'ff'FF'
+    k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j2), *(reinterpret_cast<const __m128i *>(key + 6) + off), 1); //CG
+    k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j3), *(reinterpret_cast<const __m128i *>(key + 7) + off), 1); //DH
 
+    
     // MERGED shuffling and update part 1.
     // now unpack and update
-    tt3 = _mm256_unpackhi_epi32(k2, k3);
-    tt1 = _mm256_unpacklo_epi32(k2, k3); // cdc'd'ghg'h'
-    t2 = _mm256_unpackhi_epi32(k0, k1);
+    t0 = _mm256_unpacklo_epi32(k0, k1); // aba'b'efe'f'                           // L1 C1 p5   
+    t2 = _mm256_unpackhi_epi32(k0, k1); 
+    t1 = _mm256_unpacklo_epi32(k2, k3); // cdc'd'ghg'h'
+    
+    k0 = _mm256_unpacklo_epi64(t0, t1);   // abcdefgh
+    k1 = _mm256_unpackhi_epi64(t0, t1);   // a'b'c'd'e'f'g'h'
 
-    k3 = _mm256_unpackhi_epi64(t2, tt3);
-    t3 = _mm256_mullo_epi32(k3, this->c1); // avx  // Lat10, CPI2
+    t0 = _mm256_mullo_epi32(k0, this->c1); // avx                                  // L10 C2 p0
 
-    k2 = _mm256_unpacklo_epi64(t2, tt3);
-    t2 = _mm256_mullo_epi32(k2, this->c1); // avx  // Lat10, CPI2
-
-    // now unpack and update
-    t0 = _mm256_unpacklo_epi32(k0, k1); // aba'b'efe'f'
-
-    k1 = _mm256_unpackhi_epi64(t0, tt1);   // a'b'c'd'e'f'g'h'
+    t3 = _mm256_unpackhi_epi32(k2, k3);                                            // L1 C1 p5
+    
     t1 = _mm256_mullo_epi32(k1, this->c1); // avx  // Lat10, CPI2
 
-    k0 = _mm256_unpacklo_epi64(t0, tt1);   // abcdefgh
-    t0 = _mm256_mullo_epi32(k0, this->c1); // avx  // Lat10, CPI2
+    
+    k2 = _mm256_unpacklo_epi64(t2, t3);
+    k3 = _mm256_unpackhi_epi64(t2, t3);
+
+    t2 = _mm256_mullo_epi32(k2, this->c1); // avx  // Lat10, CPI2
+    t3 = _mm256_mullo_epi32(k3, this->c1); // avx  // Lat10, CPI2
 
     // latency:  should be Lat3, C2 for temp
     // update part 2.
@@ -506,7 +515,7 @@ public:
   // also probably going to be faster for non-power of 2 less than 8 (for 9 to 15, this is needed anyways).
   //   because we'd need to shift across lane otherwise.
   // load with an offset from start of key, and load partially.  blocks of 16,
-  template <size_t KEY_LEN = sizeof(T), size_t offset = (sizeof(T) >> 4), size_t rem = (sizeof(T) & 15)>
+  template <size_t KEY_LEN = sizeof(T), size_t off = (sizeof(T) >> 4), size_t rem = (sizeof(T) & 15)>
   FSC_FORCE_INLINE void load_partial16(T const *key,
                                        __m256i &t0, __m256i &t1, __m256i &t2, __m256i &t3 //,
                                        // __m256i & t4, __m256i & t5, __m256i & t6, __m256i & t7
@@ -524,67 +533,53 @@ public:
     // an alternative might be using _mm256_set_m128i(_mm_lddqu_si128, _mm_lddqu_si128), which has about 5 cycles latency in total.
     // still need to shuffle more than 4 times.
 
-    __m256i k0, k1, k2, k3, tt1, tt3;
-    __m128i j0, j1, j2, j3, j4, j5, j6, j7;
+    __m256i k0, k1, k2, k3;
+    __m128i j0, j1, j2, j3;
     __m256i mask = _mm256_srli_si256(ones, 16 - rem); // shift right to keep just the remainder part
 
     // load 8 keys at a time, 16 bytes each time,
-    j0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key) + offset);     // SSE3
-    j1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 1) + offset); // SSE3
-    j2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 2) + offset); // SSE3
-    j3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 3) + offset); // SSE3
-    j4 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 4) + offset); // SSE3
-    j5 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 5) + offset); // SSE3
-    j6 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 6) + offset); // SSE3
-    j7 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 7) + offset); // SSE3
+    j0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key) + off);     // SSE3  // L3 C0.5 p23
+    j1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 1) + off); // SSE3
+    j2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 2) + off); // SSE3
+    j3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 3) + off); // SSE3
 
     // get the 32 byte vector.
     // mixing 1st and 4th, so don't have to cross boundaries again  // AVX
-    k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j3), (j7), 1); //DH
-    k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j2), (j6), 1); //CG
-    k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), (j5), 1); //bb'BB'ff'FF'
-    k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), (j4), 1); //aa'AA'ee'EE'
+    // y m i version, L4, C0.5, p015 p23
+    k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), *(reinterpret_cast<const __m128i *>(key + 4) + off), 1); //aa'AA'ee'EE'
+    k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), *(reinterpret_cast<const __m128i *>(key + 5) + off), 1); //bb'BB'ff'FF'
+    k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j2), *(reinterpret_cast<const __m128i *>(key + 6) + off), 1); //CG
+    k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j3), *(reinterpret_cast<const __m128i *>(key + 7) + off), 1); //DH
 
     // ZERO the leading bytes to keep just the lower.
     // latency of 3 and CPI of 1, so can do the masking here...
-    k3 = _mm256_and_si256(k3, mask);
-    k2 = _mm256_and_si256(k2, mask);
-    k1 = _mm256_and_si256(k1, mask);
     k0 = _mm256_and_si256(k0, mask);
-
+    k1 = _mm256_and_si256(k1, mask);
+    k2 = _mm256_and_si256(k2, mask);
+    k3 = _mm256_and_si256(k3, mask);
+    
     // MERGED shuffling and update part 1.
     // now unpack and update
     // RELY ON COMPILER OPTIMIZATION HERE TO REMOVE THE CONDITIONAL CHECKS
-    tt1 = _mm256_unpacklo_epi32(k2, k3); // cdc'd'ghg'h'
-    if (rem > 8)
-    {
-      tt3 = _mm256_unpackhi_epi32(k2, k3);
-      t2 = _mm256_unpackhi_epi32(k0, k1);
-    }
+    t0 = _mm256_unpacklo_epi32(k0, k1); // aba'b'efe'f'                           // L1 C1 p5    
+    if (rem > 8) t2 = _mm256_unpackhi_epi32(k0, k1);
+    t1 = _mm256_unpacklo_epi32(k2, k3); // cdc'd'ghg'h'
+    
+    k0 = _mm256_unpacklo_epi64(t0, t1);   // abcdefgh
+    if (rem > 4) k1 = _mm256_unpackhi_epi64(t0, t1);   // a'b'c'd'e'f'g'h'
 
-    if (rem > 12)
-    {
-      k3 = _mm256_unpackhi_epi64(t2, tt3);
-      t3 = _mm256_mullo_epi32(k3, this->c1); // avx  // Lat10, CPI2
-    }
+    t0 = _mm256_mullo_epi32(k0, this->c1); // avx                                  // L10 C2 p0
 
-    if (rem > 8)
-    {
-      k2 = _mm256_unpacklo_epi64(t2, tt3);
-      t2 = _mm256_mullo_epi32(k2, this->c1); // avx  // Lat10, CPI2
-    }
+    if (rem > 8) t3 = _mm256_unpackhi_epi32(k2, k3);                                            // L1 C1 p5
 
-    t0 = _mm256_unpacklo_epi32(k0, k1); // aba'b'efe'f'
+    if (rem > 4) t1 = _mm256_mullo_epi32(k1, this->c1); // avx  // Lat10, CPI2
 
-    if (rem > 4)
-    {
-      k1 = _mm256_unpackhi_epi64(t0, tt1);   // a'b'c'd'e'f'g'h'
-      t1 = _mm256_mullo_epi32(k1, this->c1); // avx  // Lat10, CPI2
-    }
+    
+    if (rem > 8) k2 = _mm256_unpacklo_epi64(t2, t3);
+    if (rem > 12) k3 = _mm256_unpackhi_epi64(t2, t3);
 
-    k0 = _mm256_unpacklo_epi64(t0, tt1);   // abcdefgh
-    t0 = _mm256_mullo_epi32(k0, this->c1); // avx  // Lat10, CPI2
-
+    if (rem > 8) t2 = _mm256_mullo_epi32(k2, this->c1); // avx  // Lat10, CPI2
+    if (rem > 12) t3 = _mm256_mullo_epi32(k3, this->c1); // avx  // Lat10, CPI2
     // now unpack and update
 
     // latency:  should be Lat3, C2 for temp
@@ -617,37 +612,41 @@ public:
     // read input, 8 keys at a time.  need 4 rounds.
     h0 = h1 = h2 = h3 = seed;
 
+    // read input, 2 keys per vector.
+    // combined load and update_part1 and update_part2 (data parallel part.)
     size_t i = 0;
+    if (i < nblocks) {
+      if (VEC_CNT >= 1)  this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
+      if (VEC_CNT >= 2)  this->load_stride16(key + 8, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
+      if (VEC_CNT >= 3)  this->load_stride16(key + 16, i, t20, t21, t22, t23); // , t24, t25, t26, t27);
+      if (VEC_CNT >= 4)  this->load_stride16(key + 24, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
+    
+      // now do part 3.
+      this->template update_part3<VEC_CNT, false>(h0, h1, h2, h3, t00, t10, t20, t30);
+      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t01, t11, t21, t31);
+      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t02, t12, t22, t32);
+      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t03, t13, t23, t33);
+      ++i;
+    }
+    
     for (; i < nblocks; ++i)
     {
-
       // read input, 2 keys per vector.
       // combined load and update_part1 and update_part2 (data parallel part.)
-      switch (VEC_CNT)
-      {
-      case 4:
-        this->load_stride16(key + 24, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
-
-      case 3:
-        this->load_stride16(key + 16, i, t20, t21, t22, t23); // , t24, t25, t26, t27);
-
-      case 2:
-        this->load_stride16(key + 8, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
-
-      case 1:
-        this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
-      }
-
+      if (VEC_CNT >= 1)  this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
+      if (VEC_CNT >= 2)  this->load_stride16(key + 8, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
+      if (VEC_CNT >= 3)  this->load_stride16(key + 16, i, t20, t21, t22, t23); // , t24, t25, t26, t27);
+      if (VEC_CNT >= 4)  this->load_stride16(key + 24, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
+    
       // now do part 3.
-      if (i == 0)
-        this->template update_part3<VEC_CNT, false>(h0, h1, h2, h3, t00, t10, t20, t30);
-      else
-        this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t00, t10, t20, t30);
+      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t00, t10, t20, t30);
       this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t01, t11, t21, t31);
       this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t02, t12, t22, t32);
       this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t03, t13, t23, t33);
     }
     // latency: h3: L0, C0.  h0: L1,C2
+
+
 
     // DO LAST ADD FROM UPDATE32
     // do remainder.
@@ -656,20 +655,10 @@ public:
 
       // read input, 2 keys per vector.
       // combined load and update_part1 and update_part2 (data parallel part.)
-      switch (VEC_CNT)
-      {
-      case 4:
-        this->load_partial16(key + 24, t30, t31, t32, t33); // , t34, t35, t36, t37);
-
-      case 3:
-        this->load_partial16(key + 16, t20, t21, t22, t23); // , t24, t25, t26, t27);
-
-      case 2:
-        this->load_partial16(key + 8, t10, t11, t12, t13); // , t14, t15, t16, t17);
-
-      case 1:
-        this->load_partial16(key, t00, t01, t02, t03); // , t04, t05, t06, t07);
-      }
+      if (VEC_CNT >= 1)  this->load_partial16(key, t00, t01, t02, t03); // , t04, t05, t06, t07);
+      if (VEC_CNT >= 2)  this->load_partial16(key + 8, t10, t11, t12, t13); // , t14, t15, t16, t17);
+      if (VEC_CNT >= 3)  this->load_partial16(key + 16, t20, t21, t22, t23); // , t24, t25, t26, t27);
+      if (VEC_CNT >= 4)  this->load_partial16(key + 24, t30, t31, t32, t33); // , t34, t35, t36, t37);
     }
 
     // For the last b < 4 bytes, we do not do full update.
@@ -680,10 +669,8 @@ public:
       else
         this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t00, t10, t20, t30);
     }
-    if (rem >= 8)
-      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t01, t11, t21, t31);
-    if (rem >= 12)
-      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t02, t12, t22, t32);
+    if (rem >= 8) this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t01, t11, t21, t31);
+    if (rem >= 12) this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t02, t12, t22, t32);
 
     __m256i t0, t1, t2, t3;
     if ((rem & 3) > 0)
@@ -718,47 +705,71 @@ public:
       }
     }
 
-    // should have 0 idle latency cyles and 0 cpi cycles here.
-    switch (VEC_CNT)
-    {
-    case 4:
-      if (rem >= 4)                                         // complete the prev update_part3
-        h3 = _mm256_add_epi32(h3, this->c4);                // avx
-      if ((rem & 3) > 0)                                    // has partial int
-        h3 = _mm256_xor_si256(h3, t3);                      // avx
-      h3 = _mm256_xor_si256(h3, this->length);              // sse
-      h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-      h3 = _mm256_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 3:
-      if (rem >= 4)                                         // complete the prev update_part3
-        h2 = _mm256_add_epi32(h2, this->c4);                // avx
-      if ((rem & 3) > 0)                                    // has partial int
-        h2 = _mm256_xor_si256(h2, t2);                      // avx
-      h2 = _mm256_xor_si256(h2, this->length);              // sse
-      h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-      h2 = _mm256_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 2:
-      if (rem >= 4)                                         // complete the prev update_part3
-        h1 = _mm256_add_epi32(h1, this->c4);                // avx
-      if ((rem & 3) > 0)                                    // has partial int
-        h1 = _mm256_xor_si256(h1, t1);                      // avx
-      h1 = _mm256_xor_si256(h1, this->length);              // sse
-      h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-      h1 = _mm256_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 1:
-      if (rem >= 4)                                         // complete the prev update_part3
-        h0 = _mm256_add_epi32(h0, this->c4);                // avx
-      if ((rem & 3) > 0)                                    // has partial int
-        h0 = _mm256_xor_si256(h0, t0);                      // avx
-      h0 = _mm256_xor_si256(h0, this->length);              // sse
-      h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-      h0 = _mm256_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    }
-    //    // should have 0 idle latency cyles and 0 cpi cycles here.
-    //
 
-    // Latency: h3: L1 C2, h0:L1 C2
-    this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
+    if (rem >= 4) {                                        // complete the prev update_part3
+    // should have 0 idle latency cyles and 0 cpi cycles here.
+        if (VEC_CNT >= 1) h0 = _mm256_add_epi32(h0, this->c4);                // avx
+        if (VEC_CNT >= 2) h1 = _mm256_add_epi32(h1, this->c4);                // avx
+        if (VEC_CNT >= 3) h2 = _mm256_add_epi32(h2, this->c4);                // avx
+        if (VEC_CNT >= 4) h3 = _mm256_add_epi32(h3, this->c4);                // avx
+      }
+
+      if ((rem & 3) > 0)  {                                  // has partial int
+        if (VEC_CNT >= 1) h0 = _mm256_xor_si256(h0, t0);                      // avx
+        if (VEC_CNT >= 2) h1 = _mm256_xor_si256(h1, t1);                      // avx
+        if (VEC_CNT >= 3) h2 = _mm256_xor_si256(h2, t2);                      // avx
+        if (VEC_CNT >= 4) h3 = _mm256_xor_si256(h3, t3);                      // avx
+      }
+
+      if (VEC_CNT >= 1) h0 = _mm256_xor_si256(h0, this->length);              // sse
+      if (VEC_CNT >= 2) h1 = _mm256_xor_si256(h1, this->length);              // sse
+      if (VEC_CNT >= 3) h2 = _mm256_xor_si256(h2, this->length);              // sse
+      if (VEC_CNT >= 4) h3 = _mm256_xor_si256(h3, this->length);              // sse
+
+      //    // should have 0 idle latency cyles and 0 cpi cycles here.
+      //
+      // if (VEC_CNT >= 1) {
+      //   if (rem >= 4)                                         // complete the prev update_part3
+      //     h0 = _mm256_add_epi32(h0, this->c4);                // avx
+      //   if ((rem & 3) > 0)
+      //     h0 = _mm256_xor_si256(h0, t0);                      // avx
+      //   h0 = _mm256_xor_si256(h0, this->length);              // sse
+      //   // h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+      //   // h0 = _mm256_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+      // }
+      // if (VEC_CNT >= 2) {
+      //   if (rem >= 4)                                         // complete the prev update_part3
+      //     h1 = _mm256_add_epi32(h1, this->c4);                // avx
+      //   if ((rem & 3) > 0)                                    // has partial int
+      //     h1 = _mm256_xor_si256(h1, t1);                      // avx
+      //   h1 = _mm256_xor_si256(h1, this->length);              // sse
+      //   // h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+      //   // h1 = _mm256_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+      // }
+      // if (VEC_CNT >= 3) {
+      //   if (rem >= 4)                                         // complete the prev update_part3
+      //     h2 = _mm256_add_epi32(h2, this->c4);                // avx
+      //   if ((rem & 3) > 0)                                    // has partial int
+      //     h2 = _mm256_xor_si256(h2, t2);                      // avx
+      //   h2 = _mm256_xor_si256(h2, this->length);              // sse
+      //   // h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+      //   // h2 = _mm256_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+      // }
+      // if (VEC_CNT >= 4) {
+      //   if (rem >= 4)                                         // complete the prev update_part3
+      //     h3 = _mm256_add_epi32(h3, this->c4);                // avx
+      //   if ((rem & 3) > 0)                                    // has partial int
+      //     h3 = _mm256_xor_si256(h3, t3);                      // avx
+      //   h3 = _mm256_xor_si256(h3, this->length);              // sse
+      //   // h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+      //   // h3 = _mm256_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+      // }
+        
+        
+        // Latency: h3: L1 C2, h0:L1 C2
+        // this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
+        this->template fmix32<VEC_CNT>(h0, h1, h2, h3);
+    
   }
 
   // hashing 32 elements worth of keys at a time.
@@ -785,31 +796,35 @@ public:
     h0 = h1 = h2 = h3 = seed;
 
     int i = 0;
-    for (; i < nblocks; ++i)
+    if (i < nblocks)
     {
-
       // read input, 2 keys per vector.
       // combined load and update_part1 and update_part2 (data parallel part.)
-      switch (VEC_CNT)
-      {
-      case 4:
-        this->load_stride16(key + 24, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
-
-      case 3:
-        this->load_stride16(key + 16, i, t20, t21, t22, t23); // , t24, t25, t26, t27);
-
-      case 2:
-        this->load_stride16(key + 8, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
-
-      case 1:
-        this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
-      }
-
+      if (VEC_CNT >= 1)  this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
+      if (VEC_CNT >= 2)  this->load_stride16(key + 8, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
+      if (VEC_CNT >= 3)  this->load_stride16(key + 16, i, t20, t21, t22, t23); //load16 , t24, t25, t26, t27);
+      if (VEC_CNT >= 4)  this->load_stride16(key + 24, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
+  
       // now do part 3.   ORDER MATTERS. from low to high.
-      if (i == 0)
-        this->template update_part3<VEC_CNT, false>(h0, h1, h2, h3, t00, t10, t20, t30);
-      else
-        this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t00, t10, t20, t30);
+      this->template update_part3<VEC_CNT, false>(h0, h1, h2, h3, t00, t10, t20, t30);
+      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t01, t11, t21, t31);
+      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t02, t12, t22, t32);
+      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t03, t13, t23, t33);
+      ++i;
+    }
+
+
+    for (; i < nblocks; ++i)
+    {
+      // read input, 2 keys per vector.
+      // combined load and update_part1 and update_part2 (data parallel part.)
+      if (VEC_CNT >= 1)  this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
+      if (VEC_CNT >= 2)  this->load_stride16(key + 8, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
+      if (VEC_CNT >= 3)  this->load_stride16(key + 16, i, t20, t21, t22, t23); //load16 , t24, t25, t26, t27);
+      if (VEC_CNT >= 4)  this->load_stride16(key + 24, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
+  
+      // now do part 3.   ORDER MATTERS. from low to high.
+      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t00, t10, t20, t30);
       this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t01, t11, t21, t31);
       this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t02, t12, t22, t32);
       this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t03, t13, t23, t33);
@@ -817,40 +832,45 @@ public:
     // latency: h3: L0, C0.  h0: L1,C2
 
     // should have 0 idle latency cyles and 0 cpi cycles here.
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm256_add_epi32(h3, this->c4);
-      h3 = _mm256_xor_si256(h3, this->length);              // sse
-      h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-      h3 = _mm256_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 3:
-      h2 = _mm256_add_epi32(h2, this->c4);
-      h2 = _mm256_xor_si256(h2, this->length);              // sse
-      h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-      h2 = _mm256_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 2:
-      h1 = _mm256_add_epi32(h1, this->c4);
-      h1 = _mm256_xor_si256(h1, this->length);              // sse
-      h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-      h1 = _mm256_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 1:
-      h0 = _mm256_add_epi32(h0, this->c4);
-      h0 = _mm256_xor_si256(h0, this->length);              // sse
-      h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-      h0 = _mm256_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    }
-    //    // should have 0 idle latency cyles and 0 cpi cycles here.
-    //
-    this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   h3 = _mm256_add_epi32(h3, this->c4);
+    //   h3 = _mm256_xor_si256(h3, this->length);              // sse
+    //   h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+    //   h3 = _mm256_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // case 3:
+    //   h2 = _mm256_add_epi32(h2, this->c4);
+    //   h2 = _mm256_xor_si256(h2, this->length);              // sse
+    //   h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    //   h2 = _mm256_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // case 2:
+    //   h1 = _mm256_add_epi32(h1, this->c4);
+    //   h1 = _mm256_xor_si256(h1, this->length);              // sse
+    //   h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    //   h1 = _mm256_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // case 1:
+    //   h0 = _mm256_add_epi32(h0, this->c4);
+    //   h0 = _mm256_xor_si256(h0, this->length);              // sse
+    //   h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    //   h0 = _mm256_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // }
+    // //    // should have 0 idle latency cyles and 0 cpi cycles here.
+    // //
+    // this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
+    add_xor<VEC_CNT, true>(this->c4, h0, h1, h2, h3, 
+      this->length, this->length, this->length, this->length);
+  
+      this->template fmix32<VEC_CNT>(h0, h1, h2, h3);
+  
   }
 
 
   FSC_FORCE_INLINE void load16(T const *key, __m256i &t0, __m256i &t1, __m256i &t2, __m256i &t3) const
   {
-    __m256i k0, k1, k2, k3, tt1, tt3;
+    __m256i k0, k1, k2, k3;
 
-    k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key));     // SSE3
+    k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key));     // SSE3  // L3 C0.5 p23
     k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 2)); // SSE3
     k2 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 4)); // SSE3
     k3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 6)); // SSE3
@@ -858,24 +878,26 @@ public:
     // MERGED shuffling and update part 1.
     // unpack to get the right set.  require 8 unpack ops
     // start.    aa'AA'bb'BB' cc'CC'dd'DD' ee'EE'ff'FF' gg'GG'hh'HH'
+    t0 = _mm256_unpacklo_epi32(k0, k1); // aca'c' bdb'd'      
+    t1 = _mm256_unpacklo_epi32(k2, k3); // ege'g' fhf'h'
     t2 = _mm256_unpackhi_epi32(k0, k1);  // ACA'C' BDB'D'
-    tt3 = _mm256_unpackhi_epi32(k2, k3); // EGE'G' FHF'H'
-    tt1 = _mm256_unpacklo_epi32(k2, k3); // ege'g' fhf'h'
 
-    // one more time.
-    k3 = _mm256_unpackhi_epi64(t2, tt3);   // A'C'E'G' B'D'F'H'
-    t3 = _mm256_mullo_epi32(k3, this->c1); // avx  // Lat10, CPI2
+    k0 = _mm256_unpacklo_epi64(t0, t1);   // aceg bdfh
+    k1 = _mm256_unpackhi_epi64(t0, t1);   // a'c'e'g' b'd'f'h'
 
-    k2 = _mm256_unpacklo_epi64(t2, tt3);   // ACEG BDFH
-    t2 = _mm256_mullo_epi32(k2, this->c1); // avx  // Lat10, CPI2
+    t0 = _mm256_mullo_epi32(k0, this->c1); // avx  // Lat10, CPI2
 
-    t0 = _mm256_unpacklo_epi32(k0, k1); // aca'c' bdb'd'
-
-    k1 = _mm256_unpackhi_epi64(t0, tt1);   // a'c'e'g' b'd'f'h'
+    t3 = _mm256_unpackhi_epi32(k2, k3); // EGE'G' FHF'H'
+    
     t1 = _mm256_mullo_epi32(k1, this->c1); // avx  // Lat10, CPI2
 
-    k0 = _mm256_unpacklo_epi64(t0, tt1);   // aceg bdfh
-    t0 = _mm256_mullo_epi32(k0, this->c1); // avx  // Lat10, CPI2
+
+    k2 = _mm256_unpacklo_epi64(t2, t3);   // ACEG BDFH
+    k3 = _mm256_unpackhi_epi64(t2, t3);   // A'C'E'G' B'D'F'H'
+
+    // one more time.
+    t2 = _mm256_mullo_epi32(k2, this->c1); // avx  // Lat10, CPI2
+    t3 = _mm256_mullo_epi32(k3, this->c1); // avx  // Lat10, CPI2
 
     // latency:  should be Lat3, C2 for temp
     // update part 2.
@@ -905,20 +927,10 @@ public:
 
     // read input, 2 keys per vector.
     // combined load and update_part1 and update_part2 (data parallel part.)
-    switch (VEC_CNT)
-    {
-    case 4:
-      this->load16(key + 24, t30, t31, t32, t33);
-
-    case 3:
-      this->load16(key + 16, t20, t21, t22, t23);
-
-    case 2:
-      this->load16(key + 8, t10, t11, t12, t13);
-
-    case 1:
-      this->load16(key, t00, t01, t02, t03);
-    }
+    if (VEC_CNT >= 1)   this->load16(key, t00, t01, t02, t03);
+    if (VEC_CNT >= 2)   this->load16(key + 8, t10, t11, t12, t13);
+    if (VEC_CNT >= 3)   this->load16(key + 16, t20, t21, t22, t23);
+    if (VEC_CNT >= 4)   this->load16(key + 24, t30, t31, t32, t33);
 
     h0 = h1 = h2 = h3 = seed;
 
@@ -935,48 +947,93 @@ public:
     // permute here, since there is an excess of instructions here.
     // permute from aceg bdfh to a'b'c'd' e'f'g'h'.  crosses lane here.
     // [ 0 4 1 5 2 6 3 7 ], which is permute16
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm256_add_epi32(h3, this->c4);
-      h3 = _mm256_xor_si256(h3, this->length);         // sse
-      h3 = _mm256_permutevar8x32_epi32(h3, permute16); // latency 3, CPI 1
-    case 3:
-      h2 = _mm256_add_epi32(h2, this->c4);
-      h2 = _mm256_xor_si256(h2, this->length);         // sse
-      h2 = _mm256_permutevar8x32_epi32(h2, permute16); // latency 3, CPI 1
-    case 2:
-      h1 = _mm256_add_epi32(h1, this->c4);
-      h1 = _mm256_xor_si256(h1, this->length);         // sse
-      h1 = _mm256_permutevar8x32_epi32(h1, permute16); // latency 3, CPI 1
-    case 1:
-      h0 = _mm256_add_epi32(h0, this->c4);
-      h0 = _mm256_xor_si256(h0, this->length);         // sse
-      h0 = _mm256_permutevar8x32_epi32(h0, permute16); // latency 3, CPI 1
-    }
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   // h3 = _mm256_add_epi32(h3, this->c4);             // L1 C0.5 p15
+    //   // h3 = _mm256_xor_si256(h3, this->length);         // L1 C0.33 p015
+    //   h3 = _mm256_permutevar8x32_epi32(h3, permute16); // L3 C1 p5
+    // case 3:
+    //   // h2 = _mm256_add_epi32(h2, this->c4);
+    //   // h2 = _mm256_xor_si256(h2, this->length);         // sse
+    //   h2 = _mm256_permutevar8x32_epi32(h2, permute16); // latency 3, CPI 1
+    // case 2:
+    //   // h1 = _mm256_add_epi32(h1, this->c4);
+    //   // h1 = _mm256_xor_si256(h1, this->length);         // sse
+    //   h1 = _mm256_permutevar8x32_epi32(h1, permute16); // latency 3, CPI 1
+    // case 1:
+    //   // h0 = _mm256_add_epi32(h0, this->c4);
+    //   // h0 = _mm256_xor_si256(h0, this->length);         // sse
+    //   h0 = _mm256_permutevar8x32_epi32(h0, permute16); // latency 3, CPI 1
+    // }
+
+    if (VEC_CNT >= 1) h0 = _mm256_permutevar8x32_epi32(h0, permute16); // L3 C1 p5
+    if (VEC_CNT >= 2) h1 = _mm256_permutevar8x32_epi32(h1, permute16); // L3 C1 p5
+    if (VEC_CNT >= 3) h2 = _mm256_permutevar8x32_epi32(h2, permute16); // L3 C1 p5
+    if (VEC_CNT >= 4) h3 = _mm256_permutevar8x32_epi32(h3, permute16); // L3 C1 p5
+    
+    // ADD: L1 C0.5 p15.   XOR: L1 C0.33 p015
+    add_xor<VEC_CNT, true>(this->c4, h0, h1, h2, h3,   
+      this->length, this->length, this->length, this->length);
 
     // Latency: h3: L1 C2, h0:L1 C2
     this->template fmix32<VEC_CNT>(h0, h1, h2, h3);
   }
 
-  FSC_FORCE_INLINE void load8(T const *key, __m256i &t0, __m256i &t1) const
-  {
-    __m256i k0, k1;
 
-    k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 4)); // SSE3
-    k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key));     // SSE3
+  // // this is using a number of different ports with biggest contention over p0.
+  // // we can probably realistically load all 16 keys at a time to hide the latency of mullo
+  // FSC_FORCE_INLINE void load8(T const *key, __m256i &t0, __m256i &t1) const
+  // {
+  //   __m256i k0, k1;
+
+  //   k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 4)); 
+  //   k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key));     // L3 C0.5 p23
     
+  //   // MERGED SHUFFLE AND UPDATE_PARTIAL
+  //   // make aebfcgdh and AEBFCGDH .  Order matters.  do lower first.
+  //   t0 = _mm256_slli_si256(k1, 4); // 0eEf0gGh                          
+  //   t1 = _mm256_srli_si256(k0, 4); // AbB0CdD0                          // L1 C1 p0
+
+  //   // then blend to get aebf cgdh  // do it as [0 1 0 1 0 1 0 1] -> 10101010 binary == 0xAA
+  //   t0 = _mm256_blend_epi32(k0, t0, 0xAA);                              // L1 C0.33 p015           
+  //   t0 = _mm256_mullo_epi32(t0, this->c1); // avx                       // L10, C2, p0
+
+  //   t1 = _mm256_blend_epi32(t1, k1, 0xAA); // Lat1, cpi 0.3.  // AEBF
+  //   t1 = _mm256_mullo_epi32(t1, this->c1); // avx  // L10, C2, p0
+
+
+  // }
+
+  // this is using a number of different ports with biggest contention over p0.
+  // we can probably realistically load all 16 keys at a time to hide the latency of mullo
+  FSC_FORCE_INLINE void load8(T const *key, __m256i &t0, __m256i &t1, __m256i &t2, __m256i &t3) const
+  {
+    __m256i k0, k1, k2, k3;
+
+    k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key));     // L3 C0.5 p23
+    k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 4)); 
+    k2 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 8)); 
+    k3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 12)); 
+
     // MERGED SHUFFLE AND UPDATE_PARTIAL
-
-    t1 = _mm256_srli_si256(k0, 4); // Lat1, Cpi1.  AbB0CdD0
-    // then blend to get aebf cgdh  // do it as [0 1 0 1 0 1 0 1] -> 10101010 binary == 0xAA
-    t1 = _mm256_blend_epi32(t1, k1, 0xAA); // Lat1, cpi 0.3.  // AEBF
-    t1 = _mm256_mullo_epi32(t1, this->c1); // avx  // Lat10, CPI2
-
     // make aebfcgdh and AEBFCGDH .  Order matters.  do lower first.
-    t0 = _mm256_slli_si256(k1, 4);         // Lat1, Cpi1.  0eEf0gGh
-    t0 = _mm256_blend_epi32(k0, t0, 0xAA); // Lat1, cpi 0.3.
-    t0 = _mm256_mullo_epi32(t0, this->c1); // avx  // Lat10, CPI2
+    t1 = _mm256_srli_si256(k0, 4); // AbB0CdD0                          // L1 C1 p0
+    t0 = _mm256_slli_si256(k1, 4); // 0eEf0gGh                          
+    t3 = _mm256_srli_si256(k2, 4); // AbB0CdD0                          // L1 C1 p0
+    t2 = _mm256_slli_si256(k3, 4); // 0eEf0gGh                          
+
+    // then blend to get aebf cgdh  // do it as [0 1 0 1 0 1 0 1] -> 10101010 binary == 0xAA
+    t0 = _mm256_blend_epi32(k0, t0, 0xAA);                              // L1 C0.33 p015           
+    t1 = _mm256_blend_epi32(t1, k1, 0xAA); // Lat1, cpi 0.3.  // AEBF
+    t2 = _mm256_blend_epi32(k2, t2, 0xAA);                              // L1 C0.33 p015           
+    t3 = _mm256_blend_epi32(t3, k3, 0xAA); // Lat1, cpi 0.3.  // AEBF
+
+    t0 = _mm256_mullo_epi32(t0, this->c1); // avx                       // L10, C2, p0
+    t1 = _mm256_mullo_epi32(t1, this->c1); // avx  // L10, C2, p0
+    t2 = _mm256_mullo_epi32(t2, this->c1); // avx                       // L10, C2, p0
+    t3 = _mm256_mullo_epi32(t3, this->c1); // avx  // L10, C2, p0
+
 
   }
 
@@ -1000,17 +1057,13 @@ public:
     // do not use unpacklo and unpackhi - interleave would be aeAEcgCG
     // instead use shuffle + 2 blend + another shuffle.
     // OR: shift, shift, blend, blend
-    switch (VEC_CNT)
-    {
-    case 4:
-      load8(key + 24, t30, t31);
-    case 3:
-      load8(key + 16, t20, t21);
-    case 2:
-      load8(key + 8, t10, t11);
-    case 1:
-      load8(key, t00, t01);
-    }
+    // if (VEC_CNT >= 1) load8(key, t00, t01);
+    // if (VEC_CNT >= 2) load8(key + 4, t10, t11);
+    // if (VEC_CNT >= 3) load8(key + 8, t20, t21);
+    // if (VEC_CNT >= 4) load8(key + 12, t30, t31);
+    if (VEC_CNT >= 1) load8(key, t00, t01, t10, t11);
+    if (VEC_CNT >= 3) load8(key + 16, t20, t21, t30, t31);
+
 
     // FINISH FIRST MULLO FROM UPDATE32
 
@@ -1039,28 +1092,40 @@ public:
     // permute here, since there is an excess of instructions here.
     // permute from aebfcgdh to a'b'c'd' e'f'g'h'.  crosses lane here.
     // [ 0 2 4 6 1 3 5 7 ], which is permute1
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm256_add_epi32(h3, this->c4);
-      h3 = _mm256_xor_si256(h3, this->length);        // sse
-      h3 = _mm256_permutevar8x32_epi32(h3, permute1); // latency 3, CPI 1
-    case 3:
-      h2 = _mm256_add_epi32(h2, this->c4);
-      h2 = _mm256_xor_si256(h2, this->length);        // sse
-      h2 = _mm256_permutevar8x32_epi32(h2, permute1); // latency 3, CPI 1
-    case 2:
-      h1 = _mm256_add_epi32(h1, this->c4);
-      h1 = _mm256_xor_si256(h1, this->length);        // sse
-      h1 = _mm256_permutevar8x32_epi32(h1, permute1); // latency 3, CPI 1
-    case 1:
-      h0 = _mm256_add_epi32(h0, this->c4);
-      h0 = _mm256_xor_si256(h0, this->length);        // sse
-      h0 = _mm256_permutevar8x32_epi32(h0, permute1); // latency 3, CPI 1
-    }
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   h3 = _mm256_add_epi32(h3, this->c4);
+    //   h3 = _mm256_xor_si256(h3, this->length);        // sse
+    //   h3 = _mm256_permutevar8x32_epi32(h3, permute1); // latency 3, CPI 1
+    // case 3:
+    //   h2 = _mm256_add_epi32(h2, this->c4);
+    //   h2 = _mm256_xor_si256(h2, this->length);        // sse
+    //   h2 = _mm256_permutevar8x32_epi32(h2, permute1); // latency 3, CPI 1
+    // case 2:
+    //   h1 = _mm256_add_epi32(h1, this->c4);
+    //   h1 = _mm256_xor_si256(h1, this->length);        // sse
+    //   h1 = _mm256_permutevar8x32_epi32(h1, permute1); // latency 3, CPI 1
+    // case 1:
+    //   h0 = _mm256_add_epi32(h0, this->c4);
+    //   h0 = _mm256_xor_si256(h0, this->length);        // sse
+    //   h0 = _mm256_permutevar8x32_epi32(h0, permute1); // latency 3, CPI 1
+    // }
+
+    // // Latency: h3: L1 C2, h0:L1 C2
+    // this->template fmix32<VEC_CNT>(h0, h1, h2, h3);
+    if (VEC_CNT >= 1) h0 = _mm256_permutevar8x32_epi32(h0, permute1); // L3 C1 p5
+    if (VEC_CNT >= 2) h1 = _mm256_permutevar8x32_epi32(h1, permute1); // L3 C1 p5
+    if (VEC_CNT >= 3) h2 = _mm256_permutevar8x32_epi32(h2, permute1); // L3 C1 p5
+    if (VEC_CNT >= 4) h3 = _mm256_permutevar8x32_epi32(h3, permute1); // L3 C1 p5
+    
+    // ADD: L1 C0.5 p15.   XOR: L1 C0.33 p015
+    add_xor<VEC_CNT, true>(this->c4, h0, h1, h2, h3,   
+      this->length, this->length, this->length, this->length);
 
     // Latency: h3: L1 C2, h0:L1 C2
     this->template fmix32<VEC_CNT>(h0, h1, h2, h3);
+
   }
 
   // hashing 32 elements worth of keys at a time.  uses 10 to 11 registers.
@@ -1085,21 +1150,32 @@ public:
     // h1 = update32_partial(h1, t0, 1); // transpose 4x2  SSE2
 
     // 16 keys per vector. can potentially do 2 iters.
-    switch (VEC_CNT)
-    {
-    case 4:
-      t3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 24)); // SSE3
-      t3 = _mm256_mullo_epi32(t3, this->c1);                                // avx  // Lat10, CPI2
-    case 3:
-      t2 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 16)); // SSE3
-      t2 = _mm256_mullo_epi32(t2, this->c1);                                // avx  // Lat10, CPI2
-    case 2:
-      t1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 8)); // SSE3
-      t1 = _mm256_mullo_epi32(t1, this->c1);                               // avx  // Lat10, CPI2
-    case 1:
-      t0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
-      t0 = _mm256_mullo_epi32(t0, this->c1);                           // avx  // Lat10, CPI2
-    }
+    if (VEC_CNT >= 1) t0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3  L3 C1 p23
+    if (VEC_CNT >= 2) t1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 8)); // SSE3  L3 C1 p23
+    if (VEC_CNT >= 3) t2 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 16)); // SSE3  L3 C1 p23
+    if (VEC_CNT >= 4) t3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 24)); // SSE3  L3 C1 p23
+
+    if (VEC_CNT >= 1) t0 = _mm256_mullo_epi32(t0, this->c1); // AVX  L10 C2 p0
+    if (VEC_CNT >= 2) t1 = _mm256_mullo_epi32(t1, this->c1); // AVX  L10 C2 p0
+    if (VEC_CNT >= 3) t2 = _mm256_mullo_epi32(t2, this->c1); // AVX  L10 C2 p0
+    if (VEC_CNT >= 4) t3 = _mm256_mullo_epi32(t3, this->c1); // AVX  L10 C2 p0
+    
+
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   t3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 24)); // SSE3
+    //   t3 = _mm256_mullo_epi32(t3, this->c1);                                // avx  // Lat10, CPI2
+    // case 3:
+    //   t2 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 16)); // SSE3
+    //   t2 = _mm256_mullo_epi32(t2, this->c1);                                // avx  // Lat10, CPI2
+    // case 2:
+    //   t1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 8)); // SSE3
+    //   t1 = _mm256_mullo_epi32(t1, this->c1);                               // avx  // Lat10, CPI2
+    // case 1:
+      
+    //   t0 = _mm256_mullo_epi32(t0, this->c1);                           // avx  // Lat10, CPI2
+    // }
 
     // should have 4 idle latency cycles and 2 CPI cycles here.  initialize here.
     h0 = h1 = h2 = h3 = seed;
@@ -1116,32 +1192,38 @@ public:
     this->template update_part3<VEC_CNT, false>(h0, h1, h2, h3, t0, t1, t2, t3);
 
     // should have 0 idle latency cyles and 0 cpi cycles here.
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm256_add_epi32(h3, this->c4);
-      h3 = _mm256_xor_si256(h3, this->length);              // sse
-      h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-      h3 = _mm256_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 3:
-      h2 = _mm256_add_epi32(h2, this->c4);
-      h2 = _mm256_xor_si256(h2, this->length);              // sse
-      h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-      h2 = _mm256_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 2:
-      h1 = _mm256_add_epi32(h1, this->c4);
-      h1 = _mm256_xor_si256(h1, this->length);              // sse
-      h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-      h1 = _mm256_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 1:
-      h0 = _mm256_add_epi32(h0, this->c4);
-      h0 = _mm256_xor_si256(h0, this->length);              // sse
-      h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-      h0 = _mm256_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    }
-    //    // should have 0 idle latency cyles and 0 cpi cycles here.
-    //
-    this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   h3 = _mm256_add_epi32(h3, this->c4);
+    //   h3 = _mm256_xor_si256(h3, this->length);              // sse
+    //   h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+    //   h3 = _mm256_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // case 3:
+    //   h2 = _mm256_add_epi32(h2, this->c4);
+    //   h2 = _mm256_xor_si256(h2, this->length);              // sse
+    //   h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    //   h2 = _mm256_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // case 2:
+    //   h1 = _mm256_add_epi32(h1, this->c4);
+    //   h1 = _mm256_xor_si256(h1, this->length);              // sse
+    //   h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    //   h1 = _mm256_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // case 1:
+    //   h0 = _mm256_add_epi32(h0, this->c4);
+    //   h0 = _mm256_xor_si256(h0, this->length);              // sse
+    //   h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    //   h0 = _mm256_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // }
+    // //    // should have 0 idle latency cyles and 0 cpi cycles here.
+    // //
+    // this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
+
+    add_xor<VEC_CNT, true>(this->c4, h0, h1, h2, h3, 
+      this->length, this->length, this->length, this->length);
+
+    this->template fmix32<VEC_CNT>(h0, h1, h2, h3);
+
   }
 
   // hashing 32 elements worth of keys at a time.  uses 10 to 11 registers.
@@ -1247,7 +1329,23 @@ public:
     //h1 = fmix32(h1); // ***** SSE4.1 **********
     if (VEC_CNT > 2)
     {
-      h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
+      h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 13));
+      switch (VEC_CNT)
+      {
+      case 4:
+        t3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 24)); // SSE3
+        t3 = _mm256_mullo_epi32(t3, this->c1);                                // avx  // Lat10, CPI2
+      case 3:
+        t2 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 16)); // SSE3
+        t2 = _mm256_mullo_epi32(t2, this->c1);                                // avx  // Lat10, CPI2
+      case 2:
+        t1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 8)); // SSE3
+        t1 = _mm256_mullo_epi32(t1, this->c1);                               // avx  // Lat10, CPI2
+      case 1:
+        
+        t0 = _mm256_mullo_epi32(t0, this->c1);                           // avx  // Lat10, CPI2
+      }
+   // h ^= h >> 13;      sse2
       h3 = _mm256_mullo_epi32(h3, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
 
       h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
@@ -1292,93 +1390,94 @@ public:
     __m256i k0, t0, t1, t2, t3;
 
     // 32 keys per vector, can potentially do 4 rounds.
-    k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3
+    k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key)); // SSE3   // L3 C1 p23
 
     // 2 extra calls.
     // need to permute with permutevar8x32, idx = [0 2 4 6 1 3 5 7]
-    k0 = _mm256_permutevar8x32_epi32(k0, permute1); // AVX2, latency of 3, CPI 1
+    k0 = _mm256_permutevar8x32_epi32(k0, permute1); // AVX2,    // L3 C1
     // abcd ijkl qrst yz12 efgh mnop uvwx 3456
 
     // MERGED SHUFFLE AND UPDATE_PARTIAL
     // USE shuffle_epi8, with mask.
-    // yz12
-    t3 = _mm256_shuffle_epi8(k0, shuffle3); // AVX2, latency 1, CPI 1
-    t3 = _mm256_mullo_epi32(t3, this->c1);  // avx  // Lat10, CPI2
-    // qrst
-    t2 = _mm256_shuffle_epi8(k0, shuffle2); // AVX2, latency 1, CPI 1
-    t2 = _mm256_mullo_epi32(t2, this->c1);  // avx  // Lat10, CPI2
-    // ijkl
-    t1 = _mm256_shuffle_epi8(k0, shuffle1); // AVX2, latency 1, CPI 1
-    t1 = _mm256_mullo_epi32(t1, this->c1);  // avx  // Lat10, CPI2
     // transform to a000b000c000d000 e000f000g000h000.  interleave with 0.
     t0 = _mm256_shuffle_epi8(k0, shuffle0); // AVX2, latency 1, CPI 1
+    // ijkl
+    t1 = _mm256_shuffle_epi8(k0, shuffle1); // AVX2, latency 1, CPI 1
+    // qrst
+    t2 = _mm256_shuffle_epi8(k0, shuffle2); // AVX2, latency 1, CPI 1
+    // yz12
+    t3 = _mm256_shuffle_epi8(k0, shuffle3); // AVX2, latency 1, CPI 1
+
     // h1 = update32_partial(h1, t0, 1); // transpose 4x2  SSE2
     t0 = _mm256_mullo_epi32(t0, this->c1); // avx  // Lat10, CPI2
-
+    t1 = _mm256_mullo_epi32(t1, this->c1);  // avx  // Lat10, CPI2
+    t2 = _mm256_mullo_epi32(t2, this->c1);  // avx  // Lat10, CPI2
+    t3 = _mm256_mullo_epi32(t3, this->c1);  // avx  // Lat10, CPI2
+    
     // should have 4 idle latency cycles and 2 CPI cycles here.  initialize here.
     h0 = h1 = h2 = h3 = seed;
 
     // rotl32
     //t0 = rotl32(t0, 15);
-    t3 = _mm256_or_si256(_mm256_slli_epi32(t3, 15), _mm256_srli_epi32(t3, 17));
-    t3 = _mm256_mullo_epi32(t3, this->c2); // avx   // Lat10, CPI2
-    t2 = _mm256_or_si256(_mm256_slli_epi32(t2, 15), _mm256_srli_epi32(t2, 17));
-    t2 = _mm256_mullo_epi32(t2, this->c2); // avx   // Lat10, CPI2
-    t1 = _mm256_or_si256(_mm256_slli_epi32(t1, 15), _mm256_srli_epi32(t1, 17));
-    t1 = _mm256_mullo_epi32(t1, this->c2); // avx   // Lat10, CPI2
-    t0 = _mm256_or_si256(_mm256_slli_epi32(t0, 15), _mm256_srli_epi32(t0, 17));
-    t0 = _mm256_mullo_epi32(t0, this->c2); // avx   // Lat10, CPI2
+    // t3 = _mm256_or_si256(_mm256_slli_epi32(t3, 15), _mm256_srli_epi32(t3, 17));
+    // t3 = _mm256_mullo_epi32(t3, this->c2); // avx   // Lat10, CPI2
+    // t2 = _mm256_or_si256(_mm256_slli_epi32(t2, 15), _mm256_srli_epi32(t2, 17));
+    // t2 = _mm256_mullo_epi32(t2, this->c2); // avx   // Lat10, CPI2
+    // t1 = _mm256_or_si256(_mm256_slli_epi32(t1, 15), _mm256_srli_epi32(t1, 17));
+    // t1 = _mm256_mullo_epi32(t1, this->c2); // avx   // Lat10, CPI2
+    // t0 = _mm256_or_si256(_mm256_slli_epi32(t0, 15), _mm256_srli_epi32(t0, 17));
+    // t0 = _mm256_mullo_epi32(t0, this->c2); // avx   // Lat10, CPI2
     // merge with existing.
-    //    this->template update_part2<4>(t0, t1, t2, t3);
+    this->template update_part2<4>(t0, t1, t2, t3);
 
     // should have 0 idle latency cyles and 0 cpi cycles here.
 
     // final step of update, xor the length, and fmix32.
     // finalization
-
-    h3 = _mm256_xor_si256(h3, t3);                        // avx
-    h3 = _mm256_xor_si256(h3, this->length);              // sse
-    h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-    h3 = _mm256_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-
-    h2 = _mm256_xor_si256(h2, t2);                        // avx
-    h2 = _mm256_xor_si256(h2, this->length);              // sse
-    h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-    h2 = _mm256_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-
-    h1 = _mm256_xor_si256(h1, t1);                        // avx
-    h1 = _mm256_xor_si256(h1, this->length);              // sse
-    h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-    h1 = _mm256_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-
     h0 = _mm256_xor_si256(h0, t0);                        // avx
     h0 = _mm256_xor_si256(h0, this->length);              // sse
-    h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-    h0 = _mm256_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    h1 = _mm256_xor_si256(h1, t1);                        // avx
+    h1 = _mm256_xor_si256(h1, this->length);              // sse
+    h2 = _mm256_xor_si256(h2, t2);                        // avx
+    h2 = _mm256_xor_si256(h2, this->length);              // sse
+    h3 = _mm256_xor_si256(h3, t3);                        // avx
+    h3 = _mm256_xor_si256(h3, this->length);              // sse
 
-    // should have 0 idle latency cyles and 0 cpi cycles here.
+    // h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+    // h3 = _mm256_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
 
-    //    //h1 = fmix32(h1); // ***** SSE4.1 **********
-    h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
-    h3 = _mm256_mullo_epi32(h3, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    // h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    // h2 = _mm256_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
 
-    h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
-    h2 = _mm256_mullo_epi32(h2, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    // h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    // h1 = _mm256_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
 
-    h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 13)); // h ^= h >> 13;      sse2
-    h1 = _mm256_mullo_epi32(h1, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    // h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    // h0 = _mm256_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
 
-    h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 13)); // h ^= h >> 13;      sse2
-    h0 = _mm256_mullo_epi32(h0, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-                                                          //
-                                                          //    // latencies.
-                                                          //    // h3  Lat 4, cpi 2
-                                                          //
-    h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-    h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-    h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-    h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-                                                          //    this->template fmix32_part2<4>(h0, h1, h2, h3);
+    // // should have 0 idle latency cyles and 0 cpi cycles here.
+
+    // //    //h1 = fmix32(h1); // ***** SSE4.1 **********
+    // h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
+    // h3 = _mm256_mullo_epi32(h3, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+
+    // h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
+    // h2 = _mm256_mullo_epi32(h2, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+
+    // h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 13)); // h ^= h >> 13;      sse2
+    // h1 = _mm256_mullo_epi32(h1, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+
+    // h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 13)); // h ^= h >> 13;      sse2
+    // h0 = _mm256_mullo_epi32(h0, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    //                                                       //
+    //                                                       //    // latencies.
+    //                                                       //    // h3  Lat 4, cpi 2
+    //                                                       //
+    // h3 = _mm256_xor_si256(h3, _mm256_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+    // h2 = _mm256_xor_si256(h2, _mm256_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    // h1 = _mm256_xor_si256(h1, _mm256_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    // h0 = _mm256_xor_si256(h0, _mm256_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    this->template fmix32<4>(h0, h1, h2, h3);
   }
 };
 template <typename T>

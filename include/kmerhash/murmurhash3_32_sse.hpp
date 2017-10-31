@@ -64,6 +64,7 @@
  *        [ ] try to stick to some small multiples of 64 bytes.
  *        [ ] schedule instructions to maximize usage of ALU and other vector units.
  *        [ ] at 64 bytes per element, we are at limit of 8-way set associative cache (L1)...
+ *        [ ] migrate AVX optimizations over here.
  */
 #ifndef MURMUR3_32_SSE_HPP_
 #define MURMUR3_32_SSE_HPP_
@@ -124,118 +125,279 @@ protected:
 
   // part of the update32() function, from second multiply to last multiply.
   template <uint8_t VEC_CNT>
-  FSC_FORCE_INLINE void update_part2(__m128i &t0, __m128i &t1, __m128i &t2, __m128i &t3) const
+  FSC_FORCE_INLINE void rotl(uint8_t const & rot, __m128i &t0, __m128i &t1, __m128i &t2, __m128i &t3) const
   {
-    switch (VEC_CNT)
-    {
-    case 4:
-      t3 = _mm_or_si128(_mm_slli_epi32(t3, 15), _mm_srli_epi32(t3, 17));
-      t3 = _mm_mullo_epi32(t3, this->c2); // sse   // Lat10, CPI2
-    case 3:
-      t2 = _mm_or_si128(_mm_slli_epi32(t2, 15), _mm_srli_epi32(t2, 17));
-      t2 = _mm_mullo_epi32(t2, this->c2); // sse   // Lat10, CPI2
-    case 2:
-      t1 = _mm_or_si128(_mm_slli_epi32(t1, 15), _mm_srli_epi32(t1, 17));
-      t1 = _mm_mullo_epi32(t1, this->c2); // sse   // Lat10, CPI2
-    case 1:
-      t0 = _mm_or_si128(_mm_slli_epi32(t0, 15), _mm_srli_epi32(t0, 17));
-      t0 = _mm_mullo_epi32(t0, this->c2); // sse   // Lat10, CPI2
+
+    __m128i tt0, tt1, tt2, tt3;
+
+    if (VEC_CNT >= 1) {
+      tt1 = _mm_slli_epi32(t0, rot);   // SLLI: L1 C1 p0
+      tt0 = _mm_srli_epi32(t0, (32 - rot));   // SRLI: L1 C1 p0
+      t0 = _mm_or_si128(tt1, tt0);  // OR: L1 C0.33 p015
     }
+    if (VEC_CNT >= 2) {
+      tt3 = _mm_slli_epi32(t1, rot);   // SLLI: L1 C1 p0
+      tt2 = _mm_srli_epi32(t1, (32 - rot));   // SRLI: L1 C1 p0
+      t1 = _mm_or_si128(tt3, tt2);  // OR: L1 C0.33 p015
+    }
+    if (VEC_CNT >= 3) {
+      tt1 = _mm_slli_epi32(t2, rot);   // SLLI: L1 C1 p0
+      tt0 = _mm_srli_epi32(t2, (32 - rot));   // SRLI: L1 C1 p0
+      t2 = _mm_or_si128(tt1, tt0);  // OR: L1 C0.33 p015
+    }
+    if (VEC_CNT >= 4) {
+      tt3 = _mm_slli_epi32(t3, rot);   // SLLI: L1 C1 p0
+      tt2 = _mm_srli_epi32(t3, (32 - rot));   // SRLI: L1 C1 p0
+      t3 = _mm_or_si128(tt3, tt2);  // OR: L1 C0.33 p015
+    }
+
+    // note that the next call needs to have at least 4 operations before using t3, 6 before using t2, 8 before t1, 10 before t0
+  }
+
+  // part of the update32() function, from second multiply to last multiply.
+  template <uint8_t VEC_CNT>
+  FSC_FORCE_INLINE void mul(__m128i const & mult, __m128i &t0, __m128i &t1, __m128i &t2, __m128i &t3) const
+  {
+    if (VEC_CNT >= 1) {
+      t0 = _mm_mullo_epi32(t0, mult); // sse   // Lat10, CPI2
+    }
+    if (VEC_CNT >= 2) {
+      t1 = _mm_mullo_epi32(t1, mult); // sse   // Lat10, CPI2
+    }
+    if (VEC_CNT >= 3) {
+      t2 = _mm_mullo_epi32(t2, mult); // sse   // Lat10, CPI2
+    }
+    if (VEC_CNT >= 4) {
+      t3 = _mm_mullo_epi32(t3, mult); // sse                          // MULLO: L10 C2 2p0
+    }
+
+
+    // note that the next call needs to have at least 4 operations before using t3, 6 before using t2, 8 before t1, 10 before t0
   }
 
 
   // part of the update32() function, from second multiply to last multiply.
+  template <uint8_t VEC_CNT>
+  FSC_FORCE_INLINE void update_part2(__m128i &t0, __m128i &t1, __m128i &t2, __m128i &t3) const
+  {
+    
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   t3 = _mm_or_si128(_mm_slli_epi32(t3, 15), _mm_srli_epi32(t3, 17));  // OR: L1 C0.33 p015,  SR/LL: L1 C1 p0
+    //   t3 = _mm_mullo_epi32(t3, this->c2); // sse                          // MULLO: L10 C2 2p0
+    // case 3:
+    //   t2 = _mm_or_si128(_mm_slli_epi32(t2, 15), _mm_srli_epi32(t2, 17));
+    //   t2 = _mm_mullo_epi32(t2, this->c2); // sse   // Lat10, CPI2
+    // case 2:
+    //   t1 = _mm_or_si128(_mm_slli_epi32(t1, 15), _mm_srli_epi32(t1, 17));
+    //   t1 = _mm_mullo_epi32(t1, this->c2); // sse   // Lat10, CPI2
+    // case 1:
+    //   t0 = _mm_or_si128(_mm_slli_epi32(t0, 15), _mm_srli_epi32(t0, 17));
+    //   t0 = _mm_mullo_epi32(t0, this->c2); // sse   // Lat10, CPI2
+    // }
+
+    rotl<VEC_CNT>(15, t0, t1, t2, t3);
+    mul<VEC_CNT>(this->c2, t0, t1, t2, t3);
+    
+    // note that the next call needs to have at least 4 operations before using t3, 6 before using t2, 8 before t1, 10 before t0
+  }
+
+
+
+  // part of the update32() function, from second multiply to last multiply.
+  template <uint8_t VEC_CNT, bool add_prev_iter>
+  FSC_FORCE_INLINE void add_xor(__m128i const & adder, __m128i &h0, __m128i &h1, __m128i &h2, __m128i &h3,
+                                     __m128i const &t0, __m128i const &t1, __m128i const &t2, __m128i const &t3) const
+  {
+    // first do the add.
+    if (add_prev_iter) {
+      if (VEC_CNT >= 1) {
+        h0 = _mm_add_epi32(h0, adder);
+      }
+      if (VEC_CNT >= 2) {
+        h1 = _mm_add_epi32(h1, adder);
+      }
+      if (VEC_CNT >= 3) {
+        h2 = _mm_add_epi32(h2, adder);
+      }
+      if (VEC_CNT >= 4) {
+        h3 = _mm_add_epi32(h3, adder);                                   // ADD: L1 C0.5 p15
+      }
+   }
+    
+    if (VEC_CNT >= 1) {
+      h0 = _mm_xor_si128(h0, t0); // sse
+    }
+    if (VEC_CNT >= 2) {
+      h1 = _mm_xor_si128(h1, t1); // sse
+    }
+    if (VEC_CNT >= 3) { 
+      h2 = _mm_xor_si128(h2, t2); // sse
+    }
+    if (VEC_CNT >= 4) {
+      h3 = _mm_xor_si128(h3, t3); // sse                                    // XOR: L1 C0.33 p015
+    }
+  }
+
+
+
+      // part of the update32() function, from second multiply to last multiply.
   template <uint8_t VEC_CNT, bool add_prev_iter>
   FSC_FORCE_INLINE void update_part3(__m128i &h0, __m128i &h1, __m128i &h2, __m128i &h3,
                                      __m128i const &t0, __m128i const &t1, __m128i const &t2, __m128i const &t3) const
   {
-    switch (VEC_CNT)
-    {
-    case 4:
-      if (add_prev_iter)
-        h3 = _mm_add_epi32(h3, this->c4);
-      h3 = _mm_xor_si128(h3, t3); // sse
-      h3 = _mm_or_si128(_mm_slli_epi32(h3, 13), _mm_srli_epi32(h3, 19));
-      h3 = _mm_mullo_epi32(h3, this->c3);
-    case 3:
-      if (add_prev_iter)
-        h2 = _mm_add_epi32(h2, this->c4);
-      h2 = _mm_xor_si128(h2, t2); // sse
-      h2 = _mm_or_si128(_mm_slli_epi32(h2, 13), _mm_srli_epi32(h2, 19));
-      h2 = _mm_mullo_epi32(h2, this->c3);
-    case 2:
-      if (add_prev_iter)
-        h1 = _mm_add_epi32(h1, this->c4);
-      h1 = _mm_xor_si128(h1, t1); // sse
-      h1 = _mm_or_si128(_mm_slli_epi32(h1, 13), _mm_srli_epi32(h1, 19));
-      h1 = _mm_mullo_epi32(h1, this->c3);
-    case 1:
-      if (add_prev_iter)
-        h0 = _mm_add_epi32(h0, this->c4);
-      h0 = _mm_xor_si128(h0, t0); // sse
-      h0 = _mm_or_si128(_mm_slli_epi32(h0, 13), _mm_srli_epi32(h0, 19));
-      h0 = _mm_mullo_epi32(h0, this->c3);
-    }
+    // // first do the add.
+    // if (add_prev_iter) {
+    //   switch (VEC_CNT)
+    //   {
+    //   case 4:
+    //     h3 = _mm_add_epi32(h3, this->c4);                                   // ADD: L1 C0.5 p15
+    //   case 3:
+    //     h2 = _mm_add_epi32(h2, this->c4);
+    //   case 2:
+    //     h1 = _mm_add_epi32(h1, this->c4);
+    //   case 1:
+    //     h0 = _mm_add_epi32(h0, this->c4);
+    //   }
+    // }
+    
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   h3 = _mm_xor_si128(h3, t3); // sse                                    // XOR: L1 C0.33 p015
+    // case 3:
+    //   h2 = _mm_xor_si128(h2, t2); // sse
+    // case 2:
+    //   h1 = _mm_xor_si128(h1, t1); // sse
+    // case 1:
+    //   h0 = _mm_xor_si128(h0, t0); // sse
+    // }
+    add_xor<VEC_CNT, add_prev_iter>(this->c4, h0, h1, h2, h3, t0, t1, t2, t3);
+
+
+    rotl<VEC_CNT>(13, h0, h1, h2, h3);
+    mul<VEC_CNT>(this->c3, h0, h1, h2, h3);
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   if (add_prev_iter)
+    //     h3 = _mm_add_epi32(h3, this->c4);                                   // ADD: L1 C0.5 p15
+    //   h3 = _mm_xor_si128(h3, t3); // sse                                    // XOR: L1 C0.33 p015
+    //   h3 = _mm_or_si128(_mm_slli_epi32(h3, 13), _mm_srli_epi32(h3, 19));    // OR: L1 C0.33 p015,  SR/LL: L1 C1 p0
+    //   h3 = _mm_mullo_epi32(h3, this->c3);                                   // MULLO: L10 C2 2p0
+    // case 3:
+    //   if (add_prev_iter)
+    //     h2 = _mm_add_epi32(h2, this->c4);
+    //   h2 = _mm_xor_si128(h2, t2); // sse
+    //   h2 = _mm_or_si128(_mm_slli_epi32(h2, 13), _mm_srli_epi32(h2, 19));
+    //   h2 = _mm_mullo_epi32(h2, this->c3);
+    // case 2:
+    //   if (add_prev_iter)
+    //     h1 = _mm_add_epi32(h1, this->c4);
+    //   h1 = _mm_xor_si128(h1, t1); // sse
+    //   h1 = _mm_or_si128(_mm_slli_epi32(h1, 13), _mm_srli_epi32(h1, 19));
+    //   h1 = _mm_mullo_epi32(h1, this->c3);
+    // case 1:
+    //   if (add_prev_iter)
+    //     h0 = _mm_add_epi32(h0, this->c4);
+    //   h0 = _mm_xor_si128(h0, t0); // sse
+    //   h0 = _mm_or_si128(_mm_slli_epi32(h0, 13), _mm_srli_epi32(h0, 19));
+    //   h0 = _mm_mullo_epi32(h0, this->c3);
+    // }
   }
+
+    
+
+  template <uint8_t VEC_CNT>
+  FSC_FORCE_INLINE void shift_xor(uint8_t const & shift, __m128i &h0, __m128i &h1, __m128i &h2, __m128i &h3) const
+  {
+    __m128i tt0, tt1;
+    if (VEC_CNT >= 1) {
+      tt0 = _mm_srli_epi32(h0, shift);
+      h0 = _mm_xor_si128(h0, tt0); // h ^= h >> 16;      sse2
+    }
+    if (VEC_CNT >= 2) {
+      tt1 = _mm_srli_epi32(h1, shift);
+    h1 = _mm_xor_si128(h1, tt1); // h ^= h >> 16;      sse2
+    }
+    if (VEC_CNT >= 3) {
+      tt0 = _mm_srli_epi32(h2, shift); 
+    h2 = _mm_xor_si128(h2, tt0); // h ^= h >> 16;      sse2
+    }
+    if (VEC_CNT >= 4) {
+      tt1 = _mm_srli_epi32(h3, shift);   //SRLI: L1, C1, p0.  
+      h3 = _mm_xor_si128(h3, tt1); // h ^= h >> 16;      sse2  XOR: L1, C0.33, p015
+    }
+
+  }
+
 
   /// fmix32 for 16 elements at a time.
   template <uint8_t VEC_CNT>
   FSC_FORCE_INLINE void fmix32(__m128i &h0, __m128i &h1, __m128i &h2, __m128i &h3) const
   {
+    // // should have 0 idle latency cyles and 0 cpi cycles here.
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+    //   h3 = _mm_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // case 3:
+    //   h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    //   h2 = _mm_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // case 2:
+    //   h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    //   h1 = _mm_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // case 1:
+    //   h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    //   h0 = _mm_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    // }
+    shift_xor<VEC_CNT>(16, h0, h1, h2, h3);
+    mul<VEC_CNT>(this->mix_const1, h0, h1, h2, h3);
 
-    // should have 0 idle latency cyles and 0 cpi cycles here.
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-      h3 = _mm_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 3:
-      h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-      h2 = _mm_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 2:
-      h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-      h1 = _mm_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 1:
-      h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-      h0 = _mm_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    }
+    // // should have 1 idle latency cyles and 2 cpi cycles here.
 
-    // should have 1 idle latency cyles and 2 cpi cycles here.
+    // //h1 = fmix32(h1); // ***** SSE4.1 **********
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
+    //   h3 = _mm_mullo_epi32(h3, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    // case 3:
+    //   h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
+    //   h2 = _mm_mullo_epi32(h2, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    // case 2:
+    //   h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 13)); // h ^= h >> 13;      sse2
+    //   h1 = _mm_mullo_epi32(h1, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    // case 1:
+    //   h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 13)); // h ^= h >> 13;      sse2
+    //   h0 = _mm_mullo_epi32(h0, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    // }
+    shift_xor<VEC_CNT>(13, h0, h1, h2, h3);
+    mul<VEC_CNT>(this->mix_const2, h0, h1, h2, h3);
 
-    //h1 = fmix32(h1); // ***** SSE4.1 **********
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
-      h3 = _mm_mullo_epi32(h3, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 3:
-      h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
-      h2 = _mm_mullo_epi32(h2, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 2:
-      h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 13)); // h ^= h >> 13;      sse2
-      h1 = _mm_mullo_epi32(h1, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 1:
-      h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 13)); // h ^= h >> 13;      sse2
-      h0 = _mm_mullo_epi32(h0, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    }
+    // // latencies.
+    // // h3  Lat 1, cpi 2
+    // // h0  Lat 4, cpi 2
 
-    // latencies.
-    // h3  Lat 1, cpi 2
-    // h0  Lat 4, cpi 2
+    // // expect Lat 0, cycle 1
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+    // case 3:
+    //   h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    // case 2:
+    //   h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    // case 1:
+    //   h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    // }
+    shift_xor<VEC_CNT>(16, h0, h1, h2, h3);
 
-    // expect Lat 0, cycle 1
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-    case 3:
-      h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-    case 2:
-      h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-    case 1:
-      h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-    }
   }
+
+
 
   /// fmix32 for 16 elements at a time.
   template <uint8_t VEC_CNT>
@@ -244,38 +406,43 @@ protected:
     // should have 1 idle latency cyles and 2 cpi cycles here.
 
     //h1 = fmix32(h1); // ***** SSE4.1 **********
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
-      h3 = _mm_mullo_epi32(h3, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 3:
-      h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
-      h2 = _mm_mullo_epi32(h2, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 2:
-      h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 13)); // h ^= h >> 13;      sse2
-      h1 = _mm_mullo_epi32(h1, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    case 1:
-      h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 13)); // h ^= h >> 13;      sse2
-      h0 = _mm_mullo_epi32(h0, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
-    }
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 13)); // h ^= h >> 13;      sse2
+    //   h3 = _mm_mullo_epi32(h3, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    // case 3:
+    //   h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 13)); // h ^= h >> 13;      sse2
+    //   h2 = _mm_mullo_epi32(h2, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    // case 2:
+    //   h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 13)); // h ^= h >> 13;      sse2
+    //   h1 = _mm_mullo_epi32(h1, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    // case 1:
+    //   h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 13)); // h ^= h >> 13;      sse2
+    //   h0 = _mm_mullo_epi32(h0, this->mix_const2);        // h *= 0xc2b2ae35;   Lat10, CPI2
+    // }
+    shift_xor<VEC_CNT>(13, h0, h1, h2, h3);
+    mul<VEC_CNT>(this->mix_const2, h0, h1, h2, h3);
+
 
     // latencies.
     // h3  Lat 1, cpi 2
     // h0  Lat 4, cpi 2
 
     // expect Lat 0, cycle 1
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-    case 3:
-      h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-    case 2:
-      h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-    case 1:
-      h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-    }
+    // switch (VEC_CNT)
+    // {
+    // case 4:
+    //   h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+    // case 3:
+    //   h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+    // case 2:
+    //   h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+    // case 1:
+    //   h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+    // }
+    shift_xor<VEC_CNT>(16, h0, h1, h2, h3);
+
   }
 
 
@@ -434,54 +601,45 @@ public:
   //  std::cout << "\tStreams to process " << static_cast<size_t>(nstreams) << " in blocks " << static_cast<size_t>(blocks) << std::endl;
     switch (blocks)
     {
-    case 4:
-      hash<4>(key, h0, h1, h2, h3);
-      break;
-    case 3:
-      hash<3>(key, h0, h1, h2, h3);
+      case 1:
+      hash<1>(key, h0, h1, h2, h3);
       break;
     case 2:
       hash<2>(key, h0, h1, h2, h3);
       break;
-    case 1:
-      hash<1>(key, h0, h1, h2, h3);
+      case 3:
+      hash<3>(key, h0, h1, h2, h3);
+      break;
+      case 4:
+      hash<4>(key, h0, h1, h2, h3);
       break;
     default:
       break;
     }
 
     blocks = nstreams >> 2;
-    switch (blocks)
-    {
-    case 4:
-      _mm_storeu_si128((__m128i *)(out + 12), h3);
-    case 3:
-      _mm_storeu_si128((__m128i *)(out + 8), h2);
-    case 2:
-      _mm_storeu_si128((__m128i *)(out + 4), h1);
-    case 1:
-      _mm_storeu_si128((__m128i *)out, h0);
-    default:
-      break;
-    }
-
+    if (blocks >= 1) _mm_storeu_si128((__m128i *)out, h0);
+    if (blocks >= 2) _mm_storeu_si128((__m128i *)(out + 4), h1);
+    if (blocks >= 3) _mm_storeu_si128((__m128i *)(out + 8), h2);
+    if (blocks >= 4) _mm_storeu_si128((__m128i *)(out + 12), h3);
+    
     uint8_t rem = nstreams & 3; // remainder.
     if (rem > 0)
     {
       // write remainders.  write rem * 4 bytes.
       switch (blocks)
       {
-      case 3:
-        memcpy(out + 12, reinterpret_cast<uint32_t *>(&h3), rem << 2); // copy bytes
-        break;
-      case 2:
-        memcpy(out + 8, reinterpret_cast<uint32_t *>(&h2), rem << 2); // copy bytes
+        case 0:
+        memcpy(out, reinterpret_cast<uint32_t *>(&h0), rem << 2); // copy bytes
         break;
       case 1:
         memcpy(out + 4, reinterpret_cast<uint32_t *>(&h1), rem << 2); // copy bytes
         break;
-      case 0:
-        memcpy(out, reinterpret_cast<uint32_t *>(&h0), rem << 2); // copy bytes
+        case 2:
+        memcpy(out + 8, reinterpret_cast<uint32_t *>(&h2), rem << 2); // copy bytes
+        break;
+        case 3:
+        memcpy(out + 12, reinterpret_cast<uint32_t *>(&h3), rem << 2); // copy bytes
         break;
       default:
         break;
@@ -496,18 +654,19 @@ public:
     __m128i h0, h1, h2, h3;
 //    std::cout << "\tprocess 16 streams  in 4 blocks " << std::endl;
     hash<4>(key, h0, h1, h2, h3);
-    _mm_storeu_si128((__m128i *)(out + 12), h3);
-    _mm_storeu_si128((__m128i *)(out + 8), h2);
-    _mm_storeu_si128((__m128i *)(out + 4), h1);
     _mm_storeu_si128((__m128i *)out, h0);
+    _mm_storeu_si128((__m128i *)(out + 4), h1);
+    _mm_storeu_si128((__m128i *)(out + 8), h2);
+    _mm_storeu_si128((__m128i *)(out + 12), h3);
   }
+
 
 
 
   /// NOTE: multiples of 32.
   // USING load, INSERT plus unpack is FASTER than i32gather.
   // load with an offset from start of key.
-  FSC_FORCE_INLINE void load_stride16(T const *key, size_t const &off,
+  FSC_FORCE_INLINE void load_stride16(T const *key, size_t const & offset, 
                                       __m128i &t0, __m128i &t1, __m128i &t2, __m128i &t3 //,
                                       // __m128i & t4, __m128i & t5, __m128i & t6, __m128i & t7
                                       ) const
@@ -522,34 +681,37 @@ public:
     // an alternative might be using _mm_set_m128i(_mm_lddqu_si128, _mm_lddqu_si128), which has about 5 cycles latency in total.
     // still need to shuffle more than 4 times.
 
-    __m128i k0, k1, k2, k3, tt1, tt3;
+    __m128i k0, k1, k2, k3, tt0, tt2;
 
     // load 4 keys at a time, 16 bytes each time,
-    k0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key) + off);     // SSE3
-    k1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 1) + off); // SSE3
-    k2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 2) + off); // SSE3
-    k3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 3) + off); // SSE3
+    k0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key) + offset);     // SSE3   // L3, C0.5, p23
+    k1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 1) + offset); // SSE3
+
+    k2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 2) + offset); // SSE3
+    k3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 3) + offset); // SSE3
 
     // MERGED shuffling and update part 1.
     // now unpack and update
-    tt3 = _mm_unpackhi_epi32(k2, k3);
-    tt1 = _mm_unpacklo_epi32(k2, k3); // cdc'd'ghg'h'
-    t2 = _mm_unpackhi_epi32(k0, k1);
+    tt0 = _mm_unpacklo_epi32(k0, k1); // aba'b'efe'f'                           // L1 C1 p5    
+    t1 = _mm_unpacklo_epi32(k2, k3); // cdc'd'ghg'h'
+    tt2 = _mm_unpackhi_epi32(k0, k1);
+    
+    k0 = _mm_unpacklo_epi64(tt0, t1);   // abcdefgh
+    k1 = _mm_unpackhi_epi64(tt0, t1);   // a'b'c'd'e'f'g'h'
 
-    k3 = _mm_unpackhi_epi64(t2, tt3);
-    t3 = _mm_mullo_epi32(k3, this->c1); // avx  // Lat10, CPI2
+    t0 = _mm_mullo_epi32(k0, this->c1); // avx                                  // L10 C2 p0
 
-    k2 = _mm_unpacklo_epi64(t2, tt3);
-    t2 = _mm_mullo_epi32(k2, this->c1); // avx  // Lat10, CPI2
-
-    // now unpack and update
-    t0 = _mm_unpacklo_epi32(k0, k1); // aba'b'efe'f'
-
-    k1 = _mm_unpackhi_epi64(t0, tt1);   // a'b'c'd'e'f'g'h'
+    t3 = _mm_unpackhi_epi32(k2, k3);                                            // L1 C1 p5
+    
     t1 = _mm_mullo_epi32(k1, this->c1); // avx  // Lat10, CPI2
 
-    k0 = _mm_unpacklo_epi64(t0, tt1);   // abcdefgh
-    t0 = _mm_mullo_epi32(k0, this->c1); // avx  // Lat10, CPI2
+    
+    k2 = _mm_unpacklo_epi64(tt2, t3);
+    k3 = _mm_unpackhi_epi64(tt2, t3);
+
+    t2 = _mm_mullo_epi32(k2, this->c1); // avx  // Lat10, CPI2
+    t3 = _mm_mullo_epi32(k3, this->c1); // avx  // Lat10, CPI2
+
 
     // latency:  should be Lat3, C2 for temp
     // update part 2.
@@ -580,7 +742,7 @@ public:
     // an alternative might be using _mm_set_m128i(_mm_lddqu_si128, _mm_lddqu_si128), which has about 5 cycles latency in total.
     // still need to shuffle more than 4 times.
 
-    __m128i k0, k1, k2, k3, tt1, tt3;
+    __m128i k0, k1, k2, k3, tt0, tt2;
 
     __m128i mask = _mm_srli_si128(ones, 16 - rem); // shift right to keep just the remainder part
 
@@ -592,45 +754,34 @@ public:
 
     // ZERO the leading bytes to keep just the lower.
     // latency of 3 and CPI of 1, so can do the masking here...
-    k3 = _mm_and_si128(k3, mask);
-    k2 = _mm_and_si128(k2, mask);
-    k1 = _mm_and_si128(k1, mask);
     k0 = _mm_and_si128(k0, mask);
-
+    k1 = _mm_and_si128(k1, mask);
+    k2 = _mm_and_si128(k2, mask);
+    k3 = _mm_and_si128(k3, mask);
+    
     // MERGED shuffling and update part 1.
     // now unpack and update
     // RELY ON COMPILER OPTIMIZATION HERE TO REMOVE THE CONDITIONAL CHECKS
-    tt1 = _mm_unpacklo_epi32(k2, k3); // cdc'd'ghg'h'
-    if (rem > 8)
-    {
-      tt3 = _mm_unpackhi_epi32(k2, k3);
-      t2 = _mm_unpackhi_epi32(k0, k1);
-    }
+    tt0 = _mm_unpacklo_epi32(k0, k1); // aba'b'efe'f'                           // L1 C1 p5    
+    t1 = _mm_unpacklo_epi32(k2, k3); // cdc'd'ghg'h'
+    if (rem > 8) tt2 = _mm_unpackhi_epi32(k0, k1);
 
-    if (rem > 12)
-    {
-      k3 = _mm_unpackhi_epi64(t2, tt3);
-      t3 = _mm_mullo_epi32(k3, this->c1); // avx  // Lat10, CPI2
-    }
+    k0 = _mm_unpacklo_epi64(tt0, t1);   // abcdefgh
+    if (rem > 4) k1 = _mm_unpackhi_epi64(tt0, t1);   // a'b'c'd'e'f'g'h'
 
-    if (rem > 8)
-    {
-      k2 = _mm_unpacklo_epi64(t2, tt3);
-      t2 = _mm_mullo_epi32(k2, this->c1); // avx  // Lat10, CPI2
-    }
+    t0 = _mm_mullo_epi32(k0, this->c1); // avx                                  // L10 C2 p0
 
-    t0 = _mm_unpacklo_epi32(k0, k1); // aba'b'efe'f'
+    if (rem > 8) t3 = _mm_unpackhi_epi32(k2, k3);                                            // L1 C1 p5
 
-    if (rem > 4)
-    {
-      k1 = _mm_unpackhi_epi64(t0, tt1);   // a'b'c'd'e'f'g'h'
-      t1 = _mm_mullo_epi32(k1, this->c1); // avx  // Lat10, CPI2
-    }
+    if (rem > 4) t1 = _mm_mullo_epi32(k1, this->c1); // avx  // Lat10, CPI2
 
-    k0 = _mm_unpacklo_epi64(t0, tt1);   // abcdefgh
-    t0 = _mm_mullo_epi32(k0, this->c1); // avx  // Lat10, CPI2
+    
+    if (rem > 8) k2 = _mm_unpacklo_epi64(tt2, t3);
+    if (rem > 12) k3 = _mm_unpackhi_epi64(tt2, t3);
 
-    // now unpack and update
+    if (rem > 8) t2 = _mm_mullo_epi32(k2, this->c1); // avx  // Lat10, CPI2
+    if (rem > 12) t3 = _mm_mullo_epi32(k3, this->c1); // avx  // Lat10, CPI2
+
 
     // latency:  should be Lat3, C2 for temp
     // update part 2.  note that we compute for parts that have non-zero values, determined in blocks of 4 bytes.
@@ -668,21 +819,13 @@ public:
 
       // read input, 2 keys per vector.
       // combined load and update_part1 and update_part2 (data parallel part.)
-      switch (VEC_CNT)
-      {
-      case 4:
-        this->load_stride16(key + 12, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
 
-      case 3:
-        this->load_stride16(key + 8, i, t20, t21, t22, t23); // , t24, t25, t26, t27);
-
-      case 2:
-        this->load_stride16(key + 4, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
-
-      case 1:
-        this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
-      }
-
+    if (VEC_CNT >= 1)  this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
+    if (VEC_CNT >= 2)  this->load_stride16(key + 4, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
+    if (VEC_CNT >= 3)  this->load_stride16(key + 8, i, t20, t21, t22, t23); // , t24, t25, t26, t27);
+    if (VEC_CNT >= 4)  this->load_stride16(key + 12, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
+  
+  
       // now do part 3.
       if (i == 0)
         this->template update_part3<VEC_CNT, false>(h0, h1, h2, h3, t00, t10, t20, t30);
@@ -701,20 +844,10 @@ public:
 
       // read input, 2 keys per vector.
       // combined load and update_part1 and update_part2 (data parallel part.)
-      switch (VEC_CNT)
-      {
-      case 4:
-        this->load_partial16(key + 12, t30, t31, t32, t33); // , t34, t35, t36, t37);
-
-      case 3:
-        this->load_partial16(key + 8, t20, t21, t22, t23); // , t24, t25, t26, t27);
-
-      case 2:
-        this->load_partial16(key + 4, t10, t11, t12, t13); // , t14, t15, t16, t17);
-
-      case 1:
-        this->load_partial16(key, t00, t01, t02, t03); // , t04, t05, t06, t07);
-      }
+      if (VEC_CNT >= 1)  this->load_partial16(key, t00, t01, t02, t03); // , t04, t05, t06, t07);
+      if (VEC_CNT >= 2)  this->load_partial16(key + 4, t10, t11, t12, t13); // , t14, t15, t16, t17);
+      if (VEC_CNT >= 3)  this->load_partial16(key + 8, t20, t21, t22, t23); // , t24, t25, t26, t27);
+      if (VEC_CNT >= 4)  this->load_partial16(key + 12, t30, t31, t32, t33); // , t34, t35, t36, t37);
     }
 
     // For the last b < 4 bytes, we do not do full update.
@@ -764,46 +897,48 @@ public:
     }
 
     // should have 0 idle latency cyles and 0 cpi cycles here.
-    switch (VEC_CNT)
-    {
-    case 4:
-      if (rem >= 4)                                         // complete the prev update_part3
-        h3 = _mm_add_epi32(h3, this->c4);                // avx
-      if ((rem & 3) > 0)                                    // has partial int
-        h3 = _mm_xor_si128(h3, t3);                      // avx
-      h3 = _mm_xor_si128(h3, this->length);              // sse
-      h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-      h3 = _mm_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 3:
-      if (rem >= 4)                                         // complete the prev update_part3
-        h2 = _mm_add_epi32(h2, this->c4);                // avx
-      if ((rem & 3) > 0)                                    // has partial int
-        h2 = _mm_xor_si128(h2, t2);                      // avx
-      h2 = _mm_xor_si128(h2, this->length);              // sse
-      h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-      h2 = _mm_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 2:
-      if (rem >= 4)                                         // complete the prev update_part3
-        h1 = _mm_add_epi32(h1, this->c4);                // avx
-      if ((rem & 3) > 0)                                    // has partial int
-        h1 = _mm_xor_si128(h1, t1);                      // avx
-      h1 = _mm_xor_si128(h1, this->length);              // sse
-      h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-      h1 = _mm_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 1:
+    if (VEC_CNT >= 1) {
       if (rem >= 4)                                         // complete the prev update_part3
         h0 = _mm_add_epi32(h0, this->c4);                // avx
       if ((rem & 3) > 0)                                    // has partial int
         h0 = _mm_xor_si128(h0, t0);                      // avx
       h0 = _mm_xor_si128(h0, this->length);              // sse
-      h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-      h0 = _mm_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+      // h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
+      // h0 = _mm_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    }
+    if (VEC_CNT >= 2) {
+      if (rem >= 4)                                         // complete the prev update_part3
+        h1 = _mm_add_epi32(h1, this->c4);                // avx
+      if ((rem & 3) > 0)                                    // has partial int
+        h1 = _mm_xor_si128(h1, t1);                      // avx
+      h1 = _mm_xor_si128(h1, this->length);              // sse
+      // h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
+      // h1 = _mm_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    }
+    if (VEC_CNT >= 3) {
+      if (rem >= 4)                                         // complete the prev update_part3
+        h2 = _mm_add_epi32(h2, this->c4);                // avx
+      if ((rem & 3) > 0)                                    // has partial int
+        h2 = _mm_xor_si128(h2, t2);                      // avx
+      h2 = _mm_xor_si128(h2, this->length);              // sse
+      // h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
+      // h2 = _mm_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
+    }
+    if (VEC_CNT >= 4) {
+      if (rem >= 4)                                         // complete the prev update_part3
+        h3 = _mm_add_epi32(h3, this->c4);                // avx
+      if ((rem & 3) > 0)                                    // has partial int
+        h3 = _mm_xor_si128(h3, t3);                      // avx
+      h3 = _mm_xor_si128(h3, this->length);              // sse
+      // h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
+      // h3 = _mm_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
     }
     //    // should have 0 idle latency cyles and 0 cpi cycles here.
     //
 
     // Latency: h3: L1 C2, h0:L1 C2
-    this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
+    // this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
+    this->template fmix32<VEC_CNT>(h0, h1, h2, h3);
   }
 
   // hashing 16 elements worth of keys at a time.
@@ -812,7 +947,7 @@ public:
   // first latency cycles are hidden.  the second latency cycles will remain the same for double the number of elements.
   // multiple of 16 that are greater than 16.
   template <uint8_t VEC_CNT, size_t KEY_LEN = sizeof(T),
-            typename std::enable_if<((KEY_LEN & 15) == 0) && (KEY_LEN > 16), int>::type = 1>
+  typename std::enable_if<((KEY_LEN & 15) == 0) && (KEY_LEN > 16), int>::type = 1>
   FSC_FORCE_INLINE void hash(T const *key, __m128i &h0, __m128i &h1, __m128i &h2, __m128i &h3) const
   {
     // we now assume no specific layout, so we need to load 8 at a time.
@@ -821,10 +956,10 @@ public:
     const int nblocks = KEY_LEN >> 4;
 
     __m128i t00, t01, t02, t03, //t04, t05, t06, t07,
-        t10, t11, t12, t13,     //t14, t15, t16, t17,
-        t20, t21, t22, t23,     //t24, t25, t26, t27,
-        t30, t31, t32, t33      //, t34, t35, t36, t37
-        ;
+    t10, t11, t12, t13,     //t14, t15, t16, t17,
+    t20, t21, t22, t23,     //t24, t25, t26, t27,
+    t30, t31, t32, t33      //, t34, t35, t36, t37
+    ;
 
     // read input, 8 keys at a time.  need 4 rounds.
     h0 = h1 = h2 = h3 = seed;
@@ -833,63 +968,31 @@ public:
     for (; i < nblocks; ++i)
     {
 
-      // read input, 2 keys per vector.
-      // combined load and update_part1 and update_part2 (data parallel part.)
-      switch (VEC_CNT)
-      {
-      case 4:
-        this->load_stride16(key + 12, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
+    // read input, 2 keys per vector.
+    // combined load and update_part1 and update_part2 (data parallel part.)
+    if (VEC_CNT >= 1)  this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
+    if (VEC_CNT >= 2)  this->load_stride16(key + 4, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
+    if (VEC_CNT >= 3)  this->load_stride16(key + 8, i, t20, t21, t22, t23); // , t24, t25, t26, t27);
+    if (VEC_CNT >= 4)  this->load_stride16(key + 12, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
 
-      case 3:
-        this->load_stride16(key + 8, i, t20, t21, t22, t23); // , t24, t25, t26, t27);
-
-      case 2:
-        this->load_stride16(key + 4, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
-
-      case 1:
-        this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
-      }
-
-      // now do part 3.   ORDER MATTERS. from low to high.
-      if (i == 0)
-        this->template update_part3<VEC_CNT, false>(h0, h1, h2, h3, t00, t10, t20, t30);
-      else
-        this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t00, t10, t20, t30);
-      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t01, t11, t21, t31);
-      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t02, t12, t22, t32);
-      this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t03, t13, t23, t33);
+    // now do part 3.   ORDER MATTERS. from low to high.
+    if (i == 0)
+    this->template update_part3<VEC_CNT, false>(h0, h1, h2, h3, t00, t10, t20, t30);
+    else
+    this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t00, t10, t20, t30);
+    this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t01, t11, t21, t31);
+    this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t02, t12, t22, t32);
+    this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t03, t13, t23, t33);
     }
     // latency: h3: L0, C0.  h0: L1,C2
 
     // should have 0 idle latency cyles and 0 cpi cycles here.
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm_add_epi32(h3, this->c4);
-      h3 = _mm_xor_si128(h3, this->length);              // sse
-      h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-      h3 = _mm_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 3:
-      h2 = _mm_add_epi32(h2, this->c4);
-      h2 = _mm_xor_si128(h2, this->length);              // sse
-      h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-      h2 = _mm_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 2:
-      h1 = _mm_add_epi32(h1, this->c4);
-      h1 = _mm_xor_si128(h1, this->length);              // sse
-      h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-      h1 = _mm_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 1:
-      h0 = _mm_add_epi32(h0, this->c4);
-      h0 = _mm_xor_si128(h0, this->length);              // sse
-      h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-      h0 = _mm_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    }
-    //    // should have 0 idle latency cyles and 0 cpi cycles here.
-    //
-    this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
-  }
+    add_xor<VEC_CNT, true>(this->c4, h0, h1, h2, h3, 
+    this->length, this->length, this->length, this->length);
 
+    this->template fmix32<VEC_CNT>(h0, h1, h2, h3);
+
+  }
 
 
   // hashing 16 elements worth of keys at a time.
@@ -915,21 +1018,11 @@ public:
 
     // read input, 2 keys per vector.
     // combined load and update_part1 and update_part2 (data parallel part.)
-    switch (VEC_CNT)
-    {
-    case 4:
-      this->load_stride16(key + 12, 0, t30, t31, t32, t33);
-
-    case 3:
-      this->load_stride16(key + 8, 0, t20, t21, t22, t23);
-
-    case 2:
-      this->load_stride16(key + 4, 0, t10, t11, t12, t13);
-
-    case 1:
-      this->load_stride16(key, 0, t00, t01, t02, t03);
-    }
-
+    if (VEC_CNT >= 1)   this->load_stride16(key, 0, t00, t01, t02, t03);
+    if (VEC_CNT >= 2)   this->load_stride16(key + 4, 0, t10, t11, t12, t13);
+    if (VEC_CNT >= 3)   this->load_stride16(key + 8, 0, t20, t21, t22, t23);
+    if (VEC_CNT >= 4)   this->load_stride16(key + 12, 0, t30, t31, t32, t33);
+    
     h0 = h1 = h2 = h3 = seed;
 
     // now do part 3.
@@ -942,34 +1035,10 @@ public:
 
     // DO LAST ADD FROM UPDATE32
 
-    // permute here, since there is an excess of instructions here.
-    // permute from aceg bdfh to a'b'c'd' e'f'g'h'.  crosses lane here.
-    // [ 0 4 1 5 2 6 3 7 ], which is permute16
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm_add_epi32(h3, this->c4);
-      h3 = _mm_xor_si128(h3, this->length);              // sse
-      h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-      h3 = _mm_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 3:
-      h2 = _mm_add_epi32(h2, this->c4);
-      h2 = _mm_xor_si128(h2, this->length);              // sse
-      h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-      h2 = _mm_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 2:
-      h1 = _mm_add_epi32(h1, this->c4);
-      h1 = _mm_xor_si128(h1, this->length);              // sse
-      h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-      h1 = _mm_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 1:
-      h0 = _mm_add_epi32(h0, this->c4);
-      h0 = _mm_xor_si128(h0, this->length);              // sse
-      h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-      h0 = _mm_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    }
-    this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
-    
+    add_xor<VEC_CNT, true>(this->c4, h0, h1, h2, h3, 
+      this->length, this->length, this->length, this->length);
+
+    this->template fmix32<VEC_CNT>(h0, h1, h2, h3);
   }
 
 
@@ -977,22 +1046,23 @@ public:
   {
     __m128i k0, k1;
 
-    k1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 2)); // SSE3  cCdD
-    k0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key));     // SSE3  aAbB
-
+    k0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key));     // SSE3  aAbB  L3, C0.5, p23
+    k1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 2)); // SSE3  cCdD  L3, C0.5, p23
+    
     // MERGED SHUFFLE AND UPDATE_PARTIAL
     // shuffle :  [0 2 1 3], or in binary 11011000, or hex 0xD8
-    k1 = _mm_shuffle_epi32(k1, 0xD8); // Lat1, Cpi1.  cdCD
-    k0 = _mm_shuffle_epi32(k0, 0xD8); // Lat1, Cpi1.  abAB
-
+    k0 = _mm_shuffle_epi32(k0, 0xD8); // Lat1, Cpi1 p5.  abAB
+    k1 = _mm_shuffle_epi32(k1, 0xD8); // Lat1, Cpi1 p5.  cdCD
+    
 
     // then blend to get aebf cgdh  // do it as [0 1 0 1 0 1 0 1] -> 10101010 binary == 0xAA
-    t1 = _mm_unpackhi_epi64(k0, k1); // Lat1, cpi 0.3.  // ABCD
-    t1 = _mm_mullo_epi32(t1, this->c1); // avx  // Lat10, CPI2
+    
+    t0 = _mm_unpacklo_epi64(k0, k1); // Lat1, cpi1, p5.  //abcd 
+    t0 = _mm_mullo_epi32(t0, this->c1); // avx  // Lat10, CPI2, p0
 
-    t0 = _mm_unpacklo_epi64(k0, k1); // Lat1, cpi 0.3.  //abcd
-    t0 = _mm_mullo_epi32(t0, this->c1); // avx  // Lat10, CPI2
-
+    t1 = _mm_unpackhi_epi64(k0, k1); // Lat1, cpi1, p5.  // ABCD
+    t1 = _mm_mullo_epi32(t1, this->c1); // avx  // Lat10, CPI2, p0
+    
     // don't run update32_part2 here - need 4 mullo to hide latency.
   }
 
@@ -1018,17 +1088,12 @@ public:
     // do not use unpacklo and unpackhi - interleave would be aeAEcgCG
     // instead use shuffle + 2 blend + another shuffle.
     // OR: shift, shift, blend, blend
-    switch (VEC_CNT)
-    {
-    case 4:
-      load8(key + 12, t30, t31);
-    case 3:
-      load8(key + 8, t20, t21);
-    case 2:
-      load8(key + 4, t10, t11);
-    case 1:
-      load8(key, t00, t01);
-    }
+
+    if (VEC_CNT >= 1) load8(key, t00, t01);
+    if (VEC_CNT >= 2) load8(key + 4, t10, t11);
+    if (VEC_CNT >= 3) load8(key + 8, t20, t21);
+    if (VEC_CNT >= 4) load8(key + 12, t30, t31);
+    
 
     // FINISH FIRST MULLO FROM UPDATE32
 
@@ -1047,38 +1112,16 @@ public:
     // final step of update, xor the length, and fmix32.
     // finalization
     this->template update_part3<VEC_CNT, false>(h0, h1, h2, h3, t00, t10, t20, t30);
-
     this->template update_part3<VEC_CNT, true>(h0, h1, h2, h3, t01, t11, t21, t31);
 
     // latency: h3: L0, C0.  h0: L1,C2
 
     // DO LAST ADD FROM UPDATE32
 
-    // should have 0 idle latency cyles and 0 cpi cycles here.
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm_add_epi32(h3, this->c4);
-      h3 = _mm_xor_si128(h3, this->length);              // sse
-      h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-      h3 = _mm_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 3:
-      h2 = _mm_add_epi32(h2, this->c4);
-      h2 = _mm_xor_si128(h2, this->length);              // sse
-      h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-      h2 = _mm_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 2:
-      h1 = _mm_add_epi32(h1, this->c4);
-      h1 = _mm_xor_si128(h1, this->length);              // sse
-      h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-      h1 = _mm_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 1:
-      h0 = _mm_add_epi32(h0, this->c4);
-      h0 = _mm_xor_si128(h0, this->length);              // sse
-      h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-      h0 = _mm_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    }
-    this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
+    add_xor<VEC_CNT, true>(this->c4, h0, h1, h2, h3, 
+        this->length, this->length, this->length, this->length);
+
+    this->template fmix32<VEC_CNT>(h0, h1, h2, h3);
     
   }
 
@@ -1110,20 +1153,21 @@ public:
     // h1 = update32_partial(h1, t0, 1); // transpose 4x2  SSE2
 
     // 16 keys per vector. can potentially do 2 iters.
-    switch (VEC_CNT)
-    {
-    case 4:
-      t3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 12)); // SSE3
-      t3 = _mm_mullo_epi32(t3, this->c1);                                // avx  // Lat10, CPI2
-    case 3:
-      t2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 8)); // SSE3
-      t2 = _mm_mullo_epi32(t2, this->c1);                                // avx  // Lat10, CPI2
-    case 2:
-      t1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 4)); // SSE3  // efgh
-      t1 = _mm_mullo_epi32(t1, this->c1);                               // avx  // Lat10, CPI2
-    case 1:
+    if (VEC_CNT >= 1) {
       t0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key)); // SSE3   // abcd
       t0 = _mm_mullo_epi32(t0, this->c1);                           // avx  // Lat10, CPI2
+    }
+    if (VEC_CNT >= 2) {
+      t1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 4)); // SSE3  // efgh
+      t1 = _mm_mullo_epi32(t1, this->c1);                               // avx  // Lat10, CPI2
+    }
+    if (VEC_CNT >= 3) {
+      t2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 8)); // SSE3
+      t2 = _mm_mullo_epi32(t2, this->c1);                                // avx  // Lat10, CPI2
+    }
+    if (VEC_CNT >= 4) {
+      t3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 12)); // SSE3
+      t3 = _mm_mullo_epi32(t3, this->c1);                                // avx  // Lat10, CPI2
     }
 
     // should have 4 idle latency cycles and 2 CPI cycles here.  initialize here.
@@ -1141,33 +1185,11 @@ public:
     this->template update_part3<VEC_CNT, false>(h0, h1, h2, h3, t0, t1, t2, t3);
 
     // should have 0 idle latency cyles and 0 cpi cycles here.
-    switch (VEC_CNT)
-    {
-    case 4:
-      h3 = _mm_add_epi32(h3, this->c4);
-      h3 = _mm_xor_si128(h3, this->length);              // sse
-      h3 = _mm_xor_si128(h3, _mm_srli_epi32(h3, 16)); // h ^= h >> 16;      sse2
-      h3 = _mm_mullo_epi32(h3, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 3:
-      h2 = _mm_add_epi32(h2, this->c4);
-      h2 = _mm_xor_si128(h2, this->length);              // sse
-      h2 = _mm_xor_si128(h2, _mm_srli_epi32(h2, 16)); // h ^= h >> 16;      sse2
-      h2 = _mm_mullo_epi32(h2, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 2:
-      h1 = _mm_add_epi32(h1, this->c4);
-      h1 = _mm_xor_si128(h1, this->length);              // sse
-      h1 = _mm_xor_si128(h1, _mm_srli_epi32(h1, 16)); // h ^= h >> 16;      sse2
-      h1 = _mm_mullo_epi32(h1, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    case 1:
-      h0 = _mm_add_epi32(h0, this->c4);
-      h0 = _mm_xor_si128(h0, this->length);              // sse
-      h0 = _mm_xor_si128(h0, _mm_srli_epi32(h0, 16)); // h ^= h >> 16;      sse2
-      h0 = _mm_mullo_epi32(h0, this->mix_const1);        // h *= 0x85ebca6b;   Lat10, CPI2
-    }
-    //    // should have 0 idle latency cyles and 0 cpi cycles here.
-    //
-    this->template fmix32_part2<VEC_CNT>(h0, h1, h2, h3);
-  }
+    add_xor<VEC_CNT, true>(this->c4, h0, h1, h2, h3, 
+      this->length, this->length, this->length, this->length);
+
+    this->template fmix32<VEC_CNT>(h0, h1, h2, h3);
+}
 
   // hashing 16 elements worth of keys at a time.  uses 10 to 11 registers.
   // if we go to 64 bytes, then we'd be using 20 to 21 registers
@@ -1527,351 +1549,6 @@ public:
 template <typename T>
 constexpr uint8_t murmur3sse32<T>::batch_size;
 
-
-
-
-
-//      NOTE: no _mm_mullo_epi64 below sse512, so no point in this for Broadwell and earlier.
-//          if we were to do x = a 2^32 + b and y = c 2^32 + d, 
-//          then x * y = b * d + (a * d + c * b) 2^32, with truncation.  a*c does not matter.
-//             we would need 2 shifts, to get a and c., 3 multiplies with Lat5 C1,
-//             then 1 addition, 1 shift, and another addition.  some masking may be needed.
-//        w = shuffle x (w = d 2^32 + c), w = mullo(x, w), z = x * y; idle_w x8; hadd(w, 0); idle_h x 2; mask; shift; z = z+w.  - slower, and need 4 to offset latency. 24 cycles for 16 elements - faster.
-//      or    a = x >> 32; a = a * d; c = y >> 32; c = c * x; z = x * d; idle_a, idle_a, idle_c, idle_c; a = a+c ; a = a << 32; z = z + a;  need 2 to offset latency.  16 cycles for 8 elements.
-//          but y is a constant, so c is a constant.
-
-//      // compute a pair of 64bit at a time, equivalent to the lower 64 bit of the 128 bit murmur hash.
-//      // this simplifies the computation given the originam murmur3 128bit has dependencies that
-//      // makes them hard to map to 128 bits.
-//      template <typename T, size_t bytes = sizeof(T)>
-//      class Murmur64SSE {
-//
-//
-//        protected:
-//          // make static so initialization at beginning of class...
-//          const __m128i seed;
-//          const __m128i mix_const1;
-//          const __m128i mix_const2;
-//          const __m128i c1;
-//          const __m128i c2;
-//          const __m128i c3;
-//          const __m128i c4_1;
-//          const __m128i c4_2;
-//          const __m128i zero;
-//          const __m128i length;
-//
-//          // input is 4 unsigned ints.
-//          FSC_FORCE_INLINE __m128i rotl64 ( __m128i x, int8_t r ) const
-//          {
-//            // return (x << r) | (x >> (32 - r));
-//            return _mm_or_si128(                // sse2
-//                            _mm_slli_epi64(x, r),           // sse2
-//                            _mm_srli_epi64(x, (64 - r)));   // sse2
-//          }
-//
-//
-//          FSC_FORCE_INLINE __m128i update64_partial( __m128i h, __m128i k,
-//        		  __m128i _c1, int8_t r, __m128i _c2) const {
-//
-//            //            k1 *= c1; k1  = ROTL64(k1,31); k1 *= c2; h1 ^= k1;
-//            //            k2 *= c2; k2  = ROTL64(k2,33); k2 *= c1; h2 ^= k2;
-//
-//            k = _mm_mullo_epi64(k, _c1);
-//            k = rotl64(k, r);
-//            k = _mm_mullo_epi64(k, _c2);
-//
-//            return _mm_xor_si128(h, k);
-//          }
-//
-//          FSC_FORCE_INLINE __m128i update64_partial1( __m128i h1, __m128i k1) const {
-//        	  return update64_partial(h1, k1, c1, 31, c2);
-//          }
-//          FSC_FORCE_INLINE __m128i update64_partial2( __m128i h2, __m128i k2) const {
-//        	  return update64_partial(h2, k2, c2, 33, c1);
-//          }
-//
-//
-//          FSC_FORCE_INLINE __m128i update64( __m128i h, __m128i h2, __m128i k,
-//        		  __m128i _c1, int8_t r1, __m128i _c2,
-//				  int8_t r2, __m128i _c4) const {
-//
-//            // k1 and k2 are independent.  but need to save original h2, and concate with current h1.
-//            //            k1 *= c1; k1  = ROTL64(k1,31); k1 *= c2; h1 ^= k1;
-//            //            h1 = ROTL64(h1,27); h1 += h2; h1 = h1*5+0x52dce729;
-//            //            k2 *= c2; k2  = ROTL64(k2,33); k2 *= c1; h2 ^= k2;
-//            //            h2 = ROTL64(h2,31); h2 += h1; h2 = h2*5+0x38495ab5;
-//            h = update64_partial(h, k, _c1, r1, _c2);
-//
-//            h = rotl64(h, r2);
-//
-//            h = _mm_add_epi64(h, h2);
-//
-//            return _mm_add_epi64(_mm_mullo_epi64(h, c3), _c4);
-//          }
-//
-//          FSC_FORCE_INLINE __m128i update64_1( __m128i h1, __m128i h2, __m128i k1) const {
-//        	  return update64(h1, h2, k1, c1, 31, c2, 27, c4_1);
-//          }
-//
-//          FSC_FORCE_INLINE __m128i update64_2( __m128i h2, __m128i h1, __m128i k2) const {
-//        	  return update64(h2, h1, k2, c2, 33, c1, 31, c4_2);
-//          }
-//
-//
-//          // count cannot be zero.
-//          FSC_FORCE_INLINE __m128i zeroing( __m128i k, uint8_t const & count) const {
-//            assert((count > 0) && (count < 8) && "count should be between 1 and 3");
-//
-//            unsigned int shift = (8U - count) * 8U;
-//            // clear the upper bytes
-//            return _mm_srli_epi64(_mm_slli_epi64(k, shift), shift);  // sse2
-//          }
-//
-//          // input is the 2 halves of the hash values.
-//          // this is called for h1 and h2 at the same time.
-//          // is ((h ^ f) * c) carryless multiplication with (f = h >> d)? NO.
-//          FSC_FORCE_INLINE __m128i fmix64 ( __m128i h ) const
-//          {
-//            h = _mm_xor_si128(h, _mm_srli_epi64(h, 33));  // k ^= k >> 33;                            sse2
-//            h = _mm_mullo_epi64(h, mix_const1);           // k *= BIG_CONSTANT(0xff51afd7ed558ccd);   sse4.1
-//            h = _mm_xor_si128(h, _mm_srli_epi64(h, 33));  // k ^= k >> 33;                            sse2
-//            h = _mm_mullo_epi64(h, mix_const2);           // k *= BIG_CONSTANT(0xc4ceb9fe1a85ec53);   sse4.1
-//            h = _mm_xor_si128(h, _mm_srli_epi64(h, 33));  // k ^= k >> 33;                            sse2
-//
-//            return h;
-//          }
-//
-//        public:
-//          Murmur64SSE(uint64_t _seed) :
-//            seed(_mm_set1_epi64x(_seed)),
-//            mix_const1(_mm_set1_epi64x(0xff51afd7ed558ccd)),  // same for h1 and h0
-//            mix_const2(_mm_set1_epi64x(0xc4ceb9fe1a85ec53)),  // same for h1 and h0
-//            c1(_mm_set1_epi64x(0x4cf5ad432745937f)),   // c1 and c2 are concat .  c2, c1 for k2, k1,
-//            c2(_mm_set1_epi64x(0x87c37b91114253d5)),   //  then c1 and c2 (flipped0 for the second computation.
-//            c3(_mm_set1_epi64x(5)),
-//            c4_1(_mm_set1_epi64x(0x38495ab5)),   //   different for h1 and h0
-//			      c4_2(_mm_set1_epi64x(0x52dce729)),   //   different for h1 and h0
-//            zero(_mm_setzero_si128()),// SSE2
-//            length(_mm_set1_epi64x(bytes))
-//        {}
-//
-//          // TODO: [ ] hash1, do the k transform in parallel.  also use mask to keep only part wanted, rest of update and finalize do sequentially.
-//          // above 2, the finalize and updates will dominate and better to do those in parallel.
-//          // TODO: [ ] hash2.  do 2 streams at the same time.
-//
-//          // multiples of 16 bytes
-//          template <uint64_t len = bytes>
-//          FSC_FORCE_INLINE __m128i hash2(T const * key) const {
-//
-//
-//            const int nblocks = len >> 4;
-//
-//            __m128i k1, k2, t1, t2;
-//            __m128i h1 = seed, h2 = seed;
-//
-//            for (size_t i = 0; i < nblocks; ++i) {
-//            	// aA and bB
-//              k1 = _mm_lddqu_si128(reinterpret_cast<__m128i const *>(key) + i);
-//              k2 = _mm_lddqu_si128(reinterpret_cast<__m128i const *>(key + 1) + i);
-//
-//              t1 = _mm_unpacklo_epi64(k1, k2);   //ab
-//              t2 = _mm_unpackhi_epi64(k1, k2);   //AB
-//
-//              // now update both at the same time.
-////              k1 *= c1; k1  = ROTL64(k1,31); k1 *= c2; h1 ^= k1;
-////              h1 = ROTL64(h1,27); h1 += h2; h1 = h1*5+0x52dce729;
-////              k2 *= c2; k2  = ROTL64(k2,33); k2 *= c1; h2 ^= k2;
-////              h2 = ROTL64(h2,31); h2 += h1; h2 = h2*5+0x38495ab5;
-//              h1 = update64_1(h1, h2, t1);
-//              h2 = update64_2(h2, h1, t2);
-//            }
-//
-//            // remainder
-//            if (len & 15) {
-//            	k1 = _mm_lddqu_si128(reinterpret_cast<__m128i const *>(key) + nblocks);		 //aA
-//            	k2 = _mm_lddqu_si128(reinterpret_cast<__m128i const *>(key + 1) + nblocks);  //bB
-//
-//            	t1 = _mm_unpacklo_epi64(k1, k2);   //ab
-//                t2 = _mm_unpackhi_epi64(k1, k2);   //AB
-//            }
-//            if ((len & 15) > 8) {
-//            	// zero out the extra stuff.
-//                t2 = zeroing(t2, (len & 7));
-//
-//            } else if ((len & 15) == 8) {
-//            	t2 = zero;
-//
-//            } else if ((len & 15) > 0) {
-//            	// zero out the extra stuff.
-//            	t1 = zeroing(t1, (len & 7));
-//
-//            	t2 = zero;
-//            }
-//            if (len & 15) {
-//                // now update
-//                h1 = update64_partial1(h1, t1);
-//                h2 = update64_partial1(h2, t2);
-//            }
-//
-//            // finalize
-//            h1 = _mm_xor_si128(h1, length);
-//            h2 = _mm_xor_si128(h2, length);
-//
-//            h1 = _mm_add_epi64(h1, h2);
-//            h2 = _mm_add_epi64(h2, h1);
-//
-//            h1 = fmix64(h1);
-//            h2 = fmix64(h2);
-//
-//            h1 = _mm_add_epi64(h1, h2);
-//            h2 = _mm_add_epi64(h2, h1);
-//
-//            return h1;
-//
-//            //
-//            //          //----------
-//            //          // finalization
-//            //
-//            //          h1 ^= len; h2 ^= len;
-//            //
-//            //          h1 += h2;
-//            //          h2 += h1;
-//            //
-//            //          h1 = fmix64(h1);
-//            //          h2 = fmix64(h2);
-//            //
-//            //          h1 += h2;
-//            //          h2 += h1;
-//            //
-//            //          ((uint64_t*)out)[0] = h1;
-//            //          ((uint64_t*)out)[1] = h2;
-//
-//          }
-//
-//          // useful for computing 4 32bit hashes in 1 pass (for hashing into less than 2^32 buckets)
-//          // assume 4 streams are available.
-//          // working with 4 bytes at a time because there are
-//          // init: 4 instr.
-//          // body: 13*4 + 12  per iter of 16 bytes
-//          // tail: about the same
-//          // finalize: 11 inst. for 4 elements.
-//          // about 5 inst per byte + 11 inst for 4 elements.
-//          // for types that are have size larger than 8 or not power of 2.
-//
-//          // power of 2, or multiples of 16.
-////          template <uint64_t len = bytes,
-////              typename std::enable_if<((len & (len - 1)) == 0) || ((len & 15) == 0), int>::type = 1>
-//          FSC_FORCE_INLINE void hash(T const * key, uint8_t nstreams, uint64_t * out) const {
-//            // process 4 streams at a time.  all should be the same length.
-//
-//            assert((nstreams <= 2) && "maximum number of streams is 2");
-//            assert((nstreams > 0) && "minimum number of streams is 1");
-//
-//            __m128i h1 = hash2(key);
-//
-//            // store all 4 out
-//            switch (nstreams) {
-//              case 2: _mm_storeu_si128((__m128i*)out, h1);  // sse
-//                break;
-//              case 1: out[0] = _mm_extract_epi64(h1, 0);
-//              default:
-//                break;;
-//            }
-//          }
-//
-//          FSC_FORCE_INLINE void hash2(T const *  key, uint64_t * out) const {
-//            __m128i res = hash2(key);
-//            _mm_storeu_si128((__m128i*)out, res);
-//          }
-//
-//      };
-//
-
-
-
-//    /**
-//     * @brief MurmurHash.  using lower 64 bits.
-//     * @details.  prefetching did not help
-//                  NOTE: no _mm_mullo_epi64.  so no point in this for Broadwell and earlier.
-//     */
-//    template <typename T>
-//    class murmur3sse64 {
-//
-//
-//      protected:
-//        ::fsc::hash::sse::Murmur64SSE<T> hasher;
-//        mutable void const * kptrs[2];
-//        mutable uint64_t temp[2];
-//
-//      public:
-//        static constexpr uint8_t batch_size = 2;
-//
-//        murmur3sse64(uint64_t const & _seed = 43 ) : hasher(_seed) {};
-//
-//        inline uint64_t operator()(const T & key) const
-//        {
-//          //          kptrs[0] = &key;
-//          uint64_t h;
-//          hasher.hash(&key, 1, &h);
-//          return h;
-//        }
-//
-//        // results always 32 bit.
-//        FSC_FORCE_INLINE void hash(T const * keys, size_t count, uint64_t * results) const {
-//          size_t rem = count & 0x1;
-//          size_t max = count - rem;
-//          size_t i = 0;
-//          for (; i < max; i += 2) {
-//            hasher.hash2(&(keys[i]), results + i);
-//          }
-//
-//          if (rem > 0)
-//            hasher.hash(&(keys[i]), rem, results + i);
-//        }
-//
-//        // assume consecutive memory layout.
-//        template<typename OT>
-//        FSC_FORCE_INLINE void hash_and_mod(T const * keys, size_t count, OT * results, uint64_t modulus) const {
-//          size_t rem = count & 0x1;
-//          size_t max = count - rem;
-//          size_t i = 0;
-//          for (; i < max; i += 2) {
-//            hasher.hash2(&(keys[i]), temp);
-//            results[i] = temp[0] % modulus;
-//            results[i+1] = temp[1] % modulus;
-//          }
-//
-//          if (rem > 0) {
-//              hasher.hash(&(keys[i]), rem, temp);
-//              results[i] = temp[0] % modulus;
-//          }
-//        }
-//
-//        // assume consecutive memory layout.
-//        // note that the paremter is modulus bits.
-//        template<typename OT>
-//        FSC_FORCE_INLINE void hash_and_mod_pow2(T const * keys, size_t count, OT * results, uint64_t modulus) const {
-//          assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
-//          --modulus;
-//
-//          size_t rem = count & 0x1;
-//          size_t max = count - rem;
-//          size_t i = 0;
-//          for (; i < max; i += 2) {
-//            hasher.hash2(&(keys[i]), temp);
-//            results[i]   = temp[0] & modulus;
-//            results[i+1] = temp[1] & modulus;
-//          }
-//
-//          if (rem > 0) {
-//            hasher.hash(&(keys[i]), rem, temp);
-//            results[i]   = temp[0] & modulus;
-//          }
-//        }
-//
-//
-//        // TODO: [ ] add a transform_hash_mod.
-//    };
 #endif
 
 
