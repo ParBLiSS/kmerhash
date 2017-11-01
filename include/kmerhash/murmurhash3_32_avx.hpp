@@ -118,7 +118,6 @@ protected:
   const __m256i mix_const2;
   const __m256i c1;
   const __m256i c2;
-  const __m256i c3;
   const __m256i c4;
   const __m256i length;
 
@@ -212,7 +211,19 @@ protected:
 
 
     rotl<VEC_CNT>(13, h0, h1, h2, h3);
-    mul<VEC_CNT>(this->c3, h0, h1, h2, h3);
+//    mul<VEC_CNT>(this->c3, h0, h1, h2, h3);
+
+    __m256i hh0, hh1, hh2, hh3;
+    hh0 = _mm256_slli_epi32(h0, 2);
+    hh1 = _mm256_slli_epi32(h1, 2);
+    hh2 = _mm256_slli_epi32(h2, 2);
+    hh3 = _mm256_slli_epi32(h3, 2);
+
+    // do 1x + 4x instead of mul by 5.
+    h0 = _mm256_add_epi32(h0, hh0);
+    h1 = _mm256_add_epi32(h1, hh1);
+    h2 = _mm256_add_epi32(h2, hh2);
+    h3 = _mm256_add_epi32(h3, hh3);
   }
 
     
@@ -297,7 +308,6 @@ protected:
                                         mix_const2(_mm256_set1_epi32(0xc2b2ae35U)),
                                         c1(_mm256_set1_epi32(0xcc9e2d51U)),
                                         c2(_mm256_set1_epi32(0x1b873593U)),
-                                        c3(_mm256_set1_epi32(0x5U)),
                                         c4(_mm256_set1_epi32(0xe6546b64U)),
                                         length(_mm256_set1_epi32(static_cast<uint32_t>(sizeof(T)))),
                                         permute1(_mm256_setr_epi32(0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U)),

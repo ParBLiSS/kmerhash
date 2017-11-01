@@ -119,7 +119,6 @@ protected:
   const __m128i mix_const2;
   const __m128i c1;
   const __m128i c2;
-  const __m128i c3;
   const __m128i c4;
   const __m128i length;
 
@@ -277,7 +276,20 @@ protected:
 
 
     rotl<VEC_CNT>(13, h0, h1, h2, h3);
-    mul<VEC_CNT>(this->c3, h0, h1, h2, h3);
+    //mul<VEC_CNT>(this->c3, h0, h1, h2, h3);
+
+    __m128i hh0, hh1, hh2, hh3;
+    hh0 = _mm_slli_epi32(h0, 2);
+    hh1 = _mm_slli_epi32(h1, 2);
+    hh2 = _mm_slli_epi32(h2, 2);
+    hh3 = _mm_slli_epi32(h3, 2);
+
+    // do 1x + 4x instead of mul by 5.
+    h0 = _mm_add_epi32(h0, hh0);
+    h1 = _mm_add_epi32(h1, hh1);
+    h2 = _mm_add_epi32(h2, hh2);
+    h3 = _mm_add_epi32(h3, hh3);
+
     // switch (VEC_CNT)
     // {
     // case 4:
@@ -532,7 +544,6 @@ protected:
                                         mix_const2(_mm_set1_epi32(0xc2b2ae35)),
                                         c1(_mm_set1_epi32(0xcc9e2d51)),
                                         c2(_mm_set1_epi32(0x1b873593)),
-                                        c3(_mm_set1_epi32(0x5)),
                                         c4(_mm_set1_epi32(0xe6546b64)),
                                         length(_mm_set1_epi32(sizeof(T))),
                                         shuffle0(_mm_setr_epi32(0x80808000U, 0x80808001U, 0x80808002U, 0x80808003U)),
