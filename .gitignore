@@ -95,3 +95,6 @@ cscope.files
 
 .cproject
 .project
+
+include/.history
+.history

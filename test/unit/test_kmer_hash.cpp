@@ -508,6 +508,18 @@ TYPED_TEST_P(KmerHashTest, murmur32avx_batch)
 {
   this->template hash_vector_vs_sse_batch<fsc::hash::murmur32, fsc::hash::murmur3avx32>(std::string("murmur3_32_vs_avx_batch"));
 }
+
+TYPED_TEST_P(KmerHashTest, murmur64avx)
+{
+  this->template hash_vector_vs_sse<fsc::hash::murmur_x86, fsc::hash::murmur3avx64, uint64_t>(std::string("murmur3_64_vs_avx"));
+}
+
+TYPED_TEST_P(KmerHashTest, murmur64avx_batch)
+{
+  this->template hash_vector_vs_sse_batch<fsc::hash::murmur_x86, fsc::hash::murmur3avx64, uint64_t>(std::string("murmur3_64_vs_avx_batch"));
+}
+
+
 #endif
 
 #if defined(__SSE4_2__)
@@ -530,7 +542,7 @@ REGISTER_TYPED_TEST_CASE_P(KmerHashTest, iden, murmur, farm,
 //                           murmur64sse, murmur64sse_batch,   unimplemented.
 #endif
 #if defined(__AVX2__)
-                           murmur32avx, murmur32avx_batch, clhash,
+                           murmur32avx, murmur32avx_batch, murmur64avx, murmur64avx_batch, clhash, 
 #endif
 #if defined(__SSE4_2__)
                            crc32c, crc32c_batch,
@@ -541,40 +553,40 @@ REGISTER_TYPED_TEST_CASE_P(KmerHashTest, iden, murmur, farm,
 
 // max of 50 cases
 typedef ::testing::Types<
-    ::bliss::common::Kmer< 31, bliss::common::DNA,   uint64_t>,  // 1 word, not full
-    ::bliss::common::Kmer< 32, bliss::common::DNA,   uint64_t>,  // 1 word, full
-    ::bliss::common::Kmer< 64, bliss::common::DNA,   uint64_t>,  // 2 words, full
-    ::bliss::common::Kmer<80, bliss::common::DNA, uint64_t>, // 3 words, not full
-    ::bliss::common::Kmer< 96, bliss::common::DNA,   uint64_t>,  // 3 words, full
-    ::bliss::common::Kmer< 15, bliss::common::DNA,   uint32_t>,  // 1 word, not full
-    ::bliss::common::Kmer< 16, bliss::common::DNA,   uint32_t>,  // 1 word, full
-    ::bliss::common::Kmer< 32, bliss::common::DNA,   uint32_t>,  // 2 words, full
-    ::bliss::common::Kmer< 40, bliss::common::DNA,   uint32_t>,  // 3 words, not full
-    ::bliss::common::Kmer< 48, bliss::common::DNA,   uint32_t>,  // 3 words, full
-    ::bliss::common::Kmer<  7, bliss::common::DNA,   uint16_t>,  // 1 word, not full
-    ::bliss::common::Kmer<  8, bliss::common::DNA,   uint16_t>,  // 1 word, full
-    ::bliss::common::Kmer<  9, bliss::common::DNA,   uint16_t>,  // 2 words, not full
-    ::bliss::common::Kmer< 16, bliss::common::DNA,   uint16_t>,  // 2 words, full
-    ::bliss::common::Kmer<  3, bliss::common::DNA,    uint8_t>,  // 1 word, not full
-    ::bliss::common::Kmer<  4, bliss::common::DNA,    uint8_t>,  // 1 word, full
-    ::bliss::common::Kmer<  5, bliss::common::DNA,    uint8_t>,  // 2 words, not full
-    ::bliss::common::Kmer<  8, bliss::common::DNA,    uint8_t>,  // 2 words, full
-    ::bliss::common::Kmer< 19, bliss::common::DNA,    uint8_t>,  // 5 words, not full
-     ::bliss::common::Kmer< 39, bliss::common::DNA,    uint8_t>,  // 10 words, not full
-      ::bliss::common::Kmer< 59, bliss::common::DNA,    uint8_t>,  // 15 words, not full
-    ::bliss::common::Kmer< 21, bliss::common::DNA5,  uint64_t>,  // 1 word, not full
-    ::bliss::common::Kmer< 22, bliss::common::DNA5,  uint64_t>,  // 2 word, not full
-    ::bliss::common::Kmer< 42, bliss::common::DNA5,  uint64_t>,  // 2 words, not full
-    ::bliss::common::Kmer< 43, bliss::common::DNA5,  uint64_t>,  // 3 words, not full
-    ::bliss::common::Kmer< 64, bliss::common::DNA5,  uint64_t>,  // 3 words, full
-    ::bliss::common::Kmer<  2, bliss::common::DNA5,   uint8_t>,  // 1 word, not full
-    ::bliss::common::Kmer<  3, bliss::common::DNA5,   uint8_t>,  // 2 word, not full
-    ::bliss::common::Kmer<  5, bliss::common::DNA5,   uint8_t>,  // 2 words, not full
-    ::bliss::common::Kmer<  6, bliss::common::DNA5,   uint8_t>,  // 3 words, not full
-    ::bliss::common::Kmer<  8, bliss::common::DNA5,   uint8_t>,  // 3 words, full
-    ::bliss::common::Kmer< 15, bliss::common::DNA16, uint64_t>,  // 1 word, not full
-    ::bliss::common::Kmer< 16, bliss::common::DNA16, uint64_t>,  // 1 word, full
-    ::bliss::common::Kmer< 32, bliss::common::DNA16, uint64_t>,  // 2 words, full
+    ::bliss::common::Kmer< 31, bliss::common::DNA,   uint64_t>,  // 1 word, not full    64
+    ::bliss::common::Kmer< 32, bliss::common::DNA,   uint64_t>,  // 1 word, full        64
+    ::bliss::common::Kmer< 64, bliss::common::DNA,   uint64_t>,  // 2 words, full       128
+    ::bliss::common::Kmer< 80, bliss::common::DNA,   uint64_t>,  // 3 words, not full   192
+    ::bliss::common::Kmer< 96, bliss::common::DNA,   uint64_t>,  // 3 words, full       192
+    ::bliss::common::Kmer< 15, bliss::common::DNA,   uint32_t>,  // 1 word, not full    32
+    ::bliss::common::Kmer< 16, bliss::common::DNA,   uint32_t>,  // 1 word, full        32
+    ::bliss::common::Kmer< 32, bliss::common::DNA,   uint32_t>,  // 2 words, full       64
+    ::bliss::common::Kmer< 40, bliss::common::DNA,   uint32_t>,  // 3 words, not full   96
+    ::bliss::common::Kmer< 48, bliss::common::DNA,   uint32_t>,  // 3 words, full       96
+    ::bliss::common::Kmer<  7, bliss::common::DNA,   uint16_t>,  // 1 word, not full    16
+    ::bliss::common::Kmer<  8, bliss::common::DNA,   uint16_t>,  // 1 word, full        16
+    ::bliss::common::Kmer<  9, bliss::common::DNA,   uint16_t>,  // 2 words, not full   32
+    ::bliss::common::Kmer< 16, bliss::common::DNA,   uint16_t>,  // 2 words, full       32
+    ::bliss::common::Kmer<  3, bliss::common::DNA,    uint8_t>,  // 1 word, not full    8
+    ::bliss::common::Kmer<  4, bliss::common::DNA,    uint8_t>,  // 1 word, full        8
+    ::bliss::common::Kmer<  5, bliss::common::DNA,    uint8_t>,  // 2 words, not full   16
+    ::bliss::common::Kmer<  8, bliss::common::DNA,    uint8_t>,  // 2 words, full       16
+    ::bliss::common::Kmer< 19, bliss::common::DNA,    uint8_t>,  // 5 words, not full   40
+    ::bliss::common::Kmer< 39, bliss::common::DNA,    uint8_t>,  // 10 words, not full  80
+    ::bliss::common::Kmer< 59, bliss::common::DNA,    uint8_t>,  // 15 words, not full  120
+    ::bliss::common::Kmer< 21, bliss::common::DNA5,  uint64_t>,  // 1 word, not full    64
+    ::bliss::common::Kmer< 22, bliss::common::DNA5,  uint64_t>,  // 2 word, not full    128
+    ::bliss::common::Kmer< 42, bliss::common::DNA5,  uint64_t>,  // 2 words, not full   128
+    ::bliss::common::Kmer< 43, bliss::common::DNA5,  uint64_t>,  // 3 words, not full   192
+    ::bliss::common::Kmer< 64, bliss::common::DNA5,  uint64_t>,  // 3 words, full       192
+    ::bliss::common::Kmer<  2, bliss::common::DNA5,   uint8_t>,  // 1 word, not full    8
+    ::bliss::common::Kmer<  3, bliss::common::DNA5,   uint8_t>,  // 2 word, not full    16
+    ::bliss::common::Kmer<  5, bliss::common::DNA5,   uint8_t>,  // 2 words, not full   16
+    ::bliss::common::Kmer<  6, bliss::common::DNA5,   uint8_t>,  // 3 words, not full   24
+    ::bliss::common::Kmer<  8, bliss::common::DNA5,   uint8_t>,  // 3 words, full       24
+    ::bliss::common::Kmer< 15, bliss::common::DNA16, uint64_t>,  // 1 word, not full    64
+    ::bliss::common::Kmer< 16, bliss::common::DNA16, uint64_t>,  // 1 word, full        64
+    ::bliss::common::Kmer< 32, bliss::common::DNA16, uint64_t>,  // 2 words, full       128
     ::bliss::common::Kmer< 40, bliss::common::DNA16, uint64_t>,  // 3 words, not full
     ::bliss::common::Kmer< 48, bliss::common::DNA16, uint64_t>,  // 3 words, full
     ::bliss::common::Kmer<  7, bliss::common::DNA16, uint32_t>,  // 1 word, not full

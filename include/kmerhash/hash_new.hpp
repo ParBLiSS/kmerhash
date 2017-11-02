@@ -96,6 +96,7 @@
 
 #if defined(__AVX2__)
 #include "murmurhash3_32_avx.hpp"
+#include "murmurhash3_64_avx.hpp"
 
 #ifndef INCLUDE_CLHASH_H_
 #include <clhash/src/clhash.c>
@@ -224,6 +225,37 @@ public:
     return h[0];
   }
 };
+
+/**
+     * @brief MurmurHash.  using lower 64 bits.
+     *
+     */
+    template <typename T>
+    class murmur_x86
+    {
+    
+    protected:
+      uint64_t seed;
+    
+    public:
+      static constexpr uint8_t batch_size = 1;
+      using result_type = uint64_t;
+      using argument_type = T;
+    
+      murmur_x86(uint64_t const &_seed = 43) : seed(_seed){};
+    
+      inline uint64_t operator()(const T &key) const
+      {
+        // produces 128 bit hash.
+        uint64_t h[2];
+        // let compiler optimize out all except one of these.
+        MurmurHash3_x86_128(&key, sizeof(T), seed, h);
+    
+        // use the upper 64 bits.
+        return h[0];
+      }
+    };
+
 template <typename T>
 constexpr uint8_t murmur<T>::batch_size;
 

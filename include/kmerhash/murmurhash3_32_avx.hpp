@@ -301,6 +301,7 @@ protected:
   const __m256i shuffle2; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
   const __m256i shuffle3; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
   const __m256i ones;
+  const __m256i zeros;
   mutable __m256i seed;
 
 
@@ -321,6 +322,7 @@ protected:
                                         shuffle3(_mm256_setr_epi32(0x8080800CU, 0x8080800DU, 0x8080800EU, 0x8080800FU,
                                                                    0x8080800CU, 0x8080800DU, 0x8080800EU, 0x8080800FU)),
                                         ones(_mm256_cmpeq_epi32(length, length)),
+                                        zeros(_mm256_setzero_si256()),
                                         seed(_seed)
 
   {
@@ -1268,24 +1270,22 @@ public:
     k0 = _mm256_permute4x64_epi64(k0, 0xd8); // AVX2, latency 3, CPI 1
 
     // result abcd ijkl efgh mnop
-    __m256i zero = _mm256_setzero_si256();
-
     // MERGED SHUFFLE AND UPDATE_PARTIAL
     // transform to a0b0c0d0 e0f0g0h0.  interleave with 0.
     if (VEC_CNT > 2)
     {
       // yz12
-      t3 = _mm256_unpackhi_epi16(k1, zero);  // AVX2, latency 1, CPI 1
+      t3 = _mm256_unpackhi_epi16(k1, zeros);  // AVX2, latency 1, CPI 1
       t3 = _mm256_mullo_epi32(t3, this->c1); // avx  // Lat10, CPI2
 
-      t2 = _mm256_unpacklo_epi16(k1, zero);  // AVX2, latency 1, CPI 1
+      t2 = _mm256_unpacklo_epi16(k1, zeros);  // AVX2, latency 1, CPI 1
       t2 = _mm256_mullo_epi32(t2, this->c1); // avx  // Lat10, CPI2
     }
     // ijkl
-    t1 = _mm256_unpackhi_epi16(k0, zero);  // AVX2, latency 1, CPI 1
+    t1 = _mm256_unpackhi_epi16(k0, zeros);  // AVX2, latency 1, CPI 1
     t1 = _mm256_mullo_epi32(t1, this->c1); // avx  // Lat10, CPI2
 
-    t0 = _mm256_unpacklo_epi16(k0, zero); // AVX2, latency 1, CPI 1
+    t0 = _mm256_unpacklo_epi16(k0, zeros); // AVX2, latency 1, CPI 1
     // h1 = update32_partial(h1, t0, 1); // transpose 4x2  SSE2
     t0 = _mm256_mullo_epi32(t0, this->c1); // avx  // Lat10, CPI2
     // qrst
