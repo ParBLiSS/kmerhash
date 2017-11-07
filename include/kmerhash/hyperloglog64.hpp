@@ -173,7 +173,6 @@ protected:
 	Hash h;
 
 
-
   inline void internal_update(REG_T* regs, HVT const & no_ignore) {
     // no_ignore has bits 0xRRVVVVVV00, not that the II bits had already been shifted away.
     // extract RR:      0x0000000000RR
@@ -202,34 +201,37 @@ protected:
 
 
   double internal_estimate(const REG_T* regs) const {
-        double estimate = static_cast<double>(0.0);
+        double est = static_cast<double>(0.0);
         double sum = static_cast<double>(0.0);
 
         // compute the denominator of the harmonic mean
         for (size_t i = 0; i < nRegisters; i++) {
             sum += static_cast<double>(1.0) / static_cast<double>(1ULL << regs[i]);
         }
-        estimate = amm / sum; // E in the original paper
+        est = amm / sum; // E in the original paper
 //        std::cout << static_cast<size_t>(hvt_size) << " bit, mask " << lzc_mask << " ignored " << static_cast<size_t>(ignored_msb)
-//        		<< " no ignore " << static_cast<size_t>(no_ignore_value_bits) << " unused " << static_cast<size_t>(unused_msb) <<std::endl;
+//            << " no ignore " << static_cast<size_t>(no_ignore_value_bits) << " unused " << static_cast<size_t>(unused_msb) 
+////            << " estimate " << est
+//            << std::endl;
 
-        if (estimate <= static_cast<double>(5ULL * (nRegisters >> 1ULL))) {  // 5m/2
+        if (est <= static_cast<double>(5ULL * (nRegisters >> 1ULL))) {  // 5m/2
           size_t zeros = count_zeros(regs);
           if (zeros > 0ULL) {
-//              std::cout << "linear_count: zero: " << zeros << " estimate " << estimate << std::endl;
+//              std::cout << "linear_count: zero: " << zeros << " estimate " << est << " linear count " << linear_count(zeros) << std::endl;
         	  return linear_count(zeros);
           } else {
-//        	   std::cout << "linear_count: no zero: " << zeros << " estimate " << estimate << std::endl;
-        	   return estimate;
+//        	   std::cout << "linear_count: no zero: " << zeros << " estimate " << est << std::endl;
+        	   return est;
           }
-        } else if ((hvt_size == 32) && (estimate > (static_cast<double>(1ULL << 31U) / static_cast<double>(15.0)))) {
+        } else if ((hvt_size == 32) && (est > (static_cast<double>(1ULL << 31U) / static_cast<double>(15.0)))) {
           // don't need this because of 64bit.
-        	estimate = log(static_cast<double>(1.0) - (estimate / static_cast<double>(1ULL << 32U))) / static_cast<double>(1ULL << 32U);
-//            std::cout << "32bit large estimate correctiont: " << estimate << std::endl;
-            return estimate;
+        	est = - ::std::log(static_cast<double>(1.0) - (est / static_cast<double>(1ULL << 32U))) * static_cast<double>(1ULL << 32U);
+//            std::cout << "32bit large estimate: " 
+//            << est << std::endl;
+            return est;
         } else {
-//        	   std::cout << "normal estimate: " << estimate << std::endl;
-        	          return estimate;
+//        	   std::cout << "normal estimate: " << est << std::endl;
+        	          return est;
         }
   }
 
@@ -253,7 +255,7 @@ protected:
 
   inline double linear_count(uint32_t const & zeros) const {
     return static_cast<double>(nRegisters) *
-        std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
+        ::std::log(static_cast<double>(nRegisters)/ static_cast<double>(zeros));  //natural log
   }
 
 

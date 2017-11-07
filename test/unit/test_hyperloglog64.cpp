@@ -24,7 +24,7 @@
 // #include "common/kmer.hpp"
 // #include "index/kmer_hash.hpp"
 
-#include "kmerhash/hash.hpp"
+#include "kmerhash/hash_new.hpp"
 
 #include "kmerhash/hyperloglog64.hpp"
 
@@ -351,14 +351,14 @@ typedef ::testing::Types<
 //		HyperLogLog64TestParam<uint16_t, ::std::hash<uint16_t>        , 4 >,
 //		HyperLogLog64TestParam<uint32_t, ::std::hash<uint32_t>        , 4 >,
 //		HyperLogLog64TestParam<uint64_t, ::std::hash<uint64_t>        , 4 >,
-		HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 4 >,
-		HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 4 >,
-		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 4 >,
-		HyperLogLog64TestParam<uint64_t, ::fsc::hash::farm<uint64_t>  , 4 >,
-//		HyperLogLog64TestParam< uint8_t, ::fsc::hash::murmur<uint8_t> , 4 >,
-//		HyperLogLog64TestParam<uint16_t, ::fsc::hash::murmur<uint16_t>, 4 >,
-//		HyperLogLog64TestParam<uint32_t, ::fsc::hash::murmur<uint32_t>, 4 >,
-//		HyperLogLog64TestParam<uint64_t, ::fsc::hash::murmur<uint64_t>, 4 >,
+		// HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 4 >,
+		// HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 4 >,
+		// HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 4 >,
+		// HyperLogLog64TestParam<uint64_t, ::fsc::hash::farm<uint64_t>  , 4 >,
+		HyperLogLog64TestParam< uint8_t, ::fsc::hash::murmur<uint8_t> , 4 >,
+		HyperLogLog64TestParam<uint16_t, ::fsc::hash::murmur<uint16_t>, 4 >,
+		HyperLogLog64TestParam<uint32_t, ::fsc::hash::murmur<uint32_t>, 4 >,
+		HyperLogLog64TestParam<uint64_t, ::fsc::hash::murmur<uint64_t>, 4 >,
 //		HyperLogLog64TestParam< uint8_t, ::std::hash<uint8_t>         , 6 >,
 //		HyperLogLog64TestParam<uint16_t, ::std::hash<uint16_t>        , 6 >,
 //		HyperLogLog64TestParam<uint32_t, ::std::hash<uint32_t>        , 6 >,
@@ -399,10 +399,10 @@ typedef ::testing::Types<
 //		HyperLogLog64TestParam<uint16_t, ::std::hash<uint16_t>        , 14 >,
 //		HyperLogLog64TestParam<uint32_t, ::std::hash<uint32_t>        , 14 >,
 //		HyperLogLog64TestParam<uint64_t, ::std::hash<uint64_t>        , 14 >,
-		HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 14 >,
-		HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 14 >,
-		HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 14 >,
-		HyperLogLog64TestParam<uint64_t, ::fsc::hash::farm<uint64_t>  , 14 >,
+		// HyperLogLog64TestParam< uint8_t, ::fsc::hash::farm<uint8_t>   , 14 >,
+		// HyperLogLog64TestParam<uint16_t, ::fsc::hash::farm<uint16_t>  , 14 >,
+		// HyperLogLog64TestParam<uint32_t, ::fsc::hash::farm<uint32_t>  , 14 >,
+		// HyperLogLog64TestParam<uint64_t, ::fsc::hash::farm<uint64_t>  , 14 >,
 		HyperLogLog64TestParam< uint8_t, ::fsc::hash::murmur<uint8_t> , 14 >,
 		HyperLogLog64TestParam<uint16_t, ::fsc::hash::murmur<uint16_t>, 14 >,
 		HyperLogLog64TestParam<uint32_t, ::fsc::hash::murmur<uint32_t>, 14 >,
@@ -442,12 +442,16 @@ typedef ::testing::Types<
     HyperLogLog64TestParam< uint8_t, ::fsc::hash::murmur3sse32<uint8_t> , 12 >,
     HyperLogLog64TestParam<uint16_t, ::fsc::hash::murmur3sse32<uint16_t>, 12 >,
     HyperLogLog64TestParam<uint32_t, ::fsc::hash::murmur3sse32<uint32_t>, 12 >,
-    HyperLogLog64TestParam<uint64_t, ::fsc::hash::murmur3sse32<uint64_t>, 12 >
+    HyperLogLog64TestParam<uint64_t, ::fsc::hash::murmur3sse32<uint64_t>, 12 >,
 // segv during construction of the test.  not sure why.
-//    HyperLogLog64TestParam< uint8_t, ::fsc::hash::murmur3avx32<uint8_t> , 12 >,
-//    HyperLogLog64TestParam<uint16_t, ::fsc::hash::murmur3avx32<uint16_t>, 12 >,
-//    HyperLogLog64TestParam<uint32_t, ::fsc::hash::murmur3avx32<uint32_t>, 12 >,
-//    HyperLogLog64TestParam<uint64_t, ::fsc::hash::murmur3avx32<uint64_t>, 12 >
+    HyperLogLog64TestParam< uint8_t, ::fsc::hash::murmur3avx32<uint8_t> , 12 >,
+    HyperLogLog64TestParam<uint16_t, ::fsc::hash::murmur3avx32<uint16_t>, 12 >,
+    HyperLogLog64TestParam<uint32_t, ::fsc::hash::murmur3avx32<uint32_t>, 12 >,
+	HyperLogLog64TestParam<uint64_t, ::fsc::hash::murmur3avx32<uint64_t>, 12 >,
+	HyperLogLog64TestParam< uint8_t, ::fsc::hash::murmur3avx64<uint8_t> , 12 >,
+    HyperLogLog64TestParam<uint16_t, ::fsc::hash::murmur3avx64<uint16_t>, 12 >,
+    HyperLogLog64TestParam<uint32_t, ::fsc::hash::murmur3avx64<uint32_t>, 12 >,
+    HyperLogLog64TestParam<uint64_t, ::fsc::hash::murmur3avx64<uint64_t>, 12 >
 
 
 > HyperLogLog64TestTypes;
