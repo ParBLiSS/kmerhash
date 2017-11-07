@@ -470,7 +470,7 @@ protected:
   const __m128i shuffle20; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
   const __m128i shuffle21; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
   const __m128i ones;
-  
+  const __m128i zeros;
   mutable __m128i seed;
   
 //   // input is 4 unsigned ints.
@@ -553,6 +553,7 @@ protected:
                                         shuffle20(_mm_setr_epi32(0x80800100U, 0x80800302U, 0x80800504U, 0x80800706U)),
                                         shuffle21(_mm_setr_epi32(0x80800908U, 0x80800B0AU, 0x80800D0CU, 0x80800F0EU)),
                                         ones(_mm_cmpeq_epi32(length, length)),
+										zeros(_mm_setzero_si128()),
                                         seed(_seed)
   {
   }
@@ -820,6 +821,9 @@ public:
         t20, t21, t22, t23,     //t24, t25, t26, t27,
         t30, t31, t32, t33      //, t34, t35, t36, t37
         ;
+#if defined(__clang__)
+    t00 = t01 = t02 = t03 = t10 = t11 = t12 = t13 = t20 = t21 = t22 = t23 = t30 = t31 = t32 = t33 = zeros;
+#endif
 
     // read input, 8 keys at a time.  need 4 rounds.
     h0 = h1 = h2 = h3 = seed;

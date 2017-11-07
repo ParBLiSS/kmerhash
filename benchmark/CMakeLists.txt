@@ -91,29 +91,29 @@ if (BUILD_BENCHMARKS)
 	#cotire(benchmark_hashes)
 
 	# benchmark executable, FARM and MURMUR
-	foreach(hash STD IDEN FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C CLHASH)
+	foreach(hash STD IDEN FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx MURMUR64avx CRC32C CLHASH)
 		add_hashmap_target(${hash})
 	endforeach(hash)
 	
 	# distributed benchmarks.
 	foreach(map DENSEHASH)
-		foreach(hash FARM MURMUR CLHASH)
+		foreach(hash MURMUR MURMUR64avx)  # CLHASH) no FARM because it was affected by prefetching.
 			add_dist_hashmap_target(testKmerIndex ${map} ${hash} ${hash} KH_DUMMY KH_DUMMY2)
 			add_dist_hashmap_target(testKmerIndex ${map} ${hash} CRC32C KH_DUMMY KH_DUMMY2)
 
 			foreach(k 15 21 63)
-				add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} ${hash} CRC32C KH_DUMMY KH_DUMMY2)
 				add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} ${hash} ${hash} KH_DUMMY KH_DUMMY2)
+				add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} ${hash} CRC32C KH_DUMMY KH_DUMMY2)
 			endforeach(k)
 			foreach(dna 5 16)
-				add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} ${hash} CRC32C KH_DUMMY KH_DUMMY2)
 				add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} ${hash} ${hash} KH_DUMMY KH_DUMMY2)
+				add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} ${hash} CRC32C KH_DUMMY KH_DUMMY2)
 			endforeach(dna)
 		endforeach(hash)
 	endforeach(map)
 	
 	foreach(map BROBINHOOD RADIXSORT)
-		foreach(hash MURMUR MURMUR32avx CLHASH)
+		foreach(hash MURMUR MURMUR32avx MURMUR64avx) # CLHASH)  // for non-overlapped io, put the fastest hash function with the local hash table (CRC32C)
 			# with prefetch
 			add_dist_hashmap_target(testKmerIndex ${map} ${hash} ${hash} KH_DUMMY1 ENABLE_PREFETCH)
 			add_dist_hashmap_target(testKmerIndex ${map} ${hash} CRC32C KH_DUMMY1 ENABLE_PREFETCH)
@@ -122,52 +122,67 @@ if (BUILD_BENCHMARKS)
 			add_dist_hashmap_target(noPref_KmerIndex ${map} ${hash} ${hash} KH_DUMMY1 KH_DUMMY2)
 			add_dist_hashmap_target(noPref_KmerIndex ${map} ${hash} CRC32C KH_DUMMY1 KH_DUMMY2)
 
-			# with overlap and no prefetch
-			add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM KH_DUMMY2)
-			add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM KH_DUMMY2)
-
-			#with overlap and prefetch
-			add_dist_hashmap_target(overlap-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
-			add_dist_hashmap_target(overlap-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM ENABLE_PREFETCH)
-
 			foreach(k 15 21 63)
 					add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} ${hash} ${hash} KH_DUMMY1 ENABLE_PREFETCH)
 					add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} ${hash} CRC32C KH_DUMMY1 ENABLE_PREFETCH)
-					add_dist_hashmap_kmer_target(overlap-KmerIndex ${k} 4 ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
-					add_dist_hashmap_kmer_target(overlap-KmerIndex ${k} 4 ${map} ${hash} CRC32C OVERLAPPED_COMM ENABLE_PREFETCH)
 			endforeach(k)
 			foreach(dna 5 16)
 					add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} ${hash} ${hash} KH_DUMMY1 ENABLE_PREFETCH)
 					add_dist_hashmap_kmer_target(testKmerIndex 31 ${dna} ${map} ${hash} CRC32C KH_DUMMY1 ENABLE_PREFETCH)
-					add_dist_hashmap_kmer_target(overlap-KmerIndex 31 ${dna} ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
-					add_dist_hashmap_kmer_target(overlap-KmerIndex 31 ${dna} ${map} ${hash} CRC32C OVERLAPPED_COMM ENABLE_PREFETCH)
 			endforeach(dna)
 
 		endforeach(hash)
 		add_dist_hashmap_target(testKmerIndex ${map} FARM FARM KH_DUMMY1 ENABLE_PREFETCH)
-		add_dist_hashmap_target(noPref_KmerIndex ${map} FARM FARM KH_DUMMY1 KH_DUMMY2)
-		add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} FARM FARM OVERLAPPED_COMM KH_DUMMY2)
-		add_dist_hashmap_target(overlap-KmerIndex ${map} FARM FARM OVERLAPPED_COMM ENABLE_PREFETCH)
+		# add_dist_hashmap_target(noPref_KmerIndex ${map} FARM FARM KH_DUMMY1 KH_DUMMY2)
 					
 	endforeach(map)
 
 	foreach(map BROBINHOOD RADIXSORT)
+	foreach(hash MURMUR MURMUR64avx) # CLHASH)  // For overlapped comm, need good global estimate, so need 64 bit.
+
+		# with overlap and no prefetch
+		add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM KH_DUMMY2)
+		add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM KH_DUMMY2)
+
+		#with overlap and prefetch
+		add_dist_hashmap_target(overlap-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
+		add_dist_hashmap_target(overlap-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM ENABLE_PREFETCH)
+
+		foreach(k 15 21 63)
+				add_dist_hashmap_kmer_target(overlap-KmerIndex ${k} 4 ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
+				add_dist_hashmap_kmer_target(overlap-KmerIndex ${k} 4 ${map} ${hash} CRC32C OVERLAPPED_COMM ENABLE_PREFETCH)
+		endforeach(k)
+		foreach(dna 5 16)
+				add_dist_hashmap_kmer_target(overlap-KmerIndex 31 ${dna} ${map} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH)
+				add_dist_hashmap_kmer_target(overlap-KmerIndex 31 ${dna} ${map} ${hash} CRC32C OVERLAPPED_COMM ENABLE_PREFETCH)
+		endforeach(dna)
+
+	endforeach(hash)
+		# add_dist_hashmap_target(overlap_noPref-KmerIndex ${map} FARM FARM OVERLAPPED_COMM KH_DUMMY2)
+		# add_dist_hashmap_target(overlap-KmerIndex ${map} FARM FARM OVERLAPPED_COMM ENABLE_PREFETCH)
+				
+endforeach(map)
+
+	foreach(map BROBINHOOD RADIXSORT) #  // just Batched Robinhood should get the point across.
 		# lz4 distributed benchmarks.
-		foreach(hash MURMUR32avx CLHASH) 
+		foreach(hash MURMUR32avx MURMUR64avx) #CLHash 
 		 # FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C
-			add_dist_hashmap_target(testLZ4KmerIndex ${map} ${hash} ${hash} ENABLE_LZ4_RESULT ENABLE_PREFETCH)
+		 add_dist_hashmap_target(testLZ4KmerIndex ${map} ${hash} ${hash} ENABLE_LZ4_RESULT ENABLE_PREFETCH)
+		 add_dist_hashmap_target(testLZ4KmerIndex ${map} ${hash} CRC32C ENABLE_LZ4_RESULT ENABLE_PREFETCH)
 		endforeach(hash)
 	
 		#overlapped comm using full array
-		foreach(hash MURMUR32avx CLHASH) 
+		foreach(hash MURMUR32avx MURMUR64avx) #CLHASH) 
 		# FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
-			add_dist_hashmap_target(overlapFull-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_FULLBUFFER ENABLE_PREFETCH)
+		add_dist_hashmap_target(overlapFull-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_FULLBUFFER ENABLE_PREFETCH)
+		add_dist_hashmap_target(overlapFull-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM_FULLBUFFER ENABLE_PREFETCH)
 		endforeach(hash)
 	
 		#overlapped comm 2 phase.
-		foreach(hash MURMUR32avx CLHASH) 
+		foreach(hash MURMUR32avx MURMUR64avx) #CLHASH) 
 		#FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
-			add_dist_hashmap_target(overlap2P-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_2P ENABLE_PREFETCH)
+		add_dist_hashmap_target(overlap2P-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_2P ENABLE_PREFETCH)
+		add_dist_hashmap_target(overlap2P-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM_2P ENABLE_PREFETCH)
 		endforeach(hash)
 	endforeach(map)
 
@@ -212,7 +227,7 @@ endif(ENABLE_VTUNE_PROFILING)
 
 # kmer counter builds
 foreach(map BROBINHOOD RADIXSORT)
-	foreach(hash MURMUR32avx MURMUR CLHASH) 
+	foreach(hash MURMUR32avx MURMUR64avx) # MURMUR CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
 		add_dist_counter_target(testKmerCounter FASTA 31 ${map} ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH)
 		add_dist_counter_target(testKmerCounter FASTA 31 ${map} ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH)
 	

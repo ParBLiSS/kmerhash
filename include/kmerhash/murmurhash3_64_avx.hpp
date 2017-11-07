@@ -352,6 +352,7 @@ protected:
   const __m256i shuffle1_epi8;
   const __m256i ones;
   const __m256i zeros;
+  const __m128i zeroi128;
   mutable __m256i seed;
 
 
@@ -380,6 +381,7 @@ protected:
                                           0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15)),
                                         ones(_mm256_cmpeq_epi32(length, length)),
                                         zeros(_mm256_setzero_si256()),
+										zeroi128(_mm_setzero_si128()),
                                         seed(_seed)
 
   {
@@ -539,7 +541,16 @@ public:
 
     __m256i h0, h1;
 
-    hash(key, h0, h1);
+    switch (nstreams) {
+		case 8:     hash<8>(key, h0, h1); break;
+		case 7:     hash<7>(key, h0, h1); break;
+		case 6:     hash<6>(key, h0, h1); break;
+		case 5:     hash<5>(key, h0, h1); break;
+		case 4:     hash<4>(key, h0, h1); break;
+		case 3:     hash<3>(key, h0, h1); break;
+		case 2:     hash<2>(key, h0, h1); break;
+		case 1:     hash<1>(key, h0, h1); break;
+    }
 
     // do the full ones first.
     size_t blocks = nstreams >> 2;   // divide by 4 per vector
@@ -572,7 +583,7 @@ public:
   FSC_FORCE_INLINE void hash(T const *key, uint64_t *out) const
   {
     __m256i h0, h1;
-    hash(key, h0, h1);
+    hash<8>(key, h0, h1);
     _mm256_storeu_si256((__m256i *)out, h0);
     _mm256_storeu_si256((__m256i *)(out + 4), h1);
   }
@@ -604,6 +615,7 @@ public:
   /// NOTE: multiples of 32.
   // USING load, INSERT plus unpack is FASTER than i32gather.
   // load with an offset from start of key.
+  template <size_t CNT = 8>
   FSC_FORCE_INLINE void load_stride16(T const *key, size_t const &off,
                                       __m256i &t0, __m256i &t1, __m256i &t2, __m256i &t3 //,
                                       // __m256i & t4, __m256i & t5, __m256i & t6, __m256i & t7
@@ -622,19 +634,42 @@ public:
     __m256i k0, k1, k2, k3;
     __m128i j0, j1, j2, j3;
 
+//    // load 8 keys at a time, 16 bytes each time,
+//    j0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key) + off);     // SSE3  // L3 C0.5 p23
+//    j1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 1) + off); // SSE3
+//    j2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 4) + off); // SSE3
+//    j3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 5) + off); // SSE3
+//
+//    // get the 32 byte vector.
+//    // mixing 1st and 4th, so don't have to cross boundaries again  // AVX
+//    // y m i version, L4, C0.5, p015 p23
+//    k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), *(reinterpret_cast<const __m128i *>(key + 2) + off), 1); //aa'AA'cc'CC'
+//    k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), *(reinterpret_cast<const __m128i *>(key + 3) + off), 1); //bb'BB'dd'DD'
+//    k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j2), *(reinterpret_cast<const __m128i *>(key + 6) + off), 1); //EG
+//    k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j3), *(reinterpret_cast<const __m128i *>(key + 7) + off), 1); //FH
     // load 8 keys at a time, 16 bytes each time,
     j0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key) + off);     // SSE3  // L3 C0.5 p23
-    j1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 1) + off); // SSE3
-    j2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 4) + off); // SSE3
-    j3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 5) + off); // SSE3
+    if (CNT > 1) j1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 1) + off); else j1 = zeroi128;  // SSE3
+    if (CNT > 4) j2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 4) + off); else j2 = zeroi128;  // SSE3
+    if (CNT > 5) j3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 5) + off); else j3 = zeroi128; // SSE3
 
     // get the 32 byte vector.
     // mixing 1st and 4th, so don't have to cross boundaries again  // AVX
     // y m i version, L4, C0.5, p015 p23
-    k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), *(reinterpret_cast<const __m128i *>(key + 2) + off), 1); //aa'AA'cc'CC'
-    k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), *(reinterpret_cast<const __m128i *>(key + 3) + off), 1); //bb'BB'dd'DD'
-    k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j2), *(reinterpret_cast<const __m128i *>(key + 6) + off), 1); //EG
-    k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j3), *(reinterpret_cast<const __m128i *>(key + 7) + off), 1); //FH
+    if (CNT > 2) k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), *(reinterpret_cast<const __m128i *>(key + 2) + off), 1); //aa'AA'cc'CC'
+    else k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), zeroi128, 1);
+
+    if (CNT > 3) k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), *(reinterpret_cast<const __m128i *>(key + 3) + off), 1); //bb'BB'dd'DD'
+    else if (CNT > 1) k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), zeroi128, 1);
+    else k1 = zeros;
+
+    if (CNT > 6) k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j2), *(reinterpret_cast<const __m128i *>(key + 6) + off), 1); //EG
+    else if (CNT > 4) k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j2), zeroi128, 1);
+    else k2 = zeros;
+
+    if (CNT > 7) k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j3), *(reinterpret_cast<const __m128i *>(key + 7) + off), 1); //FH
+    else if (CNT > 5) k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j3), zeroi128, 1);
+    else k3 = zeros;
 
     // target is abef cdgh,  start with aa'AA', so want AC BD EG FH above.
 
@@ -670,7 +705,7 @@ public:
   // also probably going to be faster for non-power of 2 less than 8 (for 9 to 15, this is needed anyways).
   //   because we'd need to shift across lane otherwise.
   // load with an offset from start of key, and load partially.  blocks of 16,
-  template <size_t KEY_LEN = sizeof(T), size_t off = (sizeof(T) >> 4), size_t rem = (sizeof(T) & 15)>
+  template <size_t CNT = 8, size_t KEY_LEN = sizeof(T), size_t off = (sizeof(T) >> 4), size_t rem = (sizeof(T) & 15)>
   FSC_FORCE_INLINE void load_partial16(T const *key,
                                        __m256i &t0, __m256i &t1, __m256i &t2, __m256i &t3 //,
                                        // __m256i & t4, __m256i & t5, __m256i & t6, __m256i & t7
@@ -694,25 +729,35 @@ public:
 
     // load 8 keys at a time, 16 bytes each time,
     j0 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key) + off);     // SSE3  // L3 C0.5 p23
-    j1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 1) + off); // SSE3
-    j2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 4) + off); // SSE3
-    j3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 5) + off); // SSE3
+    if (CNT > 1) j1 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 1) + off); else j1 = zeroi128;  // SSE3
+    if (CNT > 4) j2 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 4) + off); else j2 = zeroi128;  // SSE3
+    if (CNT > 5) j3 = _mm_lddqu_si128(reinterpret_cast<const __m128i *>(key + 5) + off); else j3 = zeroi128; // SSE3
 
     // get the 32 byte vector.
     // mixing 1st and 4th, so don't have to cross boundaries again  // AVX
     // y m i version, L4, C0.5, p015 p23
-    k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), *(reinterpret_cast<const __m128i *>(key + 2) + off), 1); //aa'AA'cc'CC'
-    k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), *(reinterpret_cast<const __m128i *>(key + 3) + off), 1); //bb'BB'dd'DD'
-    k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j2), *(reinterpret_cast<const __m128i *>(key + 6) + off), 1); //EG
-    k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j3), *(reinterpret_cast<const __m128i *>(key + 7) + off), 1); //FH
+    if (CNT > 2) k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), *(reinterpret_cast<const __m128i *>(key + 2) + off), 1); //aa'AA'cc'CC'
+    else k0 = _mm256_inserti128_si256(_mm256_castsi128_si256(j0), zeroi128, 1);
+
+    if (CNT > 3) k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), *(reinterpret_cast<const __m128i *>(key + 3) + off), 1); //bb'BB'dd'DD'
+    else if (CNT > 1) k1 = _mm256_inserti128_si256(_mm256_castsi128_si256(j1), zeroi128, 1);
+    else k1 = zeros;
+
+    if (CNT > 6) k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j2), *(reinterpret_cast<const __m128i *>(key + 6) + off), 1); //EG
+    else if (CNT > 4) k2 = _mm256_inserti128_si256(_mm256_castsi128_si256(j2), zeroi128, 1);
+    else k2 = zeros;
+
+    if (CNT > 7) k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j3), *(reinterpret_cast<const __m128i *>(key + 7) + off), 1); //FH
+    else if (CNT > 5) k3 = _mm256_inserti128_si256(_mm256_castsi128_si256(j3), zeroi128, 1);
+    else k3 = zeros;
 
 
     // ZERO the leading bytes to keep just the lower.
     // latency of 3 and CPI of 1, so can do the masking here...
     k0 = _mm256_and_si256(k0, mask);
-    k1 = _mm256_and_si256(k1, mask);
-    k2 = _mm256_and_si256(k2, mask);
-    k3 = _mm256_and_si256(k3, mask);
+    if (CNT > 1) k1 = _mm256_and_si256(k1, mask);
+    if (CNT > 4) k2 = _mm256_and_si256(k2, mask);
+    if (CNT > 5) k3 = _mm256_and_si256(k3, mask);
     
     // MERGED shuffling and update part 1.
     // now unpack and update
@@ -744,7 +789,7 @@ public:
 
   /// NOTE: non-power of 2 length keys ALWAYS use AVX gather, which may be slower.
   // for hasing non multiple of 16 and non power of 2.
-  template <size_t KEY_LEN = sizeof(T), size_t nblocks = (sizeof(T) >> 4), size_t rem = (sizeof(T) & 15),
+  template <size_t CNT = 8, size_t KEY_LEN = sizeof(T), size_t nblocks = (sizeof(T) >> 4), size_t rem = (sizeof(T) & 15),
             typename std::enable_if<((KEY_LEN & (KEY_LEN - 1)) > 0) && ((KEY_LEN & 15) > 0), int>::type = 1>
   FSC_FORCE_INLINE void hash(T const *key, __m256i &h0, __m256i &h1) const
   {
@@ -769,7 +814,7 @@ public:
     size_t i = 0;
     for (; i < nblocks; ++i)
     {
-      this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
+      this->template load_stride16<CNT>(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
       // if (VEC_CNT >= 2)  this->load_stride16(key + 8, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
       // if (VEC_CNT >= 3)  this->load_stride16(key + 16, i, t20, t21, t22, t23); // , t24, t25, t26, t27);
       // if (VEC_CNT >= 4)  this->load_stride16(key + 24, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
@@ -795,7 +840,7 @@ public:
 
       // read input, 2 keys per vector.
       // combined load and update_part1 and update_part2 (data parallel part.)
-      this->load_partial16(key, t00, t01, t02, t03); // , t04, t05, t06, t07);
+      this->template load_partial16<CNT>(key, t00, t01, t02, t03); // , t04, t05, t06, t07);
       // if (VEC_CNT >= 2)  this->load_partial16(key + 8, t10, t11, t12, t13); // , t14, t15, t16, t17);
       // if (VEC_CNT >= 3)  this->load_partial16(key + 16, t20, t21, t22, t23); // , t24, t25, t26, t27);
       // if (VEC_CNT >= 4)  this->load_partial16(key + 24, t30, t31, t32, t33); // , t34, t35, t36, t37);
@@ -833,7 +878,7 @@ public:
   // NOTE: the reason for 32 elements is that mullo's 10 cycle latency requires unrolling loop 4 times to fill in the mixing stage.
   // first latency cycles are hidden.  the second latency cycles will remain the same for double the number of elements.
   // multiple of 16 that are greater than 16.
-  template <size_t KEY_LEN = sizeof(T), size_t nblocks = (sizeof(T) >> 4),
+  template <size_t CNT = 8, size_t KEY_LEN = sizeof(T), size_t nblocks = (sizeof(T) >> 4),
             typename std::enable_if<((KEY_LEN & 15) == 0) && (KEY_LEN > 16), int>::type = 1>
   FSC_FORCE_INLINE void hash(T const *key, __m256i &h0, __m256i &h1) const
   {
@@ -853,7 +898,7 @@ public:
         size_t i = 0;
         for (; i < nblocks; ++i)
         {
-          this->load_stride16(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
+          this->template load_stride16<CNT>(key, i, t00, t01, t02, t03); // , t04, t05, t06, t07);
           // if (VEC_CNT >= 2)  this->load_stride16(key + 8, i, t10, t11, t12, t13); // , t14, t15, t16, t17);
           // if (VEC_CNT >= 3)  this->load_stride16(key + 16, i, t20, t21, t22, t23); // , t24, t25, t26, t27);
           // if (VEC_CNT >= 4)  this->load_stride16(key + 24, i, t30, t31, t32, t33); // , t34, t35, t36, t37);
@@ -895,15 +940,19 @@ public:
 
 
   // load 8 16 byte keys, and shuffle (matrix transpose) into 4 8-int vectors.  Also do first multiply of the update32 op.
+  template <size_t CNT = 8>
   FSC_FORCE_INLINE void load16(T const *key, __m256i &t0, __m256i &t1, __m256i &t2, __m256i &t3) const
   {
     __m256i k0, k1, k2, k3;
 
     // get the data first - 8 keys at a time.  // start as abcd efgh.  want abef cdgh.  doing it here involves 4 lane crossing., do it later, 2.
     k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key));     // SSE3  // L3 C0.5 p23
-    k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 2)); // SSE3
-    k2 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 4)); // SSE3
-    k3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 6)); // SSE3
+    if (CNT > 2) k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 2)); // SSE3
+    else k1 = zeros;
+    if (CNT > 4) k2 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 4)); // SSE3
+    else k2 = zeros;
+    if (CNT > 6) k3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 6)); // SSE3
+    else k3 = zeros;
 
     // next shuffle to group the 32 bit ints together by their ordre in the keys, i.e. get the k1, k2, k3, k4...
     // unpack to get the right set.  require 8 unpack ops
@@ -938,7 +987,7 @@ public:
   // 8 8-byte elements fills a cache line.  using 15 to 16 registers, so probably require some reuse..
   // NOTE: the reason for 32 elements is that mullo's 10 cycle latency requires unrolling loop 4 times to fill in the mixing stage.
   // first latency cycles are hidden.  the second latency cycles will remain the same for double the number of elements.
-  template <size_t KEY_LEN = sizeof(T),
+  template <size_t CNT = 8, size_t KEY_LEN = sizeof(T),
             typename std::enable_if<(KEY_LEN == 16), int>::type = 1> // 16 bytes exactly.
   FSC_FORCE_INLINE void
   hash(T const *key, __m256i &h0, __m256i &h1) const
@@ -959,7 +1008,7 @@ public:
     // read input, 2 keys per vector.
     // combined load and update_part1 and update_part2 (data parallel part.)
     // loaded as t00 = acegbdfh, t01 = a'c'e'g'b'd'f'h', t02 = ACEGBDFH, t03 = A'C'E'G'B'D'F'H'
-	  this->load16(key, t0, t1, t2, t3);
+	  this->template load16<CNT>(key, t0, t1, t2, t3);
 
     // at this point, part2 of update should be done.
     
@@ -1002,7 +1051,7 @@ public:
 
   // this is using a number of different ports with biggest contention over p0.
   // we can probably realistically load all 16 keys at a time to hide the latency of mullo
-  template <size_t KEY_LEN = sizeof(T),
+  template <size_t CNT = 8, size_t KEY_LEN = sizeof(T),
   typename std::enable_if<(KEY_LEN == 8), int>::type = 1>
   FSC_FORCE_INLINE void load8(T const *key, __m256i &t00, __m256i &t01) const //, __m256i &t10, __m256i &t11) const
   {
@@ -1010,7 +1059,8 @@ public:
 
     // aAbBcCdD eEfFgGhH
     k0 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key));     // L3 C0.5 p23
-    k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 4)); 
+    if (CNT > 4) k1 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(key + 4));
+    else k1 = zeros;
 
     // MERGED SHUFFLE AND UPDATE_PARTIAL
     // aAbBcCdD eEfFgGhH -> aeAEcgCG bfBFdhDH  with unpacklo/hi 32
@@ -1029,7 +1079,7 @@ public:
   // 8 8-byte elements fills a cache line.  using 15 to 16 registers, so probably require some reuse..
   // NOTE: the reason for 32 elements is that mullo's 10 cycle latency requires unrolling loop 4 times to fill in the mixing stage.
   // first latency cycles are hidden.  the second latency cycles will remain the same for double the number of elements.
-  template <size_t KEY_LEN = sizeof(T),
+  template <size_t CNT = 8, size_t KEY_LEN = sizeof(T),
             typename std::enable_if<(KEY_LEN == 8), int>::type = 1>
   FSC_FORCE_INLINE void hash(T const *key, __m256i &h0, __m256i &h1) const
   {
@@ -1045,7 +1095,7 @@ public:
     // do not use unpacklo and unpackhi - interleave would be aeAEcgCG
     // instead use shuffle + 2 blend + another shuffle.
     // OR: shift, shift, blend, blend
-    this->load8(key, t0, t1); //, t10, t11);
+    this->template load8<CNT>(key, t0, t1); //, t10, t11);
 
     t2 = t3 = zeros;
 
@@ -1094,7 +1144,7 @@ public:
 
   // this is using a number of different ports with biggest contention over p0.
   // we can probably realistically load all 16 keys at a time to hide the latency of mullo
-  template <size_t KEY_LEN = sizeof(T),
+  template <size_t CNT = 8, size_t KEY_LEN = sizeof(T),
   typename std::enable_if<(KEY_LEN == 4), int>::type = 1>
   FSC_FORCE_INLINE void load4(T const *key, __m256i &t00) const //, __m256i &t10, __m256i &t20, __m256i &t30) const
   {
@@ -1116,7 +1166,7 @@ public:
   // for 4 byte, testing with 50M, on i7-4770, shows 0.0356, 0.0360, 0.0407, 0.0384 secs for
   //    manual, manual with 32element fused update function (for reuse), no unrolling, and simple unrolling
   //   manual is more effective at latency hiding, also confirmed by vtunes hotspots.
-  template <size_t KEY_LEN = sizeof(T),
+  template <size_t CNT = 8, size_t KEY_LEN = sizeof(T),
             typename std::enable_if<(KEY_LEN == 4), int>::type = 1>
   FSC_FORCE_INLINE void hash(T const *key, __m256i &h0, __m256i &h1) const //, __m256i &h2, __m256i &h3) const
   {
@@ -1132,7 +1182,7 @@ public:
         // read input, 2 keys per vector.
         // combined load and update_part1 and update_part2 (data parallel part.)
         // loaded as t00 = acegbdfh, t01 = a'c'e'g'b'd'f'h', t02 = ACEGBDFH, t03 = A'C'E'G'B'D'F'H'
-        this->load4(key, t0); //, t1, t2, t3);
+        this->template load4<8>(key, t0); //, t1, t2, t3);
     
         // at this point, part2 of update should be done.
         t1 = t2 = t3 = zeros;
@@ -1460,7 +1510,7 @@ public:
 
 protected:
   ::fsc::hash::sse::Murmur64AVX<T> hasher;
-  mutable uint64_t temp[batch_size];
+  mutable uint64_t temp[batch_size] __attribute__ ((aligned (32)));
 
 public:
     using result_type = uint64_t;

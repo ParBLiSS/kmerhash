@@ -12,7 +12,7 @@
 //#include "MurmurHash3.h"
 #include "math_utils.hpp"
 #include "mem_utils.hpp"
-#include "hash.hpp"
+#include "hash_new.hpp"
 
 #include "iterators/transform_iterator.hpp"
 
@@ -789,7 +789,9 @@ public:
             printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
             return 0;
         }
+#if ENABLE_PREFETCH
         int PFD = 16;
+#endif
         int32_t i;
         coherence = INSERT;
 		int32_t hash_batch_size = 512;
@@ -1125,8 +1127,10 @@ public:
             return 0ULL;
         }
         size_t foundCount = 0;
+#if ENABLE_PREFETCH
         int32_t PFD_INFO = 16;
         int32_t PFD_HASH = 8;
+#endif
         int32_t i;
 		int32_t hash_batch_size = 1024;
         hash_val_type bucketIdArray[2 * hash_batch_size];
@@ -1188,8 +1192,10 @@ public:
             return 0ULL;
         }
         size_t foundCount = 0;
+#if ENABLE_PREFETCH
         int32_t PFD_INFO = 16;
         int32_t PFD_HASH = 8;
+#endif
         int32_t i;
 		int32_t hash_batch_size = 1024;
         hash_val_type bucketIdArray[2 * hash_batch_size];
@@ -1252,8 +1258,10 @@ public:
             return;
         }
         coherence = ERASE;
+#if ENABLE_PREFETCH
         int32_t PFD_INFO = 16;
         int32_t PFD_HASH = 8;
+#endif
         int32_t i;
 		int32_t hash_batch_size = 1024;
         hash_val_type bucketIdArray[2 * hash_batch_size];

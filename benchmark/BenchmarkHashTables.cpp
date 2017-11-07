@@ -86,13 +86,14 @@
 //      [ ] use only insert(iter, iter)
 
 #define STD 21
-#define IDEN 22
-#define FARM 23
-#define FARM32 24
-#define MURMUR 25
-#define MURMUR32 26
-#define MURMUR32sse 27
-#define MURMUR32avx 28
+#define IDEN 20
+#define FARM 22
+#define FARM32 23
+#define MURMUR 24
+#define MURMUR32 25
+#define MURMUR32sse 26
+#define MURMUR32avx 27
+#define MURMUR64avx 28
 #define CRC32C 29
 #define CLHASH 30
 
@@ -121,6 +122,9 @@ using CountType = uint32_t;
 #elif (pStoreHash == MURMUR32avx)
   template <typename KM>
   using StoreHash = fsc::hash::murmur3avx32<KM>;
+  #elif (pStoreHash == MURMUR64avx)
+  template <typename KM>
+  using StoreHash = fsc::hash::murmur3avx64<KM>;
 #elif (pStoreHash == CRC32C)
   template <typename KM>
   using StoreHash = fsc::hash::crc32c<KM>;
@@ -1629,7 +1633,7 @@ int main(int argc, char** argv) {
   std::cout << "      \tStoreHash=" << typeid(StoreHash<FullKmer>).name() << std::endl;
   std::cout << "      \tStoreHash=" << typeid(StoreHash<DNA16Kmer>).name() << std::endl;
 
-#if (pStoreHash != MURMUR32sse) && (pStoreHash != MURMUR32avx)
+#if (pStoreHash != MURMUR32sse) && (pStoreHash != MURMUR32avx) && (pStoreHash != MURMUR64avx)
 
   if ((map == STD_UNORDERED_TYPE) || (map == ALL_TYPE)) {
     BL_BENCH_INIT(test);

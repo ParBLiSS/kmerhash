@@ -288,7 +288,7 @@ protected:
     ASSERT_TRUE(same);
   }
 
-  template <template <typename> class H, typename OT = uint32_t>
+  template <template <typename> class H, typename OT = uint64_t>
   void hash_clhash(std::string name)
   {
 
@@ -542,7 +542,9 @@ REGISTER_TYPED_TEST_CASE_P(KmerHashTest, iden, murmur, farm,
 //                           murmur64sse, murmur64sse_batch,   unimplemented.
 #endif
 #if defined(__AVX2__)
-                           murmur32avx, murmur32avx_batch, murmur64avx, murmur64avx_batch, clhash, 
+                           murmur32avx, murmur32avx_batch,
+						   murmur64avx, murmur64avx_batch,
+						   clhash,
 #endif
 #if defined(__SSE4_2__)
                            crc32c, crc32c_batch,

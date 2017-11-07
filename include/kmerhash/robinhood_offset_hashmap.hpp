@@ -50,7 +50,7 @@
 #include "containers/fsc_container_utils.hpp"
 #include "iterators/transform_iterator.hpp"
 
-#include "kmerhash/hash.hpp"
+#include "kmerhash/hash_new.hpp"
 
 #include <stdlib.h> // posix_memalign
 #include <stdexcept>

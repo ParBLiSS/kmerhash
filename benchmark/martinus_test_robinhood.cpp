@@ -13,7 +13,7 @@
 #include "kmerhash/robinhood_offset_hashmap.hpp"
 #include "kmerhash/hashmap_linearprobe.hpp"
 #include "kmerhash/hashmap_radixsort.hpp"
-#include "kmerhash/hash.hpp"
+#include "kmerhash/hash_new.hpp"
 
 #include <robinhood.h>
 #include <marsagliamwc99.h>
@@ -2294,12 +2294,13 @@ int main(int argc, char** argv) {
 //    }
     {
         // using murmur32avx, as farmhash impl is sensitive to prefetch on/off.
-      auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::clhash, ::fsc::hash::clhash >(cnt_per_iter, iterations, 0.8, 0.35);
-      print(std::cout, stats64);
+    //   auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::clhash, ::fsc::hash::clhash >(cnt_per_iter, iterations, 0.8, 0.35);
+    auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur, ::fsc::hash::murmur3avx64 >(cnt_per_iter, iterations, 0.8, 0.35);
+    print(std::cout, stats64);
 #if defined(ENABLE_PREFETCH)
-      std::ofstream fout("datascaling_benchmark_64_32_clhash-0.8-0.35_prefetch.txt");
+      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.8-0.35_prefetch.txt");
 #else
-      std::ofstream fout("datascaling_benchmark_64_32_clhash-0.8-0.35.txt");
+      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.8-0.35.txt");
 #endif
       print(fout, stats64);
     }

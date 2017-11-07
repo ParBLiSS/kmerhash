@@ -26,7 +26,10 @@
 #define _FILE_OFFSET_BITS 64
 #define _LARGEFILE64_SOURCE
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE     // get O_DIRECT from fnctl
+#endif
+
 #include <fcntl.h>      // for O_DIRECT
 #include <cstdlib>
 #include <errno.h>      // posix calls generate errno.  also for perror()
@@ -71,7 +74,7 @@
 #include "index/quality_score_iterator.hpp"
 #include "index/kmer_hash.hpp"   // workaround for distributed_map_base requiring farm hash.
 
-#include "kmerhash/hash.hpp"
+#include "kmerhash/hash_new.hpp"
 #include "kmerhash/distributed_robinhood_map.hpp"
 #include "kmerhash/distributed_batched_robinhood_map.hpp"
 #include "kmerhash/distributed_batched_radixsort_map.hpp"
@@ -97,12 +100,13 @@
 #define XOR 12
 
 #define STD 21
-#define FARM 23
-#define FARM32 24
-#define MURMUR 25
-#define MURMUR32 26
-#define MURMUR32sse 27
-#define MURMUR32avx 28
+#define FARM 22
+#define FARM32 23
+#define MURMUR 24
+#define MURMUR32 25
+#define MURMUR32sse 26
+#define MURMUR32avx 27
+#define MURMUR64avx 28
 #define CRC32C 29
 #define CLHASH 30
 
@@ -220,6 +224,9 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 	#elif (pDistHash == MURMUR32avx)
 	  template <typename KM>
 	  using DistHash = ::fsc::hash::murmur3avx32<KM>;
+	#elif (pDistHash == MURMUR64avx)
+	  template <typename KM>
+	  using DistHash = ::fsc::hash::murmur3avx64<KM>;
 	#elif (pDistHash == CRC32C)
 	  template <typename KM>
 	  using DistHash = ::fsc::hash::crc32c<KM>;
@@ -257,6 +264,9 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 	#elif (pStoreHash == MURMUR32avx)
 	  template <typename KM>
 	  using StoreHash = ::fsc::hash::murmur3avx32<KM>;
+	#elif (pStoreHash == MURMUR64avx)
+	  template <typename KM>
+	  using StoreHash = ::fsc::hash::murmur3avx64<KM>;
 	#elif (pStoreHash == CRC32C)
 	  template <typename KM>
 	  using StoreHash = ::fsc::hash::crc32c<KM>;
@@ -704,8 +714,7 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
       if (remainder > 0) {
 
         // write the remainder in a 512 block
-        void *x;
-        posix_memalign(&x, block_size, block_size);
+        unsigned char *x = ::utils::mem::aligned_alloc<unsigned char>(block_size);
         memset(x, 0, block_size);
         memcpy(x, ptr, remainder);
         iter_written = write(fd, x, block_size);
@@ -901,7 +910,7 @@ int main(int argc, char** argv) {
 	out_filename.assign("./counts.bin");
 
 //#if (pPARSER == FASTQ)
-	CountType lower;
+	// CountType lower;
 	// CountType upper;
 //#endif
 
@@ -936,7 +945,7 @@ int main(int argc, char** argv) {
 		TCLAP::ValueArg<std::string> outputArg("O", "out_filename", "output filename", false, out_filename, "string", cmd);
 
 //		TCLAP::SwitchArg threshArg("T", "thresholding", "on/off for thresholding", cmd, false);
-		TCLAP::ValueArg<CountType> lowerThreshArg("L", "lower_thresh", "Lower Threshold for Kmer and Edge frequency", false, 0, "uint16", cmd);
+// 		TCLAP::ValueArg<CountType> lowerThreshArg("L", "lower_thresh", "Lower Threshold for Kmer and Edge frequency", false, 0, "uint16", cmd);
 //		TCLAP::ValueArg<CountType> upperThreshArg("U", "upper_thresh", "Upper Threshold for Kmer and Edge frequency", false,
 //				std::numeric_limits<CountType>::max(), "uint16", cmd);
 
@@ -964,7 +973,7 @@ int main(int argc, char** argv) {
 		}
 
 //#if (pPARSER == FASTQ)
-  lower = lowerThreshArg.getValue();
+//   lower = lowerThreshArg.getValue();
 //  upper = upperThreshArg.getValue();
 //#endif
 
