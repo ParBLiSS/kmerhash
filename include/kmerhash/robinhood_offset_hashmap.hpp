@@ -46,7 +46,11 @@
 
 #include "kmerhash/aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
 #include "kmerhash/math_utils.hpp"
-#include "mmintrin.h"  // emm: _mm_stream_si64
+//#include "mmintrin.h"  // emm: _mm_stream_si64
+
+#include <x86intrin.h>
+#include "immintrin.h"
+
 #include "containers/fsc_container_utils.hpp"
 #include "iterators/transform_iterator.hpp"
 
@@ -197,9 +201,29 @@ protected:
 
 	template <typename S>
 	struct modulus2 {
+#if defined(__AVX2__)
 		static constexpr size_t batch_size = (sizeof(S) == 4 ? 8 : 4);
+#elif defined(__SSE2__)
+		static constexpr size_t batch_size = (sizeof(S) == 4 ? 4 : 2);
+#else
+		static constexpr size_t batch_size = (sizeof(S) == 4 ? 8 : 4);
+#endif
+
+#if defined(__AVX2__)
+		__m256i vmask;
+#elif defined(__SSE2__)
+		__m128i vmask;
+#endif
 		S mask;
-		modulus2(S const & _mask) : mask(_mask) {}
+
+		modulus2(S const & _mask) :
+#if defined(__AVX2__)
+				vmask(sizeof(S) == 4 ?  _mm256_set1_epi32(_mask) : _mm256_set1_epi64x(_mask)),
+#elif defined(__SSE2__)
+				vmask(sizeof(S) == 4 ?  _mm_set1_epi32(_mask) : _mm_set1_epi64x(_mask)),
+#endif
+						mask(_mask)
+				{}
 
 		template <typename IN>
 		inline IN operator()(IN const & x) const { return (x & mask); }
@@ -209,6 +233,41 @@ protected:
 			// TODO: [ ] do SSE version here
 			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
 		}
+
+#if defined(__AVX2__)
+		// when input nad output are the same types
+		template <typename IN>
+		inline void operator()(IN const * x, size_t const & _count, IN * y) const {
+			// 32 bytes at a time.  input should be
+			int i = 0;
+			int imax;
+
+			__m256i xx;
+			for (i = 0, imax = _count - batch_size; i < imax; i += batch_size)  {
+				xx = _mm256_and_si256(*(reinterpret_cast<__m256i const *>(x + i)), vmask);
+				_mm256_storeu_si256(reinterpret_cast<__m256i *>(y + i), xx);
+			}
+			for (imax = _count; i < imax; ++i)
+				y[i] = x[i] & mask;
+		}
+#elif defined(__SSE2__)
+		// when input nad output are the same types
+		template <typename IN>
+		inline void operator()(IN const * x, size_t const & _count, IN * y) const {
+			// 32 bytes at a time.  input should be
+			int i = 0;
+			int imax;
+
+			__m128i xx;
+			for (i = 0, imax = _count - batch_size; i < imax; i += batch_size)  {
+				xx = _mm_and_si128(*(reinterpret_cast<__m128i const *>(x + i)), vmask);
+				_mm_storeu_si128(reinterpret_cast<__m128i *>(y + i), xx);
+			}
+			for (imax = _count; i < imax; ++i)
+				y[i] = x[i] & mask;
+		}
+
+#endif
 	};
 
 	// mod 2 okay since hashtable size is always power of 2.
