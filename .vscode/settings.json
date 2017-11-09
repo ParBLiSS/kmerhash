@@ -5,6 +5,8 @@
         "dense_hash_map": "cpp",
         "dense_hash_set": "cpp",
         "sparse_hash_map": "cpp",
-        "sparse_hash_set": "cpp"
+        "sparse_hash_set": "cpp",
+        "scoped_allocator": "cpp",
+        "type_traits": "cpp"
     }
 }

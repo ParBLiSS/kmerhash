@@ -433,57 +433,57 @@ public:
     }
   }
 
-  // do 3 at the same time.  since latency of crc32 is 3 cycles.
-  template <typename OT>
-  FSC_FORCE_INLINE void hash_and_mod(T const *keys, size_t count, OT *results, uint32_t modulus) const
-  {
-    // loop over 3 keys at a time
-    size_t max = count - (count & 3);
-    size_t i = 0;
-    for (; i < max; i += 4)
-    {
-      hash4(keys + i, temp);
+//  // do 3 at the same time.  since latency of crc32 is 3 cycles.
+//  template <typename OT>
+//  FSC_FORCE_INLINE void hash_and_mod(T const *keys, size_t count, OT *results, uint32_t modulus) const
+//  {
+//    // loop over 3 keys at a time
+//    size_t max = count - (count & 3);
+//    size_t i = 0;
+//    for (; i < max; i += 4)
+//    {
+//      hash4(keys + i, temp);
+//
+//      results[i] = temp[0] % modulus;
+//      results[i + 1] = temp[1] % modulus;
+//      results[i + 2] = temp[2] % modulus;
+//      results[i + 3] = temp[3] % modulus;
+//    }
+//
+//    // handle the remainder
+//    for (; i < count; ++i)
+//    {
+//      results[i] = hash1(keys[i]) % modulus;
+//    }
+//  }
 
-      results[i] = temp[0] % modulus;
-      results[i + 1] = temp[1] % modulus;
-      results[i + 2] = temp[2] % modulus;
-      results[i + 3] = temp[3] % modulus;
-    }
-
-    // handle the remainder
-    for (; i < count; ++i)
-    {
-      results[i] = hash1(keys[i]) % modulus;
-    }
-  }
-
-  // do 3 at the same time.  since latency of crc32 is 3 cycles.
-  template <typename OT>
-  FSC_FORCE_INLINE void hash_and_mod_pow2(T const *keys, size_t count, OT *results, uint32_t modulus) const
-  {
-    assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
-
-    --modulus; // convert to mask.
-
-    // loop over 3 keys at a time
-    size_t max = count - (count & 3);
-    size_t i = 0;
-    for (; i < max; i += 4)
-    {
-      hash4(keys + i, temp);
-
-      results[i] = temp[0] & modulus;
-      results[i + 1] = temp[1] & modulus;
-      results[i + 2] = temp[2] & modulus;
-      results[i + 3] = temp[3] & modulus;
-    }
-
-    // handle the remainder
-    for (; i < count; ++i)
-    {
-      results[i] = hash1(keys[i]) & modulus;
-    }
-  }
+//  // do 3 at the same time.  since latency of crc32 is 3 cycles.
+//  template <typename OT>
+//  FSC_FORCE_INLINE void hash_and_mod_pow2(T const *keys, size_t count, OT *results, uint32_t modulus) const
+//  {
+//    assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
+//
+//    --modulus; // convert to mask.
+//
+//    // loop over 3 keys at a time
+//    size_t max = count - (count & 3);
+//    size_t i = 0;
+//    for (; i < max; i += 4)
+//    {
+//      hash4(keys + i, temp);
+//
+//      results[i] = temp[0] & modulus;
+//      results[i + 1] = temp[1] & modulus;
+//      results[i + 2] = temp[2] & modulus;
+//      results[i + 3] = temp[3] & modulus;
+//    }
+//
+//    // handle the remainder
+//    for (; i < count; ++i)
+//    {
+//      results[i] = hash1(keys[i]) & modulus;
+//    }
+//  }
 };
 template <typename T>
 constexpr uint8_t crc32c<T>::batch_size;

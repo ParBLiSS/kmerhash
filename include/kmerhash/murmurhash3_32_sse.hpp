@@ -1507,57 +1507,57 @@ public:
     }
   }
 
-  // assume consecutive memory layout.
-  template <typename OT>
-  FSC_FORCE_INLINE void hash_and_mod(T const *keys, size_t count, OT *results, uint32_t modulus) const
-  {
-    size_t rem = count & (batch_size - 1);
-    size_t max = count - rem;
-    size_t i = 0, j = 0;
-    for (; i < max; i += batch_size)
-    {
-      hasher.hash(&(keys[i]), temp);
-
-      for (j = 0; j < batch_size; ++j)
-      results[i + j] = temp[j] % modulus;
-    }
-
-    // last part.
-    if (rem > 0) {
-      hasher.hash(&(keys[i]), rem, temp);
-
-      for (j = 0; j < rem; ++j)
-      results[i + j] = temp[j] % modulus;
-    }
-}
-
-  // assume consecutive memory layout.
-  // note that the paremter is modulus bits.
-  template <typename OT>
-  FSC_FORCE_INLINE void hash_and_mod_pow2(T const *keys, size_t count, OT *results, uint32_t modulus) const
-  {
-    assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
-    --modulus;
-
-    size_t rem = count & (batch_size - 1);
-    size_t max = count - rem;
-    size_t i = 0, j = 0;
-    for (; i < max; i += batch_size)
-    {
-      hasher.hash(&(keys[i]), temp);
-
-      for (j = 0; j < batch_size; ++j)
-      results[i + j] = temp[j] & modulus;
-    }
-
-    // last part.
-    if (rem > 0) {
-      hasher.hash(&(keys[i]), rem, temp);
-
-      for (j = 0; j < rem; ++j)
-      results[i + j] = temp[j] & modulus;
-    }
-  }
+//  // assume consecutive memory layout.
+//  template <typename OT>
+//  FSC_FORCE_INLINE void hash_and_mod(T const *keys, size_t count, OT *results, uint32_t modulus) const
+//  {
+//    size_t rem = count & (batch_size - 1);
+//    size_t max = count - rem;
+//    size_t i = 0, j = 0;
+//    for (; i < max; i += batch_size)
+//    {
+//      hasher.hash(&(keys[i]), temp);
+//
+//      for (j = 0; j < batch_size; ++j)
+//      results[i + j] = temp[j] % modulus;
+//    }
+//
+//    // last part.
+//    if (rem > 0) {
+//      hasher.hash(&(keys[i]), rem, temp);
+//
+//      for (j = 0; j < rem; ++j)
+//      results[i + j] = temp[j] % modulus;
+//    }
+//}
+//
+//  // assume consecutive memory layout.
+//  // note that the paremter is modulus bits.
+//  template <typename OT>
+//  FSC_FORCE_INLINE void hash_and_mod_pow2(T const *keys, size_t count, OT *results, uint32_t modulus) const
+//  {
+//    assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
+//    --modulus;
+//
+//    size_t rem = count & (batch_size - 1);
+//    size_t max = count - rem;
+//    size_t i = 0, j = 0;
+//    for (; i < max; i += batch_size)
+//    {
+//      hasher.hash(&(keys[i]), temp);
+//
+//      for (j = 0; j < batch_size; ++j)
+//      results[i + j] = temp[j] & modulus;
+//    }
+//
+//    // last part.
+//    if (rem > 0) {
+//      hasher.hash(&(keys[i]), rem, temp);
+//
+//      for (j = 0; j < rem; ++j)
+//      results[i + j] = temp[j] & modulus;
+//    }
+//  }
 
   // TODO: [ ] add a transform_hash_mod.
 };

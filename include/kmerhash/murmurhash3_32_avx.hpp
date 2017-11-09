@@ -379,6 +379,7 @@ public:
   // about 5 inst per byte + 11 inst for 4 elements.
   // for types that are have size larger than 8 or not power of 2.
   // hash up to 32 elements at a time. at a time.  each is 1 byte
+  template <bool STREAMING = false>
   FSC_FORCE_INLINE void hash(T const *key, uint8_t nstreams, uint32_t *out) const
   {
     // process 4 streams at a time.  all should be the same length.
@@ -427,10 +428,18 @@ public:
     }
 
     uint8_t blocks = nstreams >> 3;
-    if (blocks >= 1) _mm256_storeu_si256((__m256i *)out, h0);
-    if (blocks >= 2) _mm256_storeu_si256((__m256i *)(out + 8), h1);
-    if (blocks >= 3) _mm256_storeu_si256((__m256i *)(out + 16), h2);
-    if (blocks >= 4) _mm256_storeu_si256((__m256i *)(out + 24), h3);
+    if (STREAMING && ((reinterpret_cast<uint64_t>(out) & 31) == 0)) {
+      if (blocks >= 1) _mm256_stream_si256((__m256i *)out, h0);
+      if (blocks >= 2) _mm256_stream_si256((__m256i *)(out + 8), h1);
+      if (blocks >= 3) _mm256_stream_si256((__m256i *)(out + 16), h2);
+      if (blocks >= 4) _mm256_stream_si256((__m256i *)(out + 24), h3);
+    
+    } else {
+      if (blocks >= 1) _mm256_storeu_si256((__m256i *)out, h0);
+      if (blocks >= 2) _mm256_storeu_si256((__m256i *)(out + 8), h1);
+      if (blocks >= 3) _mm256_storeu_si256((__m256i *)(out + 16), h2);
+      if (blocks >= 4) _mm256_storeu_si256((__m256i *)(out + 24), h3);
+      }
     
 
     uint8_t rem = nstreams & 7; // remainder.
@@ -459,14 +468,23 @@ public:
 
   // TODO: [ ] hash1, do the k transform in parallel.  also use mask to keep only part wanted, rest of update and finalize do sequentially.
   // above 2, the finalize and updates will dominate and better to do those in parallel.
+  template <bool STREAMING = false>
   FSC_FORCE_INLINE void hash(T const *key, uint32_t *out) const
   {
     __m256i h0, h1, h2, h3;
     hash<32>(key, h0, h1, h2, h3);
-    _mm256_storeu_si256((__m256i *)out, h0);
-    _mm256_storeu_si256((__m256i *)(out + 8), h1);
-    _mm256_storeu_si256((__m256i *)(out + 16), h2);
-    _mm256_storeu_si256((__m256i *)(out + 24), h3);
+    if (STREAMING && ((reinterpret_cast<uint64_t>(out) & 31) == 0)) {
+      _mm256_stream_si256((__m256i *)out, h0);
+      _mm256_stream_si256((__m256i *)(out + 8), h1);
+      _mm256_stream_si256((__m256i *)(out + 16), h2);
+      _mm256_stream_si256((__m256i *)(out + 24), h3);
+  
+    } else {
+      _mm256_storeu_si256((__m256i *)out, h0);
+      _mm256_storeu_si256((__m256i *)(out + 8), h1);
+      _mm256_storeu_si256((__m256i *)(out + 16), h2);
+      _mm256_storeu_si256((__m256i *)(out + 24), h3);  
+    }
   }
 
   /// NOTE: multiples of 32.
@@ -1255,12 +1273,14 @@ public:
     return h;
   }
 
+  template <bool STREAMING = false>
   FSC_FORCE_INLINE void operator()(T const *keys, size_t count, uint32_t *results) const
   {
-    hash(keys, count, results);
+    hash<STREAMING>(keys, count, results);
   }
 
   // results always 32 bit.
+  template <bool STREAMING = false>
   FSC_FORCE_INLINE void hash(T const *keys, size_t count, uint32_t *results) const
   {
 
@@ -1269,63 +1289,63 @@ public:
     size_t i = 0;
     for (; i < max; i += batch_size)
     {
-      hasher.hash(&(keys[i]), results + i);
+      hasher.template hash<STREAMING>(&(keys[i]), results + i);
     }
 
     if (rem > 0)
-      hasher.hash(&(keys[i]), rem, results + i);
+      hasher.template hash<STREAMING>(&(keys[i]), rem, results + i);
   }
 
-  // assume consecutive memory layout.
-  template <typename OT>
-  FSC_FORCE_INLINE void hash_and_mod(T const *keys, size_t count, OT *results, uint32_t modulus) const
-  {
-    size_t rem = count & (batch_size - 1);
-    size_t max = count - rem;
-    size_t i = 0, j = 0;
-    for (; i < max; i += batch_size)
-    {
-      hasher.hash(&(keys[i]), temp);
-
-      for (j = 0; j < batch_size; ++j)
-        results[i + j] = temp[j] % modulus;
-    }
-
-    if (rem > 0)
-    {
-      hasher.hash(&(keys[i]), rem, temp);
-
-      for (j = 0; j < rem; ++j)
-        results[i + j] = temp[j] % modulus;
-    }
-  }
-
-  // assume consecutive memory layout.
-  // note that the paremter is modulus bits.
-  template <typename OT>
-  FSC_FORCE_INLINE void hash_and_mod_pow2(T const *keys, size_t count, OT *results, uint32_t modulus) const
-  {
-    assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
-    --modulus;
-
-    size_t rem = count & (batch_size - 1);
-    size_t max = count - rem;
-    size_t i = 0, j = 0;
-    for (; i < max; i += batch_size)
-    {
-      hasher.hash(&(keys[i]), temp);
-      for (j = 0; j < batch_size; ++j)
-        results[i + j] = temp[j] & modulus;
-    }
-
-    // last part.
-    if (rem > 0)
-    {
-      hasher.hash(&(keys[i]), rem, temp);
-      for (j = 0; j < rem; ++j)
-        results[i + j] = temp[j] & modulus;
-    }
-  }
+//  // assume consecutive memory layout.
+//  template <typename OT>
+//  FSC_FORCE_INLINE void hash_and_mod(T const *keys, size_t count, OT *results, uint32_t modulus) const
+//  {
+//    size_t rem = count & (batch_size - 1);
+//    size_t max = count - rem;
+//    size_t i = 0, j = 0;
+//    for (; i < max; i += batch_size)
+//    {
+//      hasher.hash(&(keys[i]), temp);
+//
+//      for (j = 0; j < batch_size; ++j)
+//        results[i + j] = temp[j] % modulus;
+//    }
+//
+//    if (rem > 0)
+//    {
+//      hasher.hash(&(keys[i]), rem, temp);
+//
+//      for (j = 0; j < rem; ++j)
+//        results[i + j] = temp[j] % modulus;
+//    }
+//  }
+//
+//  // assume consecutive memory layout.
+//  // note that the paremter is modulus bits.
+//  template <typename OT>
+//  FSC_FORCE_INLINE void hash_and_mod_pow2(T const *keys, size_t count, OT *results, uint32_t modulus) const
+//  {
+//    assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
+//    --modulus;
+//
+//    size_t rem = count & (batch_size - 1);
+//    size_t max = count - rem;
+//    size_t i = 0, j = 0;
+//    for (; i < max; i += batch_size)
+//    {
+//      hasher.hash(&(keys[i]), temp);
+//      for (j = 0; j < batch_size; ++j)
+//        results[i + j] = temp[j] & modulus;
+//    }
+//
+//    // last part.
+//    if (rem > 0)
+//    {
+//      hasher.hash(&(keys[i]), rem, temp);
+//      for (j = 0; j < rem; ++j)
+//        results[i + j] = temp[j] & modulus;
+//    }
+//  }
 
   // TODO: [ ] add a transform_hash_mod.
 };

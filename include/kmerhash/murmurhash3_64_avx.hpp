@@ -425,11 +425,11 @@ public:
   // about 5 inst per byte + 11 inst for 4 elements.
   // for types that are have size larger than 8 or not power of 2.
   // hash up to 32 elements at a time. at a time.  each is 1 byte
-  template <size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE == 1), int>::type = 1>
+  // STREAMING:  default do not stream, as a lot of use cases end up reading the same region.
+  template <bool STREAMING = false, size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE == 1), int>::type = 1>
   FSC_FORCE_INLINE void hash(T const *key, uint8_t nstreams, uint64_t *out) const
   {
-    // process 4 streams at a time.  all should be the same length.
-    // process 4 streams at a time.  all should be the same length.
+    // process 32 streams at a time.  all should be the same length.
 
     assert((nstreams <= 32) && "maximum number of streams is 32");
     assert((nstreams > 0) && "minimum number of streams is 1");
@@ -440,17 +440,27 @@ public:
 
     // do the full ones first.
     size_t blocks = nstreams >> 2;   // divide by 4 per vector
-    if (blocks >= 1) _mm256_storeu_si256((__m256i *)out, h0);
-    if (blocks >= 2) _mm256_storeu_si256((__m256i *)(out + 4), h1);
-    if (blocks >= 3) _mm256_storeu_si256((__m256i *)(out + 8), h2);
-    if (blocks >= 4) _mm256_storeu_si256((__m256i *)(out + 12), h3);
-    if (blocks >= 5) _mm256_storeu_si256((__m256i *)(out + 16), h4);
-    if (blocks >= 6) _mm256_storeu_si256((__m256i *)(out + 20), h5);
-    if (blocks >= 7) _mm256_storeu_si256((__m256i *)(out + 24), h6);
-    if (blocks >= 8) _mm256_storeu_si256((__m256i *)(out + 28), h7);
+    uint8_t rem = nstreams & 3; // remainder.  at most 3.
     
-
-    uint8_t rem = nstreams & 3; // remainder.
+    if (STREAMING && ((reinterpret_cast<uint64_t>(out) & 31) == 0)) {
+      if (blocks >= 1) _mm256_stream_si256((__m256i *)out, h0);
+      if (blocks >= 2) _mm256_stream_si256((__m256i *)(out + 4), h1);
+      if (blocks >= 3) _mm256_stream_si256((__m256i *)(out + 8), h2);
+      if (blocks >= 4) _mm256_stream_si256((__m256i *)(out + 12), h3);
+      if (blocks >= 5) _mm256_stream_si256((__m256i *)(out + 16), h4);
+      if (blocks >= 6) _mm256_stream_si256((__m256i *)(out + 20), h5);
+      if (blocks >= 7) _mm256_stream_si256((__m256i *)(out + 24), h6);
+      if (blocks >= 8) _mm256_stream_si256((__m256i *)(out + 28), h7);
+    } else {
+      if (blocks >= 1) _mm256_storeu_si256((__m256i *)out, h0);
+      if (blocks >= 2) _mm256_storeu_si256((__m256i *)(out + 4), h1);
+      if (blocks >= 3) _mm256_storeu_si256((__m256i *)(out + 8), h2);
+      if (blocks >= 4) _mm256_storeu_si256((__m256i *)(out + 12), h3);
+      if (blocks >= 5) _mm256_storeu_si256((__m256i *)(out + 16), h4);
+      if (blocks >= 6) _mm256_storeu_si256((__m256i *)(out + 20), h5);
+      if (blocks >= 7) _mm256_storeu_si256((__m256i *)(out + 24), h6);
+      if (blocks >= 8) _mm256_storeu_si256((__m256i *)(out + 28), h7);
+    }
     if (rem > 0)
     {
       // write remainders
@@ -484,9 +494,10 @@ public:
         break;
       }
     }
+  
   }
-
-  template <size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE == 2), int>::type = 1>
+  // STREAMING:  default do not stream, as a lot of use cases end up reading the same region.
+  template <bool STREAMING = false, size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE == 2), int>::type = 1>
   FSC_FORCE_INLINE void hash(T const *key, uint8_t nstreams, uint64_t *out) const
   {
     // process 4 streams at a time.  all should be the same length.
@@ -501,11 +512,17 @@ public:
 
     // do the full ones first.
     size_t blocks = nstreams >> 2;   // divide by 4 per vector
-    if (blocks >= 1) _mm256_storeu_si256((__m256i *)out, h0);
-    if (blocks >= 2) _mm256_storeu_si256((__m256i *)(out + 4), h1);
-    if (blocks >= 3) _mm256_storeu_si256((__m256i *)(out + 8), h2);
-    if (blocks >= 4) _mm256_storeu_si256((__m256i *)(out + 12), h3);
-    
+    if (STREAMING && ((reinterpret_cast<uint64_t>(out) & 31) == 0)) {
+      if (blocks >= 1) _mm256_stream_si256((__m256i *)out, h0);
+      if (blocks >= 2) _mm256_stream_si256((__m256i *)(out + 4), h1);
+      if (blocks >= 3) _mm256_stream_si256((__m256i *)(out + 8), h2);
+      if (blocks >= 4) _mm256_stream_si256((__m256i *)(out + 12), h3);
+    } else {      
+      if (blocks >= 1) _mm256_storeu_si256((__m256i *)out, h0);
+      if (blocks >= 2) _mm256_storeu_si256((__m256i *)(out + 4), h1);
+      if (blocks >= 3) _mm256_storeu_si256((__m256i *)(out + 8), h2);
+      if (blocks >= 4) _mm256_storeu_si256((__m256i *)(out + 12), h3);
+    }
 
     uint8_t rem = nstreams & 3; // remainder.
     if (rem > 0)
@@ -530,11 +547,10 @@ public:
       }
     }
   }
-  template <size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE > 2), int>::type = 1>
+  template <bool STREAMING = false, size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE > 2), int>::type = 1>
   FSC_FORCE_INLINE void hash(T const *key, uint8_t nstreams, uint64_t *out) const
   {
-    // process 4 streams at a time.  all should be the same length.
-    // process 4 streams at a time.  all should be the same length.
+    // process 8 streams at a time.  all should be the same length.
 
     assert((nstreams <= 8) && "maximum number of streams is 8");
     assert((nstreams > 0) && "minimum number of streams is 1");
@@ -542,21 +558,26 @@ public:
     __m256i h0, h1;
 
     switch (nstreams) {
-		case 8:     hash<8>(key, h0, h1); break;
-		case 7:     hash<7>(key, h0, h1); break;
-		case 6:     hash<6>(key, h0, h1); break;
-		case 5:     hash<5>(key, h0, h1); break;
-		case 4:     hash<4>(key, h0, h1); break;
-		case 3:     hash<3>(key, h0, h1); break;
-		case 2:     hash<2>(key, h0, h1); break;
-		case 1:     hash<1>(key, h0, h1); break;
+      case 8:     hash<8>(key, h0, h1); break;
+      case 7:     hash<7>(key, h0, h1); break;
+      case 6:     hash<6>(key, h0, h1); break;
+      case 5:     hash<5>(key, h0, h1); break;
+      case 4:     hash<4>(key, h0, h1); break;
+      case 3:     hash<3>(key, h0, h1); break;
+      case 2:     hash<2>(key, h0, h1); break;
+      case 1:     hash<1>(key, h0, h1); break;
     }
 
     // do the full ones first.
     size_t blocks = nstreams >> 2;   // divide by 4 per vector
-    if (blocks >= 1) _mm256_storeu_si256((__m256i *)out, h0);
-    if (blocks >= 2) _mm256_storeu_si256((__m256i *)(out + 4), h1);
-    
+    if (STREAMING && ((reinterpret_cast<uint64_t>(out) & 31) == 0)) {
+      if (blocks >= 1) _mm256_stream_si256((__m256i *)out, h0);
+      if (blocks >= 2) _mm256_stream_si256((__m256i *)(out + 4), h1);
+    } else {
+      if (blocks >= 1) _mm256_storeu_si256((__m256i *)out, h0);
+      if (blocks >= 2) _mm256_storeu_si256((__m256i *)(out + 4), h1);
+        
+    }
 
     uint8_t rem = nstreams & 3; // remainder.
     if (rem > 0)
@@ -579,37 +600,63 @@ public:
 
   // TODO: [ ] hash1, do the k transform in parallel.  also use mask to keep only part wanted, rest of update and finalize do sequentially.
   // above 2, the finalize and updates will dominate and better to do those in parallel.
-  template <size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE > 2), int>::type = 1>
+  template <bool STREAMING = false, size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE > 2), int>::type = 1>
   FSC_FORCE_INLINE void hash(T const *key, uint64_t *out) const
   {
+    // batch of 8
     __m256i h0, h1;
     hash<8>(key, h0, h1);
-    _mm256_storeu_si256((__m256i *)out, h0);
-    _mm256_storeu_si256((__m256i *)(out + 4), h1);
+    if (STREAMING && ((reinterpret_cast<uint64_t>(out) & 31) == 0)) {
+      _mm256_stream_si256((__m256i *)out, h0);
+      _mm256_stream_si256((__m256i *)(out + 4), h1);
+    } else {
+      _mm256_storeu_si256((__m256i *)out, h0);
+      _mm256_storeu_si256((__m256i *)(out + 4), h1);  
+    }
   }
-  template <size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE == 2), int>::type = 1>
+  template <bool STREAMING = false, size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE == 2), int>::type = 1>
   FSC_FORCE_INLINE void hash(T const *key, uint64_t *out) const
   {
+    // batch of 16
     __m256i h0, h1, h2, h3;
     hash(key, h0, h1, h2, h3);
-    _mm256_storeu_si256((__m256i *)out, h0);
-    _mm256_storeu_si256((__m256i *)(out + 4), h1);
-    _mm256_storeu_si256((__m256i *)(out + 8), h2);
-    _mm256_storeu_si256((__m256i *)(out + 12), h3);
+    if (STREAMING && ((reinterpret_cast<uint64_t>(out) & 31) == 0)) {
+      _mm256_stream_si256((__m256i *)out, h0);
+      _mm256_stream_si256((__m256i *)(out + 4), h1);
+      _mm256_stream_si256((__m256i *)(out + 8), h2);
+      _mm256_stream_si256((__m256i *)(out + 12), h3);
+    } else {      
+      _mm256_storeu_si256((__m256i *)out, h0);
+      _mm256_storeu_si256((__m256i *)(out + 4), h1);
+      _mm256_storeu_si256((__m256i *)(out + 8), h2);
+      _mm256_storeu_si256((__m256i *)(out + 12), h3);
+    }
   }
-  template <size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE == 1), int>::type = 1>
+  template <bool STREAMING = false, size_t KEY_SIZE = sizeof(T), typename ::std::enable_if<(KEY_SIZE == 1), int>::type = 1>
   FSC_FORCE_INLINE void hash(T const *key, uint64_t *out) const
   {
+    // batch of 32
     __m256i h0, h1, h2, h3, h4, h5, h6, h7;
     hash(key, h0, h1, h2, h3, h4, h5, h6, h7);
-    _mm256_storeu_si256((__m256i *)out, h0);
-    _mm256_storeu_si256((__m256i *)(out + 4), h1);
-    _mm256_storeu_si256((__m256i *)(out + 8), h2);
-    _mm256_storeu_si256((__m256i *)(out + 12), h3);
-    _mm256_storeu_si256((__m256i *)(out + 16), h4);
-    _mm256_storeu_si256((__m256i *)(out + 20), h5);
-    _mm256_storeu_si256((__m256i *)(out + 24), h6);
-    _mm256_storeu_si256((__m256i *)(out + 28), h7);
+    if (STREAMING && ((reinterpret_cast<uint64_t>(out) & 31) == 0)) {
+      _mm256_stream_si256((__m256i *)out, h0);
+      _mm256_stream_si256((__m256i *)(out + 4), h1);
+      _mm256_stream_si256((__m256i *)(out + 8), h2);
+      _mm256_stream_si256((__m256i *)(out + 12), h3);
+      _mm256_stream_si256((__m256i *)(out + 16), h4);
+      _mm256_stream_si256((__m256i *)(out + 20), h5);
+      _mm256_stream_si256((__m256i *)(out + 24), h6);
+      _mm256_stream_si256((__m256i *)(out + 28), h7);
+    } else {
+      _mm256_storeu_si256((__m256i *)out, h0);
+      _mm256_storeu_si256((__m256i *)(out + 4), h1);
+      _mm256_storeu_si256((__m256i *)(out + 8), h2);
+      _mm256_storeu_si256((__m256i *)(out + 12), h3);
+      _mm256_storeu_si256((__m256i *)(out + 16), h4);
+      _mm256_storeu_si256((__m256i *)(out + 20), h5);
+      _mm256_storeu_si256((__m256i *)(out + 24), h6);
+      _mm256_storeu_si256((__m256i *)(out + 28), h7);
+    }
   }
 
   /// NOTE: multiples of 32.
@@ -1526,12 +1573,14 @@ public:
     return h;
   }
 
+  template <bool STREAMING = false>
   FSC_FORCE_INLINE void operator()(T const *keys, size_t count, uint64_t *results) const
   {
-    hash(keys, count, results);
+    hash<STREAMING>(keys, count, results);
   }
 
   // results always 32 bit.
+  template <bool STREAMING = false>
   FSC_FORCE_INLINE void hash(T const *keys, size_t count, uint64_t *results) const
   {
 
@@ -1540,63 +1589,63 @@ public:
     size_t i = 0;
     for (; i < max; i += batch_size)
     {
-      hasher.hash(&(keys[i]), results + i);
+      hasher.template hash<STREAMING>(&(keys[i]), results + i);
     }
 
     if (rem > 0)
-      hasher.hash(&(keys[i]), rem, results + i);
+      hasher.template hash<STREAMING>(&(keys[i]), rem, results + i);
   }
 
-  // assume consecutive memory layout.
-  template <typename OT>
-  FSC_FORCE_INLINE void hash_and_mod(T const *keys, size_t count, OT *results, uint64_t modulus) const
-  {
-    size_t rem = count & (batch_size - 1);
-    size_t max = count - rem;
-    size_t i = 0, j = 0;
-    for (; i < max; i += batch_size)
-    {
-      hasher.hash(&(keys[i]), temp);
-
-      for (j = 0; j < batch_size; ++j)
-        results[i + j] = temp[j] % modulus;
-    }
-
-    if (rem > 0)
-    {
-      hasher.hash(&(keys[i]), rem, temp);
-
-      for (j = 0; j < rem; ++j)
-        results[i + j] = temp[j] % modulus;
-    }
-  }
-
-  // assume consecutive memory layout.
-  // note that the paremter is modulus bits.
-  template <typename OT>
-  FSC_FORCE_INLINE void hash_and_mod_pow2(T const *keys, size_t count, OT *results, uint64_t modulus) const
-  {
-    assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
-    --modulus;
-
-    size_t rem = count & (batch_size - 1);
-    size_t max = count - rem;
-    size_t i = 0, j = 0;
-    for (; i < max; i += batch_size)
-    {
-      hasher.hash(&(keys[i]), temp);
-      for (j = 0; j < batch_size; ++j)
-        results[i + j] = temp[j] & modulus;
-    }
-
-    // last part.
-    if (rem > 0)
-    {
-      hasher.hash(&(keys[i]), rem, temp);
-      for (j = 0; j < rem; ++j)
-        results[i + j] = temp[j] & modulus;
-    }
-  }
+//  // assume consecutive memory layout.
+//  template <typename OT>
+//  FSC_FORCE_INLINE void hash_and_mod(T const *keys, size_t count, OT *results, uint64_t modulus) const
+//  {
+//    size_t rem = count & (batch_size - 1);
+//    size_t max = count - rem;
+//    size_t i = 0, j = 0;
+//    for (; i < max; i += batch_size)
+//    {
+//      hasher.hash(&(keys[i]), temp);
+//
+//      for (j = 0; j < batch_size; ++j)
+//        results[i + j] = temp[j] % modulus;
+//    }
+//
+//    if (rem > 0)
+//    {
+//      hasher.hash(&(keys[i]), rem, temp);
+//
+//      for (j = 0; j < rem; ++j)
+//        results[i + j] = temp[j] % modulus;
+//    }
+//  }
+//
+//  // assume consecutive memory layout.
+//  // note that the paremter is modulus bits.
+//  template <typename OT>
+//  FSC_FORCE_INLINE void hash_and_mod_pow2(T const *keys, size_t count, OT *results, uint64_t modulus) const
+//  {
+//    assert((modulus & (modulus - 1)) == 0 && "modulus should be a power of 2.");
+//    --modulus;
+//
+//    size_t rem = count & (batch_size - 1);
+//    size_t max = count - rem;
+//    size_t i = 0, j = 0;
+//    for (; i < max; i += batch_size)
+//    {
+//      hasher.hash(&(keys[i]), temp);
+//      for (j = 0; j < batch_size; ++j)
+//        results[i + j] = temp[j] & modulus;
+//    }
+//
+//    // last part.
+//    if (rem > 0)
+//    {
+//      hasher.hash(&(keys[i]), rem, temp);
+//      for (j = 0; j < rem; ++j)
+//        results[i + j] = temp[j] & modulus;
+//    }
+//  }
 
   // TODO: [ ] add a transform_hash_mod.
 };

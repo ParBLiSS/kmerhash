@@ -5,6 +5,7 @@
 #include <exception>
 
 #include "kmerhash/hash_new.hpp"
+#include "kmerhash/mem_utils.hpp"
 #include "utils/benchmark_utils.hpp"
 
 #include "tclap/CmdLine.h"
@@ -20,7 +21,9 @@
 #define MEASURE_MURMURAVX 11
 #define MEASURE_CRC32C 12
 #define MEASURE_CLHASH 13
-#define MEASURE_MURMUR64AVX 11
+#define MEASURE_MURMUR64AVX 14
+#define MEASURE_MURMURAVX_STREAM 15
+#define MEASURE_MURMUR64AVX_STREAM 16
 
 //#define MEASURE_MURMURSSSE64 13
 
@@ -47,6 +50,12 @@ void benchmark_hash(H const & hasher, DataStruct<N> const * data, HT * hashes, s
 template <typename H, size_t N, typename HT>
 void benchmark_hash_batch(H const & hasher, DataStruct<N> const * data, HT * hashes, size_t count) {
   hasher.hash(data, count, hashes);
+}
+
+
+template <typename H, size_t N, typename HT>
+void benchmark_hash_batch_stream(H const & hasher, DataStruct<N> const * data, HT * hashes, size_t count) {
+  hasher.template operator()<true>(data, count, hashes);
 }
 
 
@@ -123,6 +132,21 @@ BL_BENCH_START(benchmark);
   }
   BL_BENCH_END(benchmark, "murmur64avx", count);
 
+  BL_BENCH_START(benchmark);
+  {
+
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_MURMUR64AVX)
+      __itt_resume();
+#endif
+    ::fsc::hash::murmur3avx64<DataStruct<N> > h;
+     benchmark_hash_batch_stream(h, data, out64, count);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_MURMUR64AVX)
+      __itt_pause();
+#endif
+  }
+  BL_BENCH_END(benchmark, "murmur64avxStream", count);
 
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_CLHASH)
@@ -225,6 +249,22 @@ BL_BENCH_END(benchmark, "clhash", count);
   }
   BL_BENCH_END(benchmark, "murmur32avx8", count);
 
+  BL_BENCH_START(benchmark);
+  {
+
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_MURMURAVX)
+      __itt_resume();
+#endif
+    ::fsc::hash::murmur3avx32<DataStruct<N> > h;
+     benchmark_hash_batch_stream(h, data, out, count);
+#ifdef VTUNE_ANALYSIS
+  if (measure_mode == MEASURE_MURMURAVX)
+      __itt_pause();
+#endif
+  }
+  BL_BENCH_END(benchmark, "murmur32avx8Stream", count);
+
 #endif
 
 #if defined(__SSE4_2__)
@@ -292,6 +332,8 @@ int main(int argc, char** argv) {
         measure_modes.push_back("murmur_sse");
         measure_modes.push_back("murmur_avx");
         measure_modes.push_back("murmur64_avx");
+        measure_modes.push_back("murmur_avx_stream");
+        measure_modes.push_back("murmur64_avx_stream");
         measure_modes.push_back("crc32c");
         measure_modes.push_back("clhash");
         measure_modes.push_back("disabled");
@@ -319,6 +361,10 @@ int main(int argc, char** argv) {
           measure_mode = MEASURE_MURMURAVX;
        } else if (measure_mode_str == "murmur64_avx") {
          measure_mode = MEASURE_MURMUR64AVX;
+        } else if (measure_mode_str == "murmur_avx_stream") {
+          measure_mode = MEASURE_MURMURAVX_STREAM;
+       } else if (measure_mode_str == "murmur64_avx_stream") {
+         measure_mode = MEASURE_MURMUR64AVX_STREAM;
         } else if (measure_mode_str == "crc32c") {
           measure_mode = MEASURE_CRC32C;
         } else if (measure_mode_str == "clhash") {
@@ -348,7 +394,7 @@ int main(int argc, char** argv) {
     throw std::invalid_argument("Unable to allocate for data.  count is too large, or 0.");
   }
 
-  unsigned int* hashes = (unsigned int*) malloc(count * sizeof(size_t));
+  unsigned int* hashes = ::utils::mem::aligned_alloc<unsigned int>(count * sizeof(size_t));
   
   if (hashes == nullptr) {
     throw std::invalid_argument("Unable to allocate for hash.  count is too large, or 0.");
