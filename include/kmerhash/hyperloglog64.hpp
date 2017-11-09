@@ -345,14 +345,20 @@ public:
 	}
 
 
-	inline void update(T const & val) {
-      internal_update(this->registers, h(val) << ignored_msb);
+	inline HVT update(T const & val) {
+    HVT hval = h(val);
+      internal_update(this->registers, hval << ignored_msb);
+      return hval;
 	}
 
 	inline void update_via_hashval(HVT const & hval) {
 	//	::std::cout << ::std::hex << static_cast<uint64_t>(hval) << ", unused msb " << static_cast<size_t>(unused_msb) << " ignored msb  " << static_cast<size_t>(ignored_msb) << " val " <<  (static_cast<uint64_t>(hval) << ignored_msb) << std::endl;
       internal_update(this->registers, hval << ignored_msb);
 	}
+
+  //BATCH INTERFACE
+
+  // ========== update from value, compute hash on the fly.
 
 	// if batch mode not present.
   template <typename H = Hash, typename TT>
@@ -396,6 +402,55 @@ public:
     update_impl(vals, count, 0);   // prefer integer as 0 defaults to int.
   }
 
+  // ======== update from value, saving the hash values for later use also.
+
+	// if batch mode not present.
+  template <typename H = Hash, typename HTT = HVT, typename TT>
+  inline auto update_impl(TT const * vals, size_t const & count, HTT* hvals, long)
+  -> decltype(::std::declval<H>()(::std::declval<TT>()), void()) {
+    HTT hv;
+    for (size_t i = 0; i < count; ++i) {
+      hv = h(vals[i]); 
+      internal_update(this->registers, hv << ignored_msb);
+      hvals[i] = hv;
+    }
+  }
+
+  // int as last parameter preferred.  batch mode avaialble
+  template <typename H = Hash, typename HTT = HVT, typename TT, typename HT>
+  inline auto update_impl(TT const * vals, size_t const & count, HTT* hvals, int)
+  -> decltype(::std::declval<H>()(vals, count, ::std::declval<HTT*>()), void()) {
+
+    assert(((h.batch_size & (h.batch_size - 1)) == 0) && "batch size should be power of 2.");
+
+    size_t max = count - (count & (h.batch_size - 1) );
+    size_t i = 0, j = 0, jmax;
+
+    for (; i < max; i += h.batch_size ) {
+      h(vals + i, h.batch_size, hvals + i);
+
+      for (j = i, jmax = i + h.batch_size; j < jmax; ++j) {
+        internal_update(this->registers, hvals[j] << ignored_msb);
+      }
+    }
+    // last part, do linearly.
+    for (; i < count; ++i) {
+      HTT hv = h(vals[i]);
+      internal_update(this->registers, hv << ignored_msb);
+      hvals[i] = hv;
+    }
+  }
+
+
+  template <typename HTT = HVT, typename TT>
+  inline auto update(TT const * vals, size_t const & count,
+    HVT* hvals)
+  -> decltype(this->update_impl(vals, count, hvals, 0), void()) {
+    update_impl(vals, count, hvals, 0);   // prefer integer as 0 defaults to int.
+  }
+
+
+  // =============== update when we already have hash values.
   inline void update_via_hashval(HVT const * hashes, size_t const & count) {
 //  	std::cout << "h0: " << hashes[0] << std::endl;
     for (size_t i = 0; i < count; ++i) {

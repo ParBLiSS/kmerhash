@@ -2740,6 +2740,11 @@ if (measure_mode == MEASURE_TRANSFORM)
 	        BL_BENCH_END(insert, "transform", input.size());
 
 
+// NOTE: overlap comm is incrementally inserting so we estimate before transmission, thus global estimate, and 64 bit
+//            hash is needed.
+//       non-overlap comm can estimate just before insertion for more accurate estimate based on actual input received.
+//          so 32 bit hashes are sufficient.
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
 
     // count and estimate and save the bucket ids.
     BL_BENCH_COLLECTIVE_START(insert, "permute_estimate", this->comm);
@@ -2768,7 +2773,36 @@ if (measure_mode == MEASURE_TRANSFORM)
 	::utils::mem::aligned_free(buffer);
 
     BL_BENCH_END(insert, "permute_estimate", input.size());
+#else 
 
+    // count and estimate and save the bucket ids.
+    BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
+    #ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_resume();
+    #endif
+        // allocate an HLL
+        // allocate the bucket sizes array
+    std::vector<size_t> send_counts(comm_size, 0);
+    
+          if (comm_size <= std::numeric_limits<uint8_t>::max())
+              this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
+                        input.data() );
+          else if (comm_size <= std::numeric_limits<uint16_t>::max())
+              this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint16_t>(comm_size), send_counts,
+                      input.data() );
+          else    // mpi supports only 31 bit worth of ranks.
+                this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
+                        input.data() );
+    
+    #ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_pause();
+    #endif
+        ::utils::mem::aligned_free(buffer);
+    
+        BL_BENCH_END(insert, "permute", input.size());
+#endif
 
 
 	BL_BENCH_COLLECTIVE_START(insert, "a2a_count", this->comm);
@@ -2786,6 +2820,8 @@ if (measure_mode == MEASURE_A2A)
 #endif
 	  	  	  BL_BENCH_END(insert, "a2a_count", recv_counts.size());
 
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+                  
 	  	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
 	  	        if (this->comm.rank() == 0) std::cout << "local estimated size " << this->hll.estimate() << std::endl;
 	  			size_t est = this->hll.estimate_average_per_rank(this->comm);
@@ -2797,8 +2833,9 @@ if (measure_mode == MEASURE_A2A)
 				// if (this->comm.rank() == 0)
 				//	std::cout << "rank " << this->comm.rank() << " reserved " << this->c.capacity() << std::endl;
 				BL_BENCH_END(insert, "alloc_hashtable", est);
+#endif
 
-	        size_t before = this->c.size();
+            size_t before = this->c.size();
 
 #if defined(OVERLAPPED_COMM)
 
@@ -2883,6 +2920,37 @@ if (measure_mode == MEASURE_A2A)
 #endif
 
 
+#if !defined(OVERLAPPED_COMM) && !defined(OVERLAPPED_COMM_FULLBUFFER) && !defined(OVERLAPPED_COMM_2P)
+
+// hash and estimate first.
+
+BL_BENCH_COLLECTIVE_START(insert, "estimate", this->comm);
+// local hash computation and hll update.
+using HVT = decltype(::std::declval<hasher>()(::std::declval<key_type>()));
+HVT* hvals = ::utils::mem::aligned_alloc<HVT>(recv_total);  // 64 byte alignment.
+this->c.get_hll().update(distributed, recv_total, hvals);
+
+size_t est = this->c.get_hll().estimate();
+if (this->comm.rank() == 0)
+std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
+
+BL_BENCH_END(insert, "estimate", est);
+
+
+BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
+
+if (est > this->c.capacity())
+    // add 10% just to be safe.
+    this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->c.get_hll().est_error_rate + 0.1)));
+// if (this->comm.rank() == 0)
+//	std::cout << "rank " << this->comm.rank() << " reserved " << this->c.capacity() << std::endl;
+BL_BENCH_END(insert, "alloc_hashtable", est);
+
+
+#endif
+
+
+
     BL_BENCH_COLLECTIVE_START(insert, "insert", this->comm);
     // local compute part.  called by the communicator.
     // TODO: predicated version.
@@ -2891,9 +2959,8 @@ if (measure_mode == MEASURE_A2A)
 if (measure_mode == MEASURE_INSERT)
     __itt_resume();
 #endif
-
-
-	this->c.insert(distributed, recv_total);
+// USE VERSION THAT DOES NOT RECOMPUTE HVALS.
+	this->c.insert(distributed, hvals, recv_total);
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_INSERT)
     __itt_pause();
@@ -2903,6 +2970,7 @@ BL_BENCH_END(insert, "insert", this->c.size());
 
 
 BL_BENCH_START(insert);
+    free(hvals);
 	free(distributed);
     BL_BENCH_END(insert, "clean up", recv_total);
 

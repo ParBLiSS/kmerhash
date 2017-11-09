@@ -944,8 +944,11 @@ namespace dsc  // distributed std container
 #endif
   	        BL_BENCH_END(insert, "transform", input.size());
 
-
-
+// NOTE: overlap comm is incrementally inserting so we estimate before transmission, thus global estimate, and 64 bit
+//            hash is needed.
+//       non-overlap comm can estimate just before insertion for more accurate estimate based on actual input received.
+//          so 32 bit hashes are sufficient.
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
         // count and estimate and save the bucket ids.
         BL_BENCH_COLLECTIVE_START(insert, "permute_estimate", this->comm);
 #ifdef VTUNE_ANALYSIS
@@ -973,7 +976,35 @@ namespace dsc  // distributed std container
     	free(buffer);
 
         BL_BENCH_END(insert, "permute_estimate", input.size());
-
+#else
+        // count and estimate and save the bucket ids.
+        BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
+        #ifdef VTUNE_ANALYSIS
+            if (measure_mode == MEASURE_TRANSFORM)
+                __itt_resume();
+        #endif
+                // allocate an HLL
+                // allocate the bucket sizes array
+            std::vector<size_t> send_counts(comm_size, 0);
+        
+                  if (comm_size <= std::numeric_limits<uint8_t>::max())
+                      this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
+                                input.data());
+                  else if (comm_size <= std::numeric_limits<uint16_t>::max())
+                      this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint16_t>(comm_size), send_counts,
+                              input.data() );
+                  else    // mpi supports only 31 bit worth of ranks.
+                        this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
+                                input.data());
+        
+        #ifdef VTUNE_ANALYSIS
+            if (measure_mode == MEASURE_TRANSFORM)
+                __itt_pause();
+        #endif
+                free(buffer);
+        
+                BL_BENCH_END(insert, "permute", input.size());
+#endif
 
 
   	BL_BENCH_COLLECTIVE_START(insert, "a2a_count", this->comm);
@@ -991,6 +1022,9 @@ namespace dsc  // distributed std container
 #endif
   	  	  	  BL_BENCH_END(insert, "a2a_count", recv_counts.size());
 
+
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+
   	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
   			size_t est = this->hll.estimate_average_per_rank(this->comm);
   			if (est > (this->c.get_max_load_factor() * this->c.capacity()))
@@ -998,6 +1032,7 @@ namespace dsc  // distributed std container
   	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
   	        //std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
   	        BL_BENCH_END(insert, "alloc_hashtable", est);
+#endif
 
   	        size_t before = this->c.size();
 
@@ -1099,7 +1134,8 @@ namespace dsc  // distributed std container
     if (measure_mode == MEASURE_INSERT)
         __itt_resume();
 #endif
-        	this->c.insert_no_estimate(distributed, distributed + recv_total);
+// NOTE: with local cardinality estimation.
+        	this->c.insert(distributed, distributed + recv_total);
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_INSERT)
         __itt_pause();
@@ -3133,16 +3169,20 @@ if (measure_mode == MEASURE_TRANSFORM)
 	        BL_BENCH_END(insert, "transform", input.size());
 
 
-
-    // count and estimate and save the bucket ids.
+// NOTE: overlap comm is incrementally inserting so we estimate before transmission, thus global estimate, and 64 bit
+//            hash is needed.
+//       non-overlap comm can estimate just before insertion for more accurate estimate based on actual input received.
+//          so 32 bit hashes are sufficient.
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+            // count and estimate and save the bucket ids.
     BL_BENCH_COLLECTIVE_START(insert, "permute_estimate", this->comm);
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_TRANSFORM)
-    __itt_resume();
-#endif
-	// allocate an HLL
-	// allocate the bucket sizes array
-std::vector<size_t> send_counts(comm_size, 0);
+    #ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_resume();
+    #endif
+        // allocate an HLL
+        // allocate the bucket sizes array
+    std::vector<size_t> send_counts(comm_size, 0);
 
 	  if (comm_size <= std::numeric_limits<uint8_t>::max())
 		  this->assign_count_estimate_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
@@ -3154,14 +3194,42 @@ std::vector<size_t> send_counts(comm_size, 0);
 	    	this->assign_count_estimate_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
 	    			input.data(), this->hll );
 
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_TRANSFORM)
-    __itt_pause();
+    #ifdef VTUNE_ANALYSIS
+    if (measure_mode == MEASURE_TRANSFORM)
+        __itt_pause();
+    #endif
+        ::utils::mem::aligned_free(buffer);
+
+        BL_BENCH_END(insert, "permute_estimate", input.size());
+#else
+            // count and estimate and save the bucket ids.
+            BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
+            #ifdef VTUNE_ANALYSIS
+            if (measure_mode == MEASURE_TRANSFORM)
+                __itt_resume();
+            #endif
+                // allocate an HLL
+                // allocate the bucket sizes array
+            std::vector<size_t> send_counts(comm_size, 0);
+            
+                  if (comm_size <= std::numeric_limits<uint8_t>::max())
+                      this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
+                                input.data() );
+                  else if (comm_size <= std::numeric_limits<uint16_t>::max())
+                      this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint16_t>(comm_size), send_counts,
+                              input.data() );
+                  else    // mpi supports only 31 bit worth of ranks.
+                        this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
+                                input.data() );
+            
+            #ifdef VTUNE_ANALYSIS
+            if (measure_mode == MEASURE_TRANSFORM)
+                __itt_pause();
+            #endif
+                ::utils::mem::aligned_free(buffer);
+            
+                BL_BENCH_END(insert, "permute", input.size());
 #endif
-	::utils::mem::aligned_free(buffer);
-
-    BL_BENCH_END(insert, "permute_estimate", input.size());
-
 
 
 	BL_BENCH_COLLECTIVE_START(insert, "a2a_count", this->comm);
@@ -3179,6 +3247,9 @@ if (measure_mode == MEASURE_A2A)
 #endif
 	  	  	  BL_BENCH_END(insert, "a2a_count", recv_counts.size());
 
+
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+                  
 	  	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
 	  	        size_t est = this->hll.estimate_average_per_rank(this->comm);
 	  			if (est > (this->c.get_max_load_factor() * this->c.capacity()))
@@ -3186,7 +3257,7 @@ if (measure_mode == MEASURE_A2A)
 	  	        	this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
 	  	        if (this->comm.rank() == 0) std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
 	  	        BL_BENCH_END(insert, "alloc_hashtable", est);
-
+#endif
 	        size_t before = this->c.size();
 
 #if defined(OVERLAPPED_COMM)
@@ -3285,8 +3356,8 @@ if (measure_mode == MEASURE_INSERT)
     __itt_resume();
 #endif
 
-
-	this->c.insert_no_estimate(distributed, distributed + recv_total, T(1));
+// NOTE: local cardinality estimation.
+	this->c.insert(distributed, distributed + recv_total, T(1));
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_INSERT)
     __itt_pause();
