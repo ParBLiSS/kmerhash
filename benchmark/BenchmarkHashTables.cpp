@@ -1,3 +1,27 @@
+
+
+#define ITER_MODE 1
+#define INDEX_MODE 2
+#define INTEGRATED_MODE 3
+#define SORT_MODE 4
+#define SHUFFLE_MODE 5
+
+#include "bliss-config.hpp"
+
+
+#ifdef VTUNE_ANALYSIS
+
+#define MEASURE_ESTIMATE 6
+#define MEASURE_INSERT 1
+#define MEASURE_FIND 2
+#define MEASURE_COUNT 3
+#define MEASURE_ERASE 4
+#define MEASURE_COUNT2 5
+
+static int measure_mode = MEASURE_DISABLED;
+#include <ittnotify.h>
+#endif
+
 #include <unordered_map>
 #include <vector>
 #include <random>
@@ -59,9 +83,6 @@
 #include "kmerhash/io_utils.hpp"
 #include "kmerhash/hash_new.hpp"
 
-#ifdef VTUNE_ANALYSIS
-#include <ittnotify.h>
-#endif
 
 // comparison of some hash tables.  note that this is not exhaustive and includes only the well tested ones and my own.  not so much
 // the one-off ones people wrote.
@@ -566,19 +587,6 @@ void benchmark_google_densehash_map(std::string name, std::vector<::std::pair<Km
 
   BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
 }
-
-#define ITER_MODE 1
-#define INDEX_MODE 2
-#define INTEGRATED_MODE 3
-#define SORT_MODE 4
-#define SHUFFLE_MODE 5
-
-#define MEASURE_ESTIMATE 6
-#define MEASURE_INSERT 1
-#define MEASURE_FIND 2
-#define MEASURE_COUNT 3
-#define MEASURE_ERASE 4
-#define MEASURE_COUNT2 5
 
 
 
@@ -1397,7 +1405,6 @@ parse_cmdline(int argc, char** argv) {
 	  size_t repeat_rate = 10;
 
 	  int insert_mode = INDEX_MODE;
-	  int measure_mode = MEASURE_INSERT;
 
 	  double max_load = 0.8;
 	  double min_load = 0.35;

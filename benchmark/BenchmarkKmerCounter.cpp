@@ -30,13 +30,37 @@
 #define _GNU_SOURCE     // get O_DIRECT from fnctl
 #endif
 
+#include "bliss-config.hpp"
+
+
+#ifdef VTUNE_ANALYSIS
+#define MEASURE_DISABLED 0
+
+#define MEASURE_RESERVE 10
+#define MEASURE_TRANSFORM 11
+#define MEASURE_UNIQUE 12
+#define MEASURE_BUCKET 13
+#define MEASURE_PERMUTE 14
+#define MEASURE_A2A 15
+#define MEASURE_COMPRESS 16
+
+#define MEASURE_INSERT 1
+#define MEASURE_FIND 2
+#define MEASURE_COUNT 3
+#define MEASURE_ERASE 4
+
+static int measure_mode = MEASURE_DISABLED;
+
+#include <ittnotify.h>
+
+#endif
+
 #include <fcntl.h>      // for O_DIRECT
 #include <cstdlib>
 #include <errno.h>      // posix calls generate errno.  also for perror()
 #include <sys/ioctl.h>  // for ioctl, to get disk block size.
 #include <linux/fs.h>  // for BLKSSZGET
 
-#include "bliss-config.hpp"
 #include <sys/mman.h> // mmap
 #include <sys/stat.h>  // for mmap sysconf
 #include <sys/types.h>
