@@ -9,7 +9,6 @@
 #include "bliss-config.hpp"
 
 
-#ifdef VTUNE_ANALYSIS
 
 #define MEASURE_ESTIMATE 6
 #define MEASURE_INSERT 1
@@ -17,9 +16,13 @@
 #define MEASURE_COUNT 3
 #define MEASURE_ERASE 4
 #define MEASURE_COUNT2 5
+#define MEASURE_DISABLED 0
 
-static int measure_mode = MEASURE_DISABLED;
+
+#ifdef VTUNE_ANALYSIS
+
 #include <ittnotify.h>
+
 #endif
 
 #include <unordered_map>
@@ -1405,6 +1408,7 @@ parse_cmdline(int argc, char** argv) {
 	  size_t repeat_rate = 10;
 
 	  int insert_mode = INDEX_MODE;
+	  int measure_mode = MEASURE_DISABLED;
 
 	  double max_load = 0.8;
 	  double min_load = 0.35;
@@ -1483,6 +1487,7 @@ parse_cmdline(int argc, char** argv) {
 	  measure_modes.push_back("count");
 	  measure_modes.push_back("erase");
 	  measure_modes.push_back("count2");
+	  measure_modes.push_back("disabled");
 	  TCLAP::ValuesConstraint<std::string> measureModeVals( measure_modes );
 	  TCLAP::ValueArg<std::string> measureModeArg("","measured_op","function to measure (default insert)",false,"insert",&measureModeVals, cmd);
 
@@ -1567,7 +1572,8 @@ parse_cmdline(int argc, char** argv) {
 		  measure_mode = MEASURE_ERASE;
 	  } else if (measure_mode_str == "count2") {
 		  measure_mode = MEASURE_COUNT2;
-	  }
+	  } else
+		  measure_mode = MEASURE_DISABLED;
 
 
 	  // Do what you intend.
