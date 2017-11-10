@@ -738,9 +738,9 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
       if (remainder > 0) {
 
         // write the remainder in a 512 block
-        unsigned char *x = ::utils::mem::aligned_alloc<unsigned char>(block_size);
-        memset(x, 0, block_size);
+        unsigned char *x = ::utils::mem::aligned_alloc<unsigned char>(block_size, 512);
         memcpy(x, ptr, remainder);
+        memset(x + remainder, 0, block_size - remainder);
         iter_written = write(fd, x, block_size);
 
         if (iter_written < 0) {
@@ -979,8 +979,9 @@ int main(int argc, char** argv) {
 	                                 "algo", "Reader Algorithm id. Fileloader w/o preload = 2, mmap = 5, posix=7, mpiio = 10. default is 7.",
 	                                 false, 7, "int", cmd);
 
+	    // output algo 7 and 8 are not working.
       TCLAP::ValueArg<int> outAlgoArg("B",
-                                   "output_algo", "Writer Algorithm id. mmap_1=2, mmap_all=3, posix_direct_1=7, posix_direct_all=8, posix_1=5, posix_all=6, mpiio=10. no_output=0.  default is 7.",
+                                   "output_algo", "Writer Algorithm id. mmap_1=2, mmap_all=3, posix_1=5, posix_all=6, posix_direct_1=7, posix_direct_all=8, mpiio=10. no_output=0.  default is 0.",
                                    false, 0, "int", cmd);
 
 		TCLAP::UnlabeledMultiArg<std::string> fileArg("filenames", "FASTA or FASTQ file names", false, "string", cmd);
@@ -1239,6 +1240,7 @@ int main(int argc, char** argv) {
 	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
 #elif (pMAP == RADIXSORT) || (pMAP == BROBINHOOD)
 	    // do nothing, since on insertion we reserve.
+	    if (comm.rank() == 0) std::cout << " Radixsort or Batched Robinhood, no explicit resizing." << std::endl;
 #else
 	    idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
 	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
@@ -1464,6 +1466,8 @@ int main(int argc, char** argv) {
 	  BL_BENCH_COLLECTIVE_END(test, "write_10", target_size, comm);
 
   } else if (writer_algo == 7) {
+//	  throw std::invalid_argument("posix direct write 1 currently not universally supported.");
+
 	  BL_BENCH_START(test);
 
 	  out_filename.append(std::to_string(comm.rank()));
@@ -1528,6 +1532,7 @@ int main(int argc, char** argv) {
 
 
   } else if (writer_algo == 8) { // on compbio, parallel write does not seem to make a significant difference.
+//	  throw std::invalid_argument("posix direct write all currently not universally supported.");
     BL_BENCH_START(test);
 
     out_filename.append(std::to_string(comm.rank()));
