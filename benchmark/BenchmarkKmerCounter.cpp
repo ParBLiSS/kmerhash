@@ -823,8 +823,9 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
     }
 	  comm.barrier();
 
-
-    fd = open64(filename.c_str(), O_RDWR | O_LARGEFILE | O_DIRECT, S_IRWXU | S_IRWXG );
+    // cannot be write only.
+    //fd = open64(filename.c_str(), O_RDWR | O_LARGEFILE | O_DIRECT, S_IRWXU | S_IRWXG );
+    fd = open64(filename.c_str(), O_RDWR | O_LARGEFILE , S_IRWXU | S_IRWXG );
 
     if (fd == -1)
     {
@@ -901,7 +902,9 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 
 		std::cout << "completed stretching." << std::endl;
 
-    fd = open64(filename.c_str(), O_RDWR | O_LARGEFILE | O_DIRECT, S_IRWXU | S_IRWXG );
+	// cannot be write only
+    //fd = open64(filename.c_str(), O_RDWR | O_LARGEFILE | O_DIRECT, S_IRWXU | S_IRWXG );
+    fd = open64(filename.c_str(), O_RDWR | O_LARGEFILE, S_IRWXU | S_IRWXG );
 
     if (fd == -1)
     {
@@ -1908,23 +1911,23 @@ int main(int argc, char** argv) {
     mxx::comm group = comm.split_shared();  // split comm into groups that share memory, i.e. by node.
     int max_group_size = group.size();  // size of each group.
     //max_group_size = mxx::allreduce(max_group_size, mxx::max<int>(), comm);  // get the biggest group size.
+				// q starts at offset 0.
+				unsigned char *q = map_out_file(out_filename, target_size, 0);
+
 
 		size_t copied = 0;
     for (int i = 0; i < max_group_size; ++i) {
 
       if (i == group.rank()) {
-				// q starts at offset 0.
-				unsigned char *q = map_out_file(out_filename, target_size, 0);
-
 				// copy data into array (writing)
 				copied = copyToByteArray(idx.get_map().get_local_container(), q);
 
-				// unmap the file
-				unmap_out_file(q, target_size, 0);
-			}
+		}
 			group.barrier();
 		}
-
+				// unmap the file
+				unmap_out_file(q, target_size, 0);
+	
 		// barrier for all.
     BL_BENCH_COLLECTIVE_END(test, "write_1", copied, comm);
 
