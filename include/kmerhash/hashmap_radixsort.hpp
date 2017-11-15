@@ -1586,7 +1586,6 @@ public:
 		return result;
 	}
 
-
     /// Fill data into an array.  array should be preallocated to be big enough.
 	int32_t getData(::std::pair<Key, V> *result) const
 	{
@@ -1618,6 +1617,38 @@ public:
             }
 		}
 		return elemCount;
+	}
+
+    /// serialize to unsigned char array.  return byte count written.
+    template <typename SERIALIZER>
+	size_t serialize(unsigned char *result, SERIALIZER const & ser) const
+	{
+        if((coherence != COHERENT))
+        {
+            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
+            return 0;
+        }
+
+	    int32_t i, j;
+        unsigned char * it = result;
+		for(i = 0; i < numBins; i++)
+		{
+			int count = countArray[i];
+			int y = std::min(count, binSize - 1);
+			for(j = 0; j < y; j++)
+			{
+				HashElement he = hashTable[i * binSize + j];
+				it = ser(he.key, he.val, it); // serialize the key and value, and advance 'it' as far as needed.
+			}
+            int32_t overflowBufId;
+            overflowBufId = hashTable[i * binSize + binSize - 1].bucketId;
+            for(; j < count; j++)
+            {
+                HashElement he = overflowBuf[overflowBufId * binSize + j - (binSize - 1)];
+				it = ser(he.key, he.val, it); // serialize the key and value, and advance 'it' as far as needed.
+            }
+		}
+		return std::distance(result, it);
 	}
 };
 }  // namespace fsc
