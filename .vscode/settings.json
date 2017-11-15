@@ -7,6 +7,12 @@
         "sparse_hash_map": "cpp",
         "sparse_hash_set": "cpp",
         "scoped_allocator": "cpp",
-        "type_traits": "cpp"
+        "type_traits": "cpp",
+        "hash_map": "cpp",
+        "hash_set": "cpp",
+        "sparsetable": "cpp",
+        "initializer_list": "cpp",
+        "*.ipp": "cpp",
+        "chrono": "cpp"
     }
 }

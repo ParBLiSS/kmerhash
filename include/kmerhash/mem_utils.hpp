@@ -39,12 +39,12 @@ namespace utils {
 		/// allocate aligned memory
 		template <typename T>
 		inline T* aligned_alloc(size_t const & cnt, size_t const & align = 64) {
-			T* ptr = nullptr;
+			unsigned char * ptr = nullptr;
 			if (posix_memalign(reinterpret_cast<void **>(&ptr), align, cnt * sizeof(T))) {
 			  free(ptr);
 			  throw std::length_error("failed to allocate aligned memory");
 			}
-			return ptr;
+			return reinterpret_cast<T *>(ptr);
 		}
 
 		template <typename T>

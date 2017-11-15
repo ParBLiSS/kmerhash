@@ -170,7 +170,7 @@ namespace khmxx
 
 
       // [2nd pass]: saving elements into correct position, and save the final position.
-      if (len = input.size()) {
+      if (len == input.size()) {
         // use swap
         std::vector<T> tmp_result(len);
         for (size_t i = f; i < l; ++i) {

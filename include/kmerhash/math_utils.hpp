@@ -142,7 +142,6 @@ inline CONSTEXPR T next_power_of_2(T x) {
 #endif
 
 
-#if 0
 
 // compute gcd
 #include <numeric>
@@ -280,7 +279,9 @@ T gcd(T a, T b)
 
 
 #else
+
 // no built in, so use iterative + mod.  from https://hbfs.wordpress.com/2013/12/10/the-speed-of-gcd/
+template <typename T>
 T gcd(T a, T b)
 {
 	T t;
@@ -302,7 +303,6 @@ T lcm(T a, T b)
     return temp ? ((a / temp) * b) : 0;
 }
 
-#endif
 
 
 #endif /* KMERHASH_MATH_UTILS_HPP_ */
