@@ -1185,7 +1185,7 @@ void bench_batch_insert_robinhood(HS& r, MicroBenchmark& mb, const std::string& 
 
         // query existing
         while (mb.keepRunning()) {
-          found += r.find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
+          found += r.template find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
         }
         s.elapsed_find_existing = mb.min() / upTo;
 
@@ -1194,7 +1194,7 @@ void bench_batch_insert_robinhood(HS& r, MicroBenchmark& mb, const std::string& 
           keys[up] = rand();
         }
         while (mb.keepRunning()) {
-          found += r.find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
+          found += r.template find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
         }
         s.elapsed_find_nonexisting = mb.min() / upTo;
         s.found = found;
@@ -1716,7 +1716,7 @@ void bench_batch_erase_robinhood(HS& r, MicroBenchmark& mb, const std::string& t
 
         // query existing
         while (mb.keepRunning()) {
-          found += r.find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
+          found += r.template find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
         }
         s.elapsed_find_existing = mb.min() / upTo;
 
@@ -1725,7 +1725,7 @@ void bench_batch_erase_robinhood(HS& r, MicroBenchmark& mb, const std::string& t
           keys[up] = rand();
         }
         while (mb.keepRunning()) {
-          found += r.find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
+          found += r.template find<typename HS::mapped_type>(keys.data(), keys.data() + keys.size()).size();
         }
         s.elapsed_find_nonexisting = mb.min() / upTo;
         s.found = found;
