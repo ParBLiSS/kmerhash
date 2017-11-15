@@ -244,23 +244,22 @@ namespace bliss
           return aux_curr != rhs.aux_curr || _curr != rhs._curr;
         }
 
-        /// dereference operator.  returned entry passes the predicate test.  guaranteed to be at a valid position
-//        inline typename base_traits::value_type& operator*() {
-//          return *_curr;
-//        }
-
-        inline typename base_traits::value_type* operator->() {
+        // note that if _curr is of type const_iterator, then for constness, we need to use pointer type
+        inline typename base_traits::pointer operator->() {
+          return _curr.operator->();
+        }
+        inline typename base_traits::value_type const * operator->() const {
           return _curr.operator->();
         }
 
         /// dereference operator.  returned entry passes the predicate test.  guaranteed to be at a valid position
-        inline typename base_traits::value_type operator*() const {
+        inline typename base_traits::reference operator*() {
           return *_curr;
         }
-//
-//        inline const typename base_traits::value_type * operator->() const {
-//          return _curr.operator->();
-//        }
+        /// dereference operator.  returned entry passes the predicate test.  guaranteed to be at a valid position
+        inline typename base_traits::value_type const & operator*() const {
+          return *_curr;
+        }
 
 
         /// referece operator.  returned entry passes the predicate test.  guaranteed to be at a valid position
