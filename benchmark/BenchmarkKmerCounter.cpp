@@ -711,7 +711,7 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
       size_t written = 0;
       ssize_t iter_written;
 
-			std::cout << "ready to write to " << reinterpret_cast<size_t>(ptr) << std::endl;
+			//std::cout << "ready to write to " << reinterpret_cast<size_t>(ptr) << std::endl;
 
       for ( size_t i = 0; i < iterations; ++i) {
         iter_written = write(fd, ptr, step);
@@ -727,9 +727,9 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 
         ptr += step;
         written += iter_written;
-				std::cout << "written " << written << " iter " << i << std::endl;
+				//std::cout << "written " << written << " iter " << i << std::endl;
       }
-			std::cout << "wrote main part " << std::endl;
+			//std::cout << "wrote main part " << std::endl;
       if (rem > 0) {
 
         // handle 1GB remainders.  still aligned to 512
@@ -747,7 +747,7 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
         ptr += rem;
         written += iter_written;
       }
-			std::cout << "wrote rem1 part " << std::endl;
+			//std::cout << "wrote rem1 part " << std::endl;
 
       if (remainder > 0) {
 
@@ -772,7 +772,7 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
         ::utils::mem::aligned_free(x);
       }
 
-			std::cout << "wrote rem2 part " << std::endl;
+			//std::cout << "wrote rem2 part " << std::endl;
 
 		// close the file when done.
 		close_out_file(fd);
@@ -900,7 +900,7 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 
 		close_out_file(fd);
 
-		std::cout << "completed stretching." << std::endl;
+		//std::cout << "completed stretching." << std::endl;
 
 	// cannot be write only
     //fd = open64(filename.c_str(), O_RDWR | O_LARGEFILE | O_DIRECT, S_IRWXU | S_IRWXG );
@@ -940,79 +940,131 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 	}
 
 
+// SERIALIZER for kmer and count.
+struct KVSerializer {
+	template <typename KT = KmerType, typename VT = CountType>
+	inline unsigned char* operator()(KT const & k, VT const & c, unsigned char* out)  const {
+		memcpy(out, k.getData(), sizeof(KT));  
+		memcpy(out + sizeof(KT), &c, sizeof(VT));  
 
+		return out + sizeof(KT) + sizeof(VT);
+	}
+
+	template <typename KT = KmerType, typename VT = CountType,
+		typename std::enable_if<((sizeof(KT) + sizeof(VT)) == sizeof(std::pair<KT, VT>)), int>::type = 1>
+	inline unsigned char* operator()(::std::pair<KT, VT> const & kv, unsigned char* out) const {
+		memcpy(out, &kv, sizeof(std::pair<KT, VT>));
+
+		return out + sizeof(std::pair<KT, VT>);
+	}
+
+	template <typename KT = KmerType, typename VT = CountType,
+		typename std::enable_if<((sizeof(KT) + sizeof(VT)) != sizeof(std::pair<KT, VT>)), int>::type = 1>
+	inline unsigned char* operator()(::std::pair<KT, VT> const & kv, unsigned char* out) const {
+		return this->operator()(kv.first, kv.second, out);
+	}
+
+};
+
+
+
+// return bytes copied.
 template <typename C>
 size_t copyToByteArray(C const & container, unsigned char * dest) {
+// assume that dest is large enough...
+	KVSerializer kvs;
 
+	#if (pMAP == RADIXSORT)   // serialize.  since some entries are empty, and we don't have a usable iterator.
+		return container.serialize(dest, kvs);
+	#elif (pMAP == SORTED)
 
-	#if (pMAP == SORTED)  // copy batch because we know this is consecutive
-		memcpy(dest, container.data(), container.size() * sizeof(typename IndexType::TupleType));	
-		return container.size() * sizeof(typename IndexType::TupleType);
-	#elif (pMAP == RADIXSORT)   // assume that dest is large enough...
-		//auto values = ::utils::mem::aligned_alloc<typename IndexType::TupleType>(container.size());
-		//int count = container.getData(values);
-		//memcpy(dest, values, count * sizeof(decltype(*values)));
-		//::utils::mem::aligned_free(values);  // radixsort getData returns _mm_alloc allocated data.
-		return container.getData(reinterpret_cast<typename IndexType::TupleType *>(dest));
-	#else  // copy one by one because iterator may be filtering or concatenating.
-		typename IndexType::TupleType * cdest = reinterpret_cast<typename IndexType::TupleType *>(dest);
-		// copy into temporary storage.
-		auto iter_end = container.cend();
-		//typename IndexType::TupleType val;
-		for (auto it = container.cbegin(); it != iter_end; ++it, ++cdest) {
+		size_t out_elem_size = sizeof(KmerType) + sizeof(CountType);
+		if (out_elem_size == sizeof(typename IndexType::TupleType)) {
+			// same size, so just copy directly.
+			memcpy(dest, container.data(), container.size() * out_elem_type);
 
-			// // memcopy the kmer
-			// memcpy(dest, it->first.getData(), KmerType::nWords * sizeof(typename KmerType::KmerWordType));
-			// q += KmerType::nWords * sizeof(typename KmerType::KmerWordType);
-			// memcpy(q, &(it->second), sizeof(typename IndexType::ValueType));
-			// q += sizeof(typename IndexType::ValueType);
-			// val = *it;
-			// memcpy(cdest, &val, sizeof(typename IndexType::TupleType));
-			*cdest = *it;
+		} else {
+			unsigned char * cdest = dest;
+			// copy into temporary storage.
+			auto it_end = container.cend();
+			
+			for (auto it = container.cbegin(); it != it_end; ++it) {
+				cdest = kvs(it->first, it->second, cdest);
+			}
+			
 		}
-		return container.size() * sizeof(typename IndexType::TupleType);
+		return container.size() * out_elem_size;
+
+	#else  // copy one by one because iterator may be filtering or concatenating.
+
+	
+		size_t out_elem_size = sizeof(KmerType) + sizeof(CountType);
+		unsigned char * cdest = dest;
+		// copy into temporary storage.
+		auto it_end = container.cend();
+		
+		for (auto it = container.cbegin(); it != it_end; ++it) {
+			cdest = kvs(*it, cdest);
+		}
+		return container.size() * out_elem_size;
 	#endif
 }
 
 
-template <bool direct, typename C>
+template <bool direct = false, size_t CHUNK_SIZE = (1UL << 30U), typename C>
 size_t writeToPOSIX(C const & container, std::string const & out_filename) {
 
-	size_t written; 
+	static_assert((CHUNK_SIZE <= (1 << 30)), "CHUNK_SIZE is limited to 1GB due to linux limitations.");
+
+	size_t out_elem_size = sizeof(KmerType) + sizeof(typename IndexType::ValueType);
+	KVSerializer kvs;
+
+	size_t written = 0; 
     // std::cout << "rank " << comm.rank() << " out file name " << out_filename << " target size " << target_size << std::endl;
-#if (pMAP == SORTED)   // directly write everything to disk.
-	written = container.size() * sizeof(typename IndexType::TupleType);
-	if (direct)
-		write_posix_direct(out_filename, reinterpret_cast<unsigned char*>(container.data()), 
-		written, 512);
-	else 
+#if (pMAP == SORTED)   // COPY and compact first to reduce space.
+	if ((sizeof(KmerType) + sizeof(CountType)) == sizeof(typename IndexType::TupleType)) {
+		written = container.size() * sizeof(typename IndexType::TupleType);
+		// may not be able to write directly because of lack of 512 byte alignment.
 		write_posix(out_filename, reinterpret_cast<unsigned char*>(container.data()), written);
+	} else {  // not same length data types, so copy first.
+		unsigned char * values = 
+			::utils::mem::aligned_alloc<unsigned char>(container.size() * out_elem_size, 512);
+		written = copyToByteArray(container, values);
+		if (direct)
+			write_posix_direct(out_filename, values, written, 512);
+		else 
+			write_posix(out_filename, values, written);
+	  ::utils::mem::aligned_free(values);
+	}
+
 
 #elif (pMAP == RADIXSORT)  // copy the entire dataset and then write.
-	typename IndexType::TupleType* values = 
-		::utils::mem::aligned_alloc<typename IndexType::TupleType>(container.size(), 512);
-  written = container.getData(values);
-	written *= sizeof(typename IndexType::TupleType);
+	unsigned char* values = 
+		::utils::mem::aligned_alloc<unsigned char>(container.size() * out_elem_size, 512);
+  written = container.serialize(values, kvs);
 	if (direct)
-	  write_posix_direct(out_filename, reinterpret_cast<unsigned char*>(values), 
-		written , 512);
+	  write_posix_direct(out_filename, values, written , 512);
 	else
-	  write_posix(out_filename, reinterpret_cast<unsigned char*>(values), 
-		written);
+	  write_posix(out_filename, values, written);
   ::utils::mem::aligned_free(values);
+
 #else // write 1 batch at a time
 
 	// assume 32KB, 8 way set-associative cache.
 	// there are 64 sets of 8x64byte cachelines.
 	// use 1/4 of it. = 2x64x64 bytes = 8KB.
 
+
 	// compute some step sizes.  then 8192 - (8192 % lcm)
 		// get lowest common multiple of 512 and tuple type size
-		size_t step512 = lcm(512UL, sizeof(typename IndexType::TupleType));
-		size_t step_bytes = (1 << 24) - ((1 << 24) % step512);   // instead of 8192, do 1 MB.
-    size_t step = step_bytes / sizeof(typename IndexType::TupleType);  // number of elements.
-
-		std::cout << "using step: " << step << " total bytes " << step_bytes << " lcm is " << step512 << std::endl;
+		size_t step512 = lcm(512UL, out_elem_size);
+		size_t step_bytes = CHUNK_SIZE - (CHUNK_SIZE % step512);  // user specified.
+		size_t container_bytes = container.size() * out_elem_size;
+		container_bytes = ((container_bytes + step512 - 1) / step512) * step512;  // next multiple of step512.
+		step_bytes = std::min(step_bytes, container_bytes); // at most CHUNK_SIZE, and exact multiple of 512.
+    size_t step = step_bytes / out_elem_size;  // number of elements - always divisible by sizeof(TupleType)
+		
+		std::cout << "ELEM SIZE " << out_elem_size << " lcm " << step512 << " total bytes " << step_bytes << " step " << step << " container size " << container.size() <<  std::endl;
 
 	// open file.
 		int fd = open_out_file(out_filename, direct);
@@ -1020,12 +1072,13 @@ size_t writeToPOSIX(C const & container, std::string const & out_filename) {
 			throw std::logic_error("ERROR: read_range: file pointer is null");
 		}
 
-	// allocate temp buffer (should stay in cache.)
-		typename IndexType::TupleType *p = 
-			::utils::mem::aligned_alloc<typename IndexType::TupleType>(step, 512);  // align at 512
+	// allocate temp buffer , allocate a multiple of 512.
+		unsigned char *p = 
+			::utils::mem::aligned_alloc<unsigned char>(step_bytes , 512);  // align at 512
 
-		std::cout << "posix aligned allocation at 512 boundary, address " << std::hex << reinterpret_cast<size_t>(p) << std::endl;
-		typename IndexType::TupleType *q = p;
+		std::cout << "posix aligned allocation at 512 boundary, address " << std::hex << reinterpret_cast<size_t>(p) << std::dec << std::endl;
+		// typename IndexType::TupleType *q = reinterpret_cast<typename IndexType::TupleType *>(p);
+		unsigned char *q = p;
 	// set up loop
 		written = 0;
 	  ssize_t iter_written;
@@ -1034,13 +1087,12 @@ size_t writeToPOSIX(C const & container, std::string const & out_filename) {
 		size_t j = 0, jmax;
 		auto it = container.cbegin();
 
-	// iterate over loop
+		// iterate over loop
 	  for ( i = 0; i < imax; i += step) {
 			// load data into temp buffer.
-			for ( j = i, jmax = i + step, q = p; j < jmax; ++j, ++it, ++q) {
+			for ( j = i, jmax = i + step, q = p; j < jmax; ++j, ++it) {
         // memcopy the kmer
-        //memcpy(q, &(*it), sizeof(typename IndexType::ValueType));  
-				*q = *it;
+				q = kvs(*it, q);
       }
 
 			// next write to file
@@ -1060,25 +1112,28 @@ size_t writeToPOSIX(C const & container, std::string const & out_filename) {
 
 	  if (i < container.size()) {
 			// load data into temp buffer.
-			for ( j = i, jmax = container.size(), q = p; j < jmax; ++j, ++it, ++q) {
+			for ( j = i, jmax = container.size(), q = p; j < jmax; ++j, ++it) {
         // memcopy the kmer
-        // memcpy(q, &(*it), sizeof(typename IndexType::ValueType));  
-				*q = *it;
+				q = kvs(*it, q);
       }
-			size_t remainder = (container.size() - i) * sizeof(typename IndexType::TupleType);
+			size_t remainder = (container.size() - i) * out_elem_size;
 			std::cout << "remainder bytes " << remainder << " i " << i << " container " << container.size() << std::endl;
 
-			memset(q, 0, step_bytes - remainder);  // from q to end.
+			if (direct) {  // if direct, then need to zero some entries.
+				remainder = ((remainder + 511) >> 9) << 9;
 
-			// next write to file
-			iter_written = write(fd, p, step_bytes );
+				memset(q, 0, remainder - (container.size() - i) * out_elem_size);  // from q to end.
+			}
+
+			// next write to file, only write as much as needed.
+			iter_written = write(fd, p, remainder );
 
 			if (iter_written < 0) {
 				std::cout << "ERROR: " << errno << std::endl;
 				perror("write");
 				throw std::logic_error("ERROR: write failed");
-			} else if (iter_written < static_cast<ssize_t>(step_bytes)) {
-				std::cout << "ERROR: write " << iter_written << " specified " << step_bytes << std::endl;
+			} else if (iter_written < static_cast<ssize_t>(remainder)) {
+				std::cout << "ERROR: write " << iter_written << " specified " << remainder << std::endl;
 				throw std::logic_error("ERROR: written less than specified");
 			}
 
@@ -1468,7 +1523,7 @@ int main(int argc, char** argv) {
 
 	  // check if 1 file is too much.  without this check, we have an infinite loop.
 	  if (i == j) {
-	    std::cerr << "ERROR: estimates indicate that there is not enough room to insert and grow table.  continuing but may fail or be very slow: i = j = " << i << std::endl;
+	    std::cerr << "WARNING: estimates indicate that there is not enough room to insert and grow table.  continuing but may fail or be very slow: i = j = " << i << std::endl;
 	    j = std::min(j + 1, filenames.size());
 	  }
       BL_BENCH_LOOP_PAUSE(test, 0);
@@ -1664,13 +1719,11 @@ int main(int argc, char** argv) {
 //  }
 
 //===== IO!
+		size_t out_elem_size = sizeof(KmerType) + sizeof(typename IndexType::ValueType);
+		KVSerializer kvs;
 
-  // get block size.
-//#if (pMAP == SORTED) || (pMAP == RADIXSORT)
-	size_t target_size = idx.local_size() * sizeof(typename IndexType::TupleType);
-//#else 
-//    size_t target_size = idx.local_size() * (KmerType::nWords * sizeof(typename KmerType::KmerWordType) + sizeof(typename IndexType::ValueType));
-//#endif
+		size_t target_size = idx.local_size() * out_elem_size; 
+
 
 	// total size.
 	size_t total = mxx::allreduce(target_size, comm);
@@ -1689,87 +1742,54 @@ int main(int argc, char** argv) {
 
 
 	  BL_BENCH_START(test);
-	#if (pMAP == SORTED)
-			write_mpiio(out_filename, reinterpret_cast<unsigned char*>(idx.get_map().get_local_container().data()), target_size, comm);
-	#else
 
-		typename IndexType::TupleType* values = 
-			::utils::mem::aligned_alloc<typename IndexType::TupleType>(idx.get_map().get_local_container().size());
-			typename IndexType::TupleType* q = values;
-			size_t count = 0;
-	#if (pMAP == RADIXSORT)
 
-		count = idx.get_map().get_local_container().getData(q);
-	#else
-		std::copy(idx.get_map().get_local_container().begin(), idx.get_map().get_local_container().end(), q);
-		count = idx.get_map().local_size();
-			// auto iter_end = idx.get_map().get_local_container().end();
-			// for (auto it = idx.get_map().get_local_container().begin(); it != iter_end; ++it, ++q, ++count) {
-			// // memcopy the kmer
-			// 	//memcpy(q, &(*it), sizeof(typename IndexType::ValueType));
-			// 	*q = *it;
-			// }
-	#endif
+		unsigned char* values;
+			// std::cout << "rank " << comm.rank() << " out file name " << out_filename << " target size " << target_size << std::endl;
+		#if (pMAP == SORTED)   // COPY and compact first to reduce space.
+			
+			if (out_elem_size == sizeof(typename IndexType::TupleType)) {
+				values = reinterpret_cast<unsigned char*>(idx.get_map().get_local_container().data());
+				write_mpiio(out_filename, values, target_size, comm);
+			} else {  // not same length data types, so copy first.
+				values = 
+					::utils::mem::aligned_alloc<unsigned char>(target_size, 512);
+				target_size = copyToByteArray(idx.get_map().get_local_container(), values);
+				write_mpiio(out_filename, values, target_size, comm);
+				::utils::mem::aligned_free(values);
+			}
 
-		write_mpiio(out_filename, reinterpret_cast<unsigned char*>(values), count * sizeof(typename IndexType::TupleType), comm);
-		::utils::mem::aligned_free(values);
-	#endif
+		#else
+
+			values = 
+				::utils::mem::aligned_alloc<unsigned char>(target_size, 512);
+
+			#if (pMAP == RADIXSORT)
+				target_size = idx.get_map().get_local_container().serialize(values, kvs);
+
+			#else
+				unsigned char* q = values;
+				auto it_end = idx.get_map().get_local_container().cend();
+				
+				for (auto it = idx.get_map().get_local_container().cbegin(); it != it_end; ++it) {
+					q = kvs(*it, q);
+				}
+			#endif
+
+			write_mpiio(out_filename, values, target_size, comm);
+			::utils::mem::aligned_free(values);
+		#endif
 
 		BL_BENCH_COLLECTIVE_END(test, "write_10", target_size, comm);
 
-  } else if (writer_algo == 7) {
 
-		if (comm.rank() == 0) std::cout << "write using posix direct, 1 file/core, 1 core/node at a time" << std::endl;
-		if (target_size > max_fsize)  throw std::logic_error("target file size larger than supported");
-
-    BL_BENCH_START(test);
-
-	  out_filename.append(std::to_string(comm.rank()));
-
-    mxx::comm group = comm.split_shared();  // split comm into groups that share memory, i.e. by node.
-    int max_group_size = group.size();  // size of each group.
-    //max_group_size = mxx::allreduce(max_group_size, mxx::max<int>(), comm);  // get the biggest group size.
-
-		std::cout << "lcoal container size is " << idx.get_map().get_local_container().size() << std::endl;
-
-		typename IndexType::TupleType *p = (typename IndexType::TupleType*)_mm_malloc(idx.get_map().get_local_container().size()*sizeof(typename IndexType::TupleType), 512);
-		//	::utils::mem::aligned_alloc<typename IndexType::TupleType>(idx.get_map().get_local_container().size(), 512);
-
-		// copying
-		size_t copied_bytes = copyToByteArray(idx.get_map().get_local_container(), reinterpret_cast<unsigned char*>(p));
-
-    for (int i = 0; i < max_group_size; ++i) {
-
-      if (i == group.rank()) {
-				std::cout << " rank " << i << " writing " << copied_bytes << " bytes with 512 alignment " << std::endl;
-				//writing
-				write_posix_direct(out_filename, p, copied_bytes, 512);
-			}
-			group.barrier();  // use barrier to force one from a node at a time.
+  } else if ((writer_algo == 5) || (writer_algo == 7)) {
+		if (writer_algo == 5) {
+			if (comm.rank() == 0) std::cout << "write using posix with buffering, 1 file per core, 1 core per node at once.  DO NOT USE." << std::endl;
+		} else {
+			if (comm.rank() == 0) std::cout << "write using posix direct, 1 file per core, 1 core per node at once.  DO NOT USE." << std::endl;
 		}
-		//::utils::mem::aligned_free(p);
-		_mm_free(p);
-		
-	  BL_BENCH_COLLECTIVE_END(test, "write_7", target_size, comm);
 
-
-  } else if (writer_algo == 8) { // on compbio, parallel write does not seem to make a significant difference.
-		if (comm.rank() == 0) std::cout << "write using posix direct, 1 file per core, all cores at once." << std::endl;
-		if (target_size > max_fsize)  throw std::logic_error("target file size larger than supported");
-
-    BL_BENCH_START(test);
-
-    out_filename.append(std::to_string(comm.rank()));
-    //std::cout << "rank " << comm.rank() << " out file name " << out_filename << " target size " << target_size << std::endl;
-
-
-		size_t copied = writeToPOSIX<true>(idx.get_map().get_local_container(), out_filename);
-
-
-    BL_BENCH_COLLECTIVE_END(test, "write_8", copied, comm);
-
-  } else if (writer_algo == 5) {
-		if (comm.rank() == 0) std::cout << "write using posix with buffering, 1 file per core, 1 core per node at once." << std::endl;
 		if (target_size > max_fsize)  throw std::logic_error("target file size larger than supported");
 
 
@@ -1777,7 +1797,6 @@ int main(int argc, char** argv) {
 
     out_filename.append(std::to_string(comm.rank()));
     // std::cout << "rank " << comm.rank() << " out file name " << out_filename << " target size " << target_size << std::endl;
-
 
 
     mxx::comm group = comm.split_shared();  // split comm into groups that share memory, i.e. by node.
@@ -1791,31 +1810,42 @@ int main(int argc, char** argv) {
 
       if (i == group.rank()) {
 				// writing
-				copied = writeToPOSIX<false>(idx.get_map().get_local_container(), out_filename);
+				if (writer_algo == 5)
+					copied = writeToPOSIX<false, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
+				else
+					copied = writeToPOSIX<true, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
       }
 			group.barrier();  // use barrier to force one from a node at a time.
 
     }
 
 
-    BL_BENCH_COLLECTIVE_END(test, "write_5", copied, comm);
+    BL_BENCH_COLLECTIVE_END(test, ((writer_algo == 5) ? "write_5" : "write_7"), copied, comm);
 
-  } else if (writer_algo == 6) {
-		if (comm.rank() == 0) std::cout << "write using posix with buffering, 1 file per core, all cores at once." << std::endl;
+  } else if ((writer_algo == 6) || (writer_algo == 8)) {
+		if (writer_algo == 6) {
+			if (comm.rank() == 0) std::cout << "write using posix with buffering, 1 file per core, all cores at once. For MODERATE CORE COUNT and sufficient MEM." << std::endl;
+		} else {
+			if (comm.rank() == 0) std::cout << "write using posix direct, 1 file per core, all cores at once. For MODERATE CORE COUNT and sufficient MEM." << std::endl;
+		}
 		if (target_size > max_fsize)  throw std::logic_error("target file size larger than supported");
     
     BL_BENCH_START(test);
 
     out_filename.append(std::to_string(comm.rank()));
 
-		size_t copied = writeToPOSIX<false>(idx.get_map().get_local_container(), out_filename);
-
-    BL_BENCH_COLLECTIVE_END(test, "write_6", copied, comm);
+		size_t copied = 0;
+		if (writer_algo == 6)
+			copied = writeToPOSIX<false, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
+		else {
+			copied = writeToPOSIX<true, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
+		}
+    BL_BENCH_COLLECTIVE_END(test, ((writer_algo == 6) ? "write_6" : "write_8"), copied, comm);
 
 
   } else if (writer_algo == 2) {  // mmap_1.  one core from each node writes at a time..
 
-		if (comm.rank() == 0) std::cout << "write using mmap, 1 file, 1 core/node at a time" << std::endl;
+		if (comm.rank() == 0) std::cout << "write using mmap: NOT FOR GPFS! 1 file, 1 core/node at a time. DO NOT USE." << std::endl;
 		if (total > max_fsize)  throw std::logic_error("target file size larger than supported");
 
     BL_BENCH_START(test);
@@ -1853,7 +1883,7 @@ int main(int argc, char** argv) {
     BL_BENCH_COLLECTIVE_END(test, "write_2", copied, comm);
 
   } else if (writer_algo == 3) {  // mmap_all.  all writing at once.
-		if (comm.rank() == 0) std::cout << "write using mmap, all cores concurrently" << std::endl;
+		if (comm.rank() == 0) std::cout << "write using mmap: NOT FOR GPFS! 1 file, all cores concurrently: for SHARED MEM with local file system." << std::endl;
 		if (total > max_fsize)  throw std::logic_error("target file size larger than supported");
 
     BL_BENCH_START(test);
@@ -1879,7 +1909,7 @@ int main(int argc, char** argv) {
     BL_BENCH_COLLECTIVE_END(test, "write_3", copied, comm);
 
   } else if (writer_algo == 4) {  // mmap_all.  all writing at once.
-		if (comm.rank() == 0) std::cout << "write using mmap, 1 file per core, all at once." << std::endl;
+		if (comm.rank() == 0) std::cout << "write using mmap: NOT FOR GPFS! 1 file per core, all at once: for smaller COMM SIZE" << std::endl;
 		if (target_size > max_fsize)  throw std::logic_error("target file size larger than supported");
 
 
@@ -1900,7 +1930,8 @@ int main(int argc, char** argv) {
     BL_BENCH_COLLECTIVE_END(test, "write_4", copied, comm);
 
   } else if (writer_algo == 1) {  // mmap_all.  all writing at once.
-		if (comm.rank() == 0) std::cout << "write using mmap, 1 file per core, 1core/node at a time.." << std::endl;
+
+		if (comm.rank() == 0) std::cout << "write using MMAP: NOT FOR GPFS! 1 file per core, 1core/node at a time: for LARGE NODE COUNT.  DO NOT USE." << std::endl;
 		if (target_size > max_fsize)  throw std::logic_error("target file size larger than supported");
 
 
@@ -1912,7 +1943,7 @@ int main(int argc, char** argv) {
     int max_group_size = group.size();  // size of each group.
     //max_group_size = mxx::allreduce(max_group_size, mxx::max<int>(), comm);  // get the biggest group size.
 				// q starts at offset 0.
-				unsigned char *q = map_out_file(out_filename, target_size, 0);
+		unsigned char *q = map_out_file(out_filename, target_size, 0);
 
 
 		size_t copied = 0;
