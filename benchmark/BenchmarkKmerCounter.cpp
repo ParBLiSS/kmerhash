@@ -1480,11 +1480,14 @@ int main(int argc, char** argv) {
 #if (pMAP == SORTED)
 	    idx.get_map().get_local_container().reserve(idx.local_size() + kmer_est);
 	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
-#elif (pMAP == RADIXSORT) || (pMAP == BROBINHOOD)
+#elif (pMAP == RADIXSORT)
+	    if (idx.get_map().get_local_container().capacity() < (avg_distinct_count + delta_distinct))
+	    	idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
 	    // do nothing, since on insertion we reserve.
-	    if (comm.rank() == 0) std::cout << " Radixsort or Batched Robinhood, no explicit resizing." << std::endl;
+	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
 #else
-	    idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
+	    if ((idx.get_map().get_local_container().capacity() * idx.get_map().get_local_container().get_max_load_factor()) < (avg_distinct_count + delta_distinct))
+	    	idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
 	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
 #endif
     BL_BENCH_LOOP_PAUSE(test, 3);
@@ -1566,7 +1569,7 @@ int main(int argc, char** argv) {
 	    // now insert.
       BL_BENCH_LOOP_RESUME(test, 4);
 #if (pMAP == RADIXSORT)
-      idx.get_map().insert(temp);  // should be insert_no_finalize but just to be safe don't do it right now...
+      idx.get_map().insert_no_finalize(temp);  // should be insert_no_finalize but just to be safe don't do it right now...
 #else
 	    idx.insert(temp);
 #endif
@@ -1630,7 +1633,7 @@ int main(int argc, char** argv) {
     } // filename loop.
 
 #if (pMAP == RADIXSORT)
-      // idx.get_map().get_local_container().finalize_insert();
+	idx.get_map().get_local_container().finalize_insert();
 #endif
   } // scoped to clear temp.
 
