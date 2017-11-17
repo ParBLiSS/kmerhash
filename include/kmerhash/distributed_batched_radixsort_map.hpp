@@ -2623,7 +2623,7 @@ protected:
    * @brief insert new elements in the distributed batched_radixsort_multimap.
    * @param input  vector.  will be permuted.
    */
-  template <typename Predicate = ::bliss::filter::TruePredicate>
+  template <bool estimate, typename Predicate = ::bliss::filter::TruePredicate>
   size_t insert_1(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
     // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
     BL_BENCH_INIT(insert);
@@ -2655,20 +2655,43 @@ if (measure_mode == MEASURE_TRANSFORM)
       serialize_vector(input, ss.str());
 #endif
 
+      using HVT = decltype(::std::declval<hasher>()(::std::declval<key_type>()));
+      HVT* hvals;
+if (estimate) {
+      BL_BENCH_COLLECTIVE_START(insert, "estimate", this->comm);
+      // local hash computation and hll update.
+      hvals = ::utils::mem::aligned_alloc<HVT>(input.size() + local_container_type::PFD);  // 64 byte alignment.
+      this->c.get_hll().update(input.data(), input.size(), hvals);
+
+      size_t est = this->c.get_hll().estimate();
+      if (this->comm.rank() == 0)
+      std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
+
+      BL_BENCH_END(insert, "estimate", est);
+
+
+      BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
+
+      if (est > this->c.capacity())
+          // add 10% just to be safe.
+          this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->c.get_hll().est_error_rate + 0.1)));
+      // if (this->comm.rank() == 0)
+      //	std::cout << "rank " << this->comm.rank() << " reserved " << this->c.capacity() << std::endl;
+      BL_BENCH_END(insert, "alloc_hashtable", est);
+}
+
 
       size_t before = this->c.size();
       BL_BENCH_COLLECTIVE_START(insert, "insert", this->comm);
     // local compute part.  called by the communicator.
 
-    // TODO: predicated version.
-//        if (!::std::is_same<Predicate, ::bliss::filter::TruePredicate>::value) {
-//          std::cerr << "WARNING: not implemented to filter by predicate." << std::endl;
-//        	count = this->c.insert(input, pred);
-//        } else
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_INSERT)
     __itt_resume();
 #endif
+	if (estimate)
+	      this->c.insert(input.data(), hvals, input.size());
+	else
       this->c.insert(input.data(), input.size());
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_INSERT)
@@ -2677,11 +2700,12 @@ if (measure_mode == MEASURE_INSERT)
       BL_BENCH_END(insert, "insert", this->c.size());
 
     BL_BENCH_REPORT_MPI_NAMED(insert, "hashmap:insert_1", this->comm);
+    if (estimate) free(hvals);
 
     return this->c.size() - before;
   }
 
-  template <typename Predicate = ::bliss::filter::TruePredicate>
+  template <bool estimate, typename Predicate = ::bliss::filter::TruePredicate>
   size_t insert_p(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
     // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
     BL_BENCH_INIT(insert);
@@ -2744,7 +2768,6 @@ if (measure_mode == MEASURE_TRANSFORM)
 //            hash is needed.
 //       non-overlap comm can estimate just before insertion for more accurate estimate based on actual input received.
 //          so 32 bit hashes are sufficient.
-#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
 
     // count and estimate and save the bucket ids.
     BL_BENCH_COLLECTIVE_START(insert, "permute_estimate", this->comm);
@@ -2756,6 +2779,8 @@ if (measure_mode == MEASURE_TRANSFORM)
 	// allocate the bucket sizes array
 std::vector<size_t> send_counts(comm_size, 0);
 
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+	if (estimate) {
 	  if (comm_size <= std::numeric_limits<uint8_t>::max())
 		  this->assign_count_estimate_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
 	    			input.data(), this->hll );
@@ -2765,6 +2790,21 @@ std::vector<size_t> send_counts(comm_size, 0);
 	  else    // mpi supports only 31 bit worth of ranks.
 	    	this->assign_count_estimate_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
 	    			input.data(), this->hll );
+	} else {
+#endif
+        if (comm_size <= std::numeric_limits<uint8_t>::max())
+            this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
+                      input.data() );
+        else if (comm_size <= std::numeric_limits<uint16_t>::max())
+            this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint16_t>(comm_size), send_counts,
+                    input.data() );
+        else    // mpi supports only 31 bit worth of ranks.
+              this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
+                      input.data() );
+
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+	}
+#endif
 
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_TRANSFORM)
@@ -2773,37 +2813,7 @@ if (measure_mode == MEASURE_TRANSFORM)
 	::utils::mem::aligned_free(buffer);
 
     BL_BENCH_END(insert, "permute_estimate", input.size());
-#else 
-
-    // count and estimate and save the bucket ids.
-    BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
-    #ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_TRANSFORM)
-        __itt_resume();
-    #endif
-        // allocate an HLL
-        // allocate the bucket sizes array
-    std::vector<size_t> send_counts(comm_size, 0);
     
-          if (comm_size <= std::numeric_limits<uint8_t>::max())
-              this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
-                        input.data() );
-          else if (comm_size <= std::numeric_limits<uint16_t>::max())
-              this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint16_t>(comm_size), send_counts,
-                      input.data() );
-          else    // mpi supports only 31 bit worth of ranks.
-                this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
-                        input.data() );
-    
-    #ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_TRANSFORM)
-        __itt_pause();
-    #endif
-        ::utils::mem::aligned_free(buffer);
-    
-        BL_BENCH_END(insert, "permute", input.size());
-#endif
-
 
 	BL_BENCH_COLLECTIVE_START(insert, "a2a_count", this->comm);
 #ifdef VTUNE_ANALYSIS
@@ -2821,7 +2831,7 @@ if (measure_mode == MEASURE_A2A)
 	  	  	  BL_BENCH_END(insert, "a2a_count", recv_counts.size());
 
 #if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
-                  
+    if (estimate) {
 	  	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
 	  	        if (this->comm.rank() == 0) std::cout << "local estimated size " << this->hll.estimate() << std::endl;
 	  			size_t est = this->hll.estimate_average_per_rank(this->comm);
@@ -2833,6 +2843,7 @@ if (measure_mode == MEASURE_A2A)
 				// if (this->comm.rank() == 0)
 				//	std::cout << "rank " << this->comm.rank() << " reserved " << this->c.capacity() << std::endl;
 				BL_BENCH_END(insert, "alloc_hashtable", est);
+    }
 #endif
 
             size_t before = this->c.size();
@@ -2919,15 +2930,14 @@ if (measure_mode == MEASURE_A2A)
 		serialize(distributed, distributed + recv_total, ss.str());
 #endif
 
-
-#if !defined(OVERLAPPED_COMM) && !defined(OVERLAPPED_COMM_FULLBUFFER) && !defined(OVERLAPPED_COMM_2P)
-
+		using HVT = decltype(::std::declval<hasher>()(::std::declval<key_type>()));
+		HVT* hvals;
+if (estimate) {
 // hash and estimate first.
 
 BL_BENCH_COLLECTIVE_START(insert, "estimate", this->comm);
 // local hash computation and hll update.
-using HVT = decltype(::std::declval<hasher>()(::std::declval<key_type>()));
-HVT* hvals = ::utils::mem::aligned_alloc<HVT>(recv_total);  // 64 byte alignment.
+hvals = ::utils::mem::aligned_alloc<HVT>(recv_total + local_container_type::PFD);  // 64 byte alignment.
 this->c.get_hll().update(distributed, recv_total, hvals);
 
 size_t est = this->c.get_hll().estimate();
@@ -2945,9 +2955,8 @@ if (est > this->c.capacity())
 // if (this->comm.rank() == 0)
 //	std::cout << "rank " << this->comm.rank() << " reserved " << this->c.capacity() << std::endl;
 BL_BENCH_END(insert, "alloc_hashtable", est);
+}
 
-
-#endif
 
 
 
@@ -2960,7 +2969,10 @@ if (measure_mode == MEASURE_INSERT)
     __itt_resume();
 #endif
 // USE VERSION THAT DOES NOT RECOMPUTE HVALS.
-	this->c.insert(distributed, hvals, recv_total);
+	if (estimate)
+		this->c.insert(distributed, hvals, recv_total);
+	else
+		this->c.insert(distributed, recv_total);
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_INSERT)
     __itt_pause();
@@ -2970,7 +2982,7 @@ BL_BENCH_END(insert, "insert", this->c.size());
 
 
 BL_BENCH_START(insert);
-    free(hvals);
+if (estimate) free(hvals);
 	free(distributed);
     BL_BENCH_END(insert, "clean up", recv_total);
 
@@ -2989,7 +3001,7 @@ public:
        * @brief insert new elements in the distributed batched_radixsort_multimap.
        * @param input  vector.  will be permuted.
        */
-      template <typename Predicate = ::bliss::filter::TruePredicate>
+      template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>
       size_t insert(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
 
           BL_BENCH_INIT(insert);
@@ -2997,9 +3009,9 @@ public:
           BL_BENCH_START(insert);
     	  size_t result;
     	  if (this->comm.size() == 1) {
-    		  result = this->insert_1(input, sorted_input, pred);
+    		  result = this->template insert_1<estimate>(input, sorted_input, pred);
     	  } else {
-    		  result = this->insert_p(input, sorted_input, pred);
+    		  result = this->template insert_p<estimate>(input, sorted_input, pred);
     	  }
           BL_BENCH_END(insert, "insert", 0);
 
@@ -3014,7 +3026,7 @@ public:
     	  return result;
       }
 
-      template <typename Predicate = ::bliss::filter::TruePredicate>
+      template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>
       size_t insert_no_finalize(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
 
           BL_BENCH_INIT(insert);
@@ -3022,9 +3034,9 @@ public:
           BL_BENCH_START(insert);
     	  size_t result;
     	  if (this->comm.size() == 1) {
-    		  result = this->insert_1(input, sorted_input, pred);
+    		  result = this->template insert_1<estimate>(input, sorted_input, pred);
     	  } else {
-    		  result = this->insert_p(input, sorted_input, pred);
+    		  result = this->template insert_p<estimate>(input, sorted_input, pred);
     	  }
           BL_BENCH_END(insert, "insert", 0);
 

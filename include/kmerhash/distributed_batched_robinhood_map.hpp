@@ -43,7 +43,7 @@
 #define DISTRIBUTED_BATCHED_ROBINHOOD_MAP_HPP
 
 
-#include "kmerhash/robinhood_offset_hashmap.hpp"  // local storage hash table  // for multimap
+#include "kmerhash/robinhood_offset_hashmap_ptr.hpp"  // local storage hash table  // for multimap
 #include <utility> 			  // for std::pair
 
 //#include <sparsehash/dense_hash_map>  // not a multimap, where we need it most.
@@ -822,7 +822,7 @@ namespace dsc  // distributed std container
        * @brief insert new elements in the distributed batched_robinhood_multimap.
        * @param input  vector.  will be permuted.
        */
-      template <typename Predicate = ::bliss::filter::TruePredicate>
+      template <bool estimate, typename Predicate = ::bliss::filter::TruePredicate>
       size_t insert_1(std::vector<::std::pair<Key, T> >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(insert);
@@ -869,7 +869,11 @@ namespace dsc  // distributed std container
     if (measure_mode == MEASURE_INSERT)
         __itt_resume();
 #endif
-          this->c.insert(input);
+    if (estimate)
+    	this->c.insert(input);
+    else
+    	this->c.insert_no_estimate(input);
+
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_INSERT)
         __itt_pause();
@@ -886,7 +890,7 @@ namespace dsc  // distributed std container
        * @brief insert new elements in the distributed batched_robinhood_multimap.
        * @param input  vector.  will be permuted.
        */
-      template <typename Predicate = ::bliss::filter::TruePredicate>
+      template <bool estimate, typename Predicate = ::bliss::filter::TruePredicate>
       size_t insert_p(std::vector<::std::pair<Key, T> >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(insert);
@@ -948,7 +952,6 @@ namespace dsc  // distributed std container
 //            hash is needed.
 //       non-overlap comm can estimate just before insertion for more accurate estimate based on actual input received.
 //          so 32 bit hashes are sufficient.
-#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
         // count and estimate and save the bucket ids.
         BL_BENCH_COLLECTIVE_START(insert, "permute_estimate", this->comm);
 #ifdef VTUNE_ANALYSIS
@@ -959,6 +962,8 @@ namespace dsc  // distributed std container
     	// allocate the bucket sizes array
     std::vector<size_t> send_counts(comm_size, 0);
 
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+    if (estimate) {
 		  if (comm_size <= std::numeric_limits<uint8_t>::max())
 			  this->assign_count_estimate_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
 		    			input.data(), this->hll );
@@ -968,6 +973,21 @@ namespace dsc  // distributed std container
 		  else    // mpi supports only 31 bit worth of ranks.
 		    	this->assign_count_estimate_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
 		    			input.data(), this->hll );
+      } else {
+#endif
+          if (comm_size <= std::numeric_limits<uint8_t>::max())
+              this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
+                        input.data());
+          else if (comm_size <= std::numeric_limits<uint16_t>::max())
+              this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint16_t>(comm_size), send_counts,
+                      input.data() );
+          else    // mpi supports only 31 bit worth of ranks.
+                this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
+                        input.data());
+
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+      }
+#endif
 
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_TRANSFORM)
@@ -976,36 +996,7 @@ namespace dsc  // distributed std container
     	free(buffer);
 
         BL_BENCH_END(insert, "permute_estimate", input.size());
-#else
-        // count and estimate and save the bucket ids.
-        BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
-        #ifdef VTUNE_ANALYSIS
-            if (measure_mode == MEASURE_TRANSFORM)
-                __itt_resume();
-        #endif
-                // allocate an HLL
-                // allocate the bucket sizes array
-            std::vector<size_t> send_counts(comm_size, 0);
         
-                  if (comm_size <= std::numeric_limits<uint8_t>::max())
-                      this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
-                                input.data());
-                  else if (comm_size <= std::numeric_limits<uint16_t>::max())
-                      this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint16_t>(comm_size), send_counts,
-                              input.data() );
-                  else    // mpi supports only 31 bit worth of ranks.
-                        this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
-                                input.data());
-        
-        #ifdef VTUNE_ANALYSIS
-            if (measure_mode == MEASURE_TRANSFORM)
-                __itt_pause();
-        #endif
-                free(buffer);
-        
-                BL_BENCH_END(insert, "permute", input.size());
-#endif
-
 
   	BL_BENCH_COLLECTIVE_START(insert, "a2a_count", this->comm);
 #ifdef VTUNE_ANALYSIS
@@ -1024,7 +1015,7 @@ namespace dsc  // distributed std container
 
 
 #if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
-
+  	  	  	  if (estimate) {
   	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
   			size_t est = this->hll.estimate_average_per_rank(this->comm);
   			if (est > (this->c.get_max_load_factor() * this->c.capacity()))
@@ -1032,6 +1023,7 @@ namespace dsc  // distributed std container
   	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
   	        //std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
   	        BL_BENCH_END(insert, "alloc_hashtable", est);
+  	  	  	  }
 #endif
 
   	        size_t before = this->c.size();
@@ -1135,7 +1127,11 @@ namespace dsc  // distributed std container
         __itt_resume();
 #endif
 // NOTE: with local cardinality estimation.
-        	this->c.insert(distributed, distributed + recv_total);
+    if (estimate)
+        this->c.insert(distributed, distributed + recv_total);
+    else
+        this->c.insert_no_estimate(distributed, distributed + recv_total);
+
 #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_INSERT)
         __itt_pause();
@@ -1399,13 +1395,13 @@ namespace dsc  // distributed std container
        * @brief insert new elements in the distributed batched_robinhood_multimap.
        * @param input  vector.  will be permuted.
        */
-      template <typename Predicate = ::bliss::filter::TruePredicate>
+      template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>
       size_t insert(std::vector<::std::pair<Key, T> >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
 
     	  if (this->comm.size() == 1) {
-    		  return insert_1(input, sorted_input, pred);
+    		  return this->template insert_1<estimate>(input, sorted_input, pred);
     	  } else {
-    		  return insert_p(input, sorted_input, pred);
+    		  return this->template insert_p<estimate>(input, sorted_input, pred);
     	  }
       }
 
@@ -3053,7 +3049,7 @@ protected:
    * @brief insert new elements in the distributed batched_robinhood_multimap.
    * @param input  vector.  will be permuted.
    */
-  template <typename Predicate = ::bliss::filter::TruePredicate>
+  template <bool estimate, typename Predicate = ::bliss::filter::TruePredicate>
   size_t insert_1(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
     // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
     BL_BENCH_INIT(insert);
@@ -3099,7 +3095,11 @@ if (measure_mode == MEASURE_TRANSFORM)
 if (measure_mode == MEASURE_INSERT)
     __itt_resume();
 #endif
+if (estimate)
       this->c.insert(input, T(1));
+else
+	  this->c.insert_no_estimate(input, T(1));
+
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_INSERT)
     __itt_pause();
@@ -3111,7 +3111,7 @@ if (measure_mode == MEASURE_INSERT)
     return this->c.size() - before;
   }
 
-  template <typename Predicate = ::bliss::filter::TruePredicate>
+  template <bool estimate, typename Predicate = ::bliss::filter::TruePredicate>
   size_t insert_p(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
     // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
     BL_BENCH_INIT(insert);
@@ -3173,7 +3173,6 @@ if (measure_mode == MEASURE_TRANSFORM)
 //            hash is needed.
 //       non-overlap comm can estimate just before insertion for more accurate estimate based on actual input received.
 //          so 32 bit hashes are sufficient.
-#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
             // count and estimate and save the bucket ids.
     BL_BENCH_COLLECTIVE_START(insert, "permute_estimate", this->comm);
     #ifdef VTUNE_ANALYSIS
@@ -3183,7 +3182,9 @@ if (measure_mode == MEASURE_TRANSFORM)
         // allocate an HLL
         // allocate the bucket sizes array
     std::vector<size_t> send_counts(comm_size, 0);
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
 
+    if (estimate) {
 	  if (comm_size <= std::numeric_limits<uint8_t>::max())
 		  this->assign_count_estimate_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
 	    			input.data(), this->hll );
@@ -3193,7 +3194,20 @@ if (measure_mode == MEASURE_TRANSFORM)
 	  else    // mpi supports only 31 bit worth of ranks.
 	    	this->assign_count_estimate_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
 	    			input.data(), this->hll );
-
+    } else {
+#endif
+      if (comm_size <= std::numeric_limits<uint8_t>::max())
+          this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
+                    input.data() );
+      else if (comm_size <= std::numeric_limits<uint16_t>::max())
+          this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint16_t>(comm_size), send_counts,
+                  input.data() );
+      else    // mpi supports only 31 bit worth of ranks.
+            this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
+                    input.data() );
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+    }
+#endif
     #ifdef VTUNE_ANALYSIS
     if (measure_mode == MEASURE_TRANSFORM)
         __itt_pause();
@@ -3201,35 +3215,7 @@ if (measure_mode == MEASURE_TRANSFORM)
         ::utils::mem::aligned_free(buffer);
 
         BL_BENCH_END(insert, "permute_estimate", input.size());
-#else
-            // count and estimate and save the bucket ids.
-            BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
-            #ifdef VTUNE_ANALYSIS
-            if (measure_mode == MEASURE_TRANSFORM)
-                __itt_resume();
-            #endif
-                // allocate an HLL
-                // allocate the bucket sizes array
-            std::vector<size_t> send_counts(comm_size, 0);
             
-                  if (comm_size <= std::numeric_limits<uint8_t>::max())
-                      this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
-                                input.data() );
-                  else if (comm_size <= std::numeric_limits<uint16_t>::max())
-                      this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint16_t>(comm_size), send_counts,
-                              input.data() );
-                  else    // mpi supports only 31 bit worth of ranks.
-                        this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
-                                input.data() );
-            
-            #ifdef VTUNE_ANALYSIS
-            if (measure_mode == MEASURE_TRANSFORM)
-                __itt_pause();
-            #endif
-                ::utils::mem::aligned_free(buffer);
-            
-                BL_BENCH_END(insert, "permute", input.size());
-#endif
 
 
 	BL_BENCH_COLLECTIVE_START(insert, "a2a_count", this->comm);
@@ -3249,7 +3235,8 @@ if (measure_mode == MEASURE_A2A)
 
 
 #if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
-                  
+
+	  	  	  if (estimate) {
 	  	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
 	  	        size_t est = this->hll.estimate_average_per_rank(this->comm);
 	  			if (est > (this->c.get_max_load_factor() * this->c.capacity()))
@@ -3257,6 +3244,7 @@ if (measure_mode == MEASURE_A2A)
 	  	        	this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
 	  	        if (this->comm.rank() == 0) std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
 	  	        BL_BENCH_END(insert, "alloc_hashtable", est);
+	  	  	  }
 #endif
 	        size_t before = this->c.size();
 
@@ -3356,8 +3344,11 @@ if (measure_mode == MEASURE_INSERT)
     __itt_resume();
 #endif
 
+if (estimate)
 // NOTE: local cardinality estimation.
 	this->c.insert(distributed, distributed + recv_total, T(1));
+else
+	this->c.insert_no_estimate(distributed, distributed + recv_total, T(1));
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_INSERT)
     __itt_pause();
@@ -3385,13 +3376,13 @@ public:
        * @brief insert new elements in the distributed batched_robinhood_multimap.
        * @param input  vector.  will be permuted.
        */
-      template <typename Predicate = ::bliss::filter::TruePredicate>
+      template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>
       size_t insert(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
     	  if (this->comm.size() == 1) {
-    		  return this->insert_1(input, sorted_input, pred);
+    		  return this->template insert_1<estimate>(input, sorted_input, pred);
     	  } else {
-    		  return this->insert_p(input, sorted_input, pred);
+    		  return this->template insert_p<estimate>(input, sorted_input, pred);
     	  }
       }
 
