@@ -20,6 +20,7 @@
 #include "iterators/transform_iterator.hpp"
 
 namespace fsc {
+
 template <class Key, class V, template <typename> class Hash = ::std::hash,
           template <typename> class Equal = ::std::equal_to
          >
@@ -28,7 +29,7 @@ class hashmap_radixsort {
 
 public:
 
-
+	static constexpr int32_t PFD = 16;
     using key_type              = Key;
     using mapped_type           = V;
     using value_type            = ::std::pair<const Key, V>;
@@ -424,6 +425,7 @@ public:
             V _noValue = 0) :
             	numBuckets(next_power_of_2(_numBuckets)),
 				bucketMask(numBuckets - 1),
+				totalKeyCount(0),
 				hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(bucketMask))
     {
         binSize = next_power_of_2(_binSize);
@@ -498,7 +500,11 @@ public:
 		  finalize_erase();
 		}
 
-		int PFD = 16;
+
+
+		::std::cout << "RESIZING:  size=" << totalKeyCount
+				<< " prev capacity=" << capacity()
+				<< " new capacity=" << _newNumBuckets << std::endl;
 		//::std::cout << "key count " << totalKeyCount << " elem size " << sizeof(HashElement) << std::endl;
 			HashElement *oldElemArray = (HashElement *)_mm_malloc((totalKeyCount + PFD) * sizeof(HashElement), 64);
 		//printf("CURR numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
@@ -601,7 +607,6 @@ public:
         // return fail or success
         bool resize_insert(HashElement * oldElemArray, int32_t elemCount)
         {
-              int PFD = 16;
               int32_t i;
     // insert the elements again
         coherence = INSERT;
@@ -848,9 +853,6 @@ public:
             printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
             return 0;
         }
-#if ENABLE_PREFETCH
-        int PFD = 16;
-#endif
         int32_t i;
         coherence = INSERT;
 		int32_t hash_batch_size = 512;
@@ -997,7 +999,6 @@ public:
             printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
             return 0;
         }
-        int PFD = 16;
         int32_t i;
         coherence = INSERT;
         hash_val_type bucketIdArray[32];
@@ -1187,8 +1188,8 @@ public:
         }
         size_t foundCount = 0;
 #if ENABLE_PREFETCH
-        int32_t PFD_INFO = 16;
-        int32_t PFD_HASH = 8;
+        int32_t PFD_INFO = PFD;
+        int32_t PFD_HASH = PFD >> 1;
 #endif
         int32_t i;
 		int32_t hash_batch_size = 1024;
@@ -1252,8 +1253,8 @@ public:
         }
         size_t foundCount = 0;
 #if ENABLE_PREFETCH
-        int32_t PFD_INFO = 16;
-        int32_t PFD_HASH = 8;
+        int32_t PFD_INFO = PFD;
+        int32_t PFD_HASH = PFD >> 1;
 #endif
         int32_t i;
 		int32_t hash_batch_size = 1024;
@@ -1318,8 +1319,8 @@ public:
         }
         coherence = ERASE;
 #if ENABLE_PREFETCH
-        int32_t PFD_INFO = 16;
-        int32_t PFD_HASH = 8;
+        int32_t PFD_INFO = PFD;
+        int32_t PFD_HASH = PFD >> 1;
 #endif
         int32_t i;
 		int32_t hash_batch_size = 1024;
@@ -1540,8 +1541,28 @@ public:
     }
 
     size_t size() const {
+		if(coherence != COHERENT)
+		{
+			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+			throw std::logic_error("size() called on incoherent hash table");
+		}
+
         return totalKeyCount;
     }
+
+    size_t size() {
+		if(coherence == INSERT)
+		{
+			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+			finalize_insert();
+		} else if (coherence == ERASE) {
+		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+		  finalize_erase();
+		}
+
+        return totalKeyCount;
+    }
+
 
     size_t capacity() const {
       return numBuckets;
@@ -1651,5 +1672,10 @@ public:
 		return std::distance(result, it);
 	}
 };
+template <class Key, class V, template <typename> class Hash,
+          template <typename> class Equal>
+constexpr int32_t hashmap_radixsort<Key, V, Hash, Equal>::PFD;
+
+
 }  // namespace fsc
 #endif /* KMERHASH_HASHMAP_RADIXSORT_HPP_ */
