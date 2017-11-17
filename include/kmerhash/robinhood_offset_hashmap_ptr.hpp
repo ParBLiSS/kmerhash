@@ -46,7 +46,11 @@
 
 #include "kmerhash/aux_filter_iterator.hpp"   // for join iteration of 2 iterators and filtering based on 1, while returning the other.
 #include "kmerhash/math_utils.hpp"
-#include "mmintrin.h"  // emm: _mm_stream_si64
+//#include "mmintrin.h"  // emm: _mm_stream_si64
+
+#include <x86intrin.h>
+#include "immintrin.h"
+
 #include "containers/fsc_container_utils.hpp"
 #include "iterators/transform_iterator.hpp"
 
@@ -690,8 +694,9 @@ public:
 				std::endl;
 		size_type i = 0, j = 0;
 
-		container_type tmp;
-		size_t offset = 0;
+		container_type tmp = ::utils::mem::aligned_alloc<value_type>(::std::numeric_limits<info_type>::max());
+		container_type it;
+		size_t offset = 0, len = 0;
 		for (; i < buckets; ++i) {
 			std::cout << "buc: " << std::setw(10) << i <<
 					", inf: " << std::setw(3) << static_cast<size_t>(info_container[i]) <<
@@ -703,14 +708,13 @@ public:
 
 			if (! is_empty(info_container[i])) {
 				offset = i + get_offset(info_container[i]);
-				tmp.clear();
-				tmp.insert(tmp.end(), container + offset,
-						container + i + 1 + get_offset(info_container[i + 1]));
-				std::sort(tmp.begin(), tmp.end(), [](value_type const & x,
+				len = 1 + get_offset(info_container[i + 1]) - get_offset(info_container[i]);
+				memcpy(tmp, container + offset, len);
+				std::sort(tmp, tmp + len, [](value_type const & x,
 						value_type const & y){
 					return x.first < y.first;
 				});
-				for (j = 0; j < tmp.size(); ++j) {
+				for (j = 0; j < len; ++j) {
 					std::cout << std::setw(72) << (offset + j) <<
 							", hash: " << std::setw(16) << std::hex << (hash(container[i].first) & mask) << std::dec <<
 							", key: " << std::setw(22) << tmp[j].first <<
@@ -891,9 +895,9 @@ public:
 		// check it's power of 2
 		size_type n = next_power_of_2(b);
 
-#if defined(REPROBE_STAT)
+//#if defined(REPROBE_STAT)
 		std::cout << "REHASH current " << buckets << " request " << b << " nears 2^x " << n << " lsize " << lsize << std::endl;
-#endif
+//#endif
 
 		//		// early termination
 		//		if (lsize == 0) {
@@ -1034,7 +1038,7 @@ protected:
 	}
 
 
-	void copy_downsize(container_type target, info_container_type & target_info,
+	void copy_downsize(container_type & target, info_container_type & target_info,
 			size_type const & target_buckets) {
 		assert((target_buckets & (target_buckets - 1)) == 0);   // assert this is a power of 2.
 
@@ -1101,7 +1105,7 @@ protected:
 	 *    each partition is filled nearly sequentially, so figure out the scaling factor, and create an array as large as the scaling factor.
 	 *
 	 */
-	void copy_upsize(container_type target, info_container_type & target_info,
+	void copy_upsize(container_type & target, info_container_type & target_info,
 			size_type const & target_buckets) {
 		assert((target_buckets & (target_buckets - 1)) == 0);   // assert this is a power of 2.
 
@@ -1881,7 +1885,6 @@ protected:
 
     size_t j;
 
-//#define DEBUG_HASH_MAPPING 1
 
 #if defined(DEBUG_HASH_MAPPING)
     // DEBUGGING:  make histogram
@@ -1980,14 +1983,16 @@ protected:
     	}
 
     	// exhasuted indices for prefetching.  fetch some more.
-        hash_mod2(input + i + lookahead2, lookahead2, hashes);
-        for (j = 0; j < lookahead2; ++j) {
+    	if (input_size > (i+lookahead2)) {
+    		max_prefetch = std::min(input_size - (i + lookahead2), lookahead2);
+    		hash_mod2(input + i + lookahead2, max_prefetch, hashes);
+			for (j = 0; j < max_prefetch; ++j) {
           // prefetch the info_container entry for ii.
           KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + hashes[j]), _MM_HINT_T0);
           // prefetch container as well - would be NEAR but may not be exact.
           KH_PREFETCH((const char *)(container + hashes[j]), _MM_HINT_T0);
         }
-
+    	}
     	// now finish the current section with limited prefetching.
     	// and loop and insert.
     	for (kmax = batch_size - INSERT_LOOKAHEAD; k < kmax; ++k, ++i) {
@@ -2117,23 +2122,13 @@ protected:
 #endif
 
         	return i;
-//          rehash(buckets << 1);
-
-//    #if defined(REPROBE_STAT)
-//          std::cout << "rehashed.  size = " << buckets << std::endl;
-//          if ((reinterpret_cast<size_t>(container.data()) % sizeof(value_type))  > 0) {
-//            std::cout << "WARNING: container alignment not on value boundary" << std::endl;
-//          } else {
-//            std::cout << "STATUS: container alignment on value boundary" << std::endl;
-//          }
-//    #endif
         }
 
     }
 
     // do the remainder (less than blocks of batch_size.
     	// has the remainder
-    	kmax = ((input_size - max) > j) ? (input_size - max) - j : 0;
+    	kmax = std::max((input_size - max), j) - j;
     	if (kmax > 0)
     		hash_mod2(input + i + j, kmax, hashes + j);
 
@@ -2184,6 +2179,7 @@ protected:
 
             // intention is to write, so should prefetch for empty entries too.
             // prefetch container
+            if ((k + INSERT_LOOKAHEAD) < (input_size - max)) {
             bid = hashes[k + INSERT_LOOKAHEAD];
             bid1 = bid + 1;
             bid += get_offset(info_container[bid]);
@@ -2194,15 +2190,17 @@ protected:
             // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
             if (bid1 > (bid + value_per_cacheline))
               KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
-
+			}
             // prefetch info container.
+            if ((k + lookahead2) < (input_size - max)) {
             bid = hashes[k + lookahead2];
             KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + bid), _MM_HINT_T0);
+    	}
     	}
 
     	// now finish the current section with limited prefetching.
     	// and loop and insert.
-    	kmax = ((input_size - max) > INSERT_LOOKAHEAD) ? ((input_size - max) - INSERT_LOOKAHEAD) : 0;
+    	kmax = std::max((input_size - max), static_cast<size_t>(INSERT_LOOKAHEAD)) - INSERT_LOOKAHEAD;
     	for (; k < kmax; ++k, ++i) {
 
     		// process current
@@ -2248,6 +2246,8 @@ protected:
 
             // intention is to write, so should prefetch for empty entries too.
             // prefetch container
+            if ((k + INSERT_LOOKAHEAD) < (input_size - max)) {
+
             bid = hashes[k + INSERT_LOOKAHEAD];
             bid1 = bid + 1;
             bid += get_offset(info_container[bid]);
@@ -2258,6 +2258,7 @@ protected:
             // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
             if (bid1 > (bid + value_per_cacheline))
               KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+    	}
     	}
 
     	kmax = (input_size - max);
@@ -2460,7 +2461,9 @@ protected:
 
 			// estimate the number of unique entries in input.
 			//#if defined(REPROBE_STAT)
+#ifndef NDEBUG
 			std::cout << " batch estimate cardinality as " << this->hll.estimate() << std::endl;
+#endif
 			//#endif
 			// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
 			this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));   // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
@@ -2533,7 +2536,9 @@ protected:
 		  }
   // estimate the number of unique entries in input.
 //#if defined(REPROBE_STAT)
+#ifndef NDEBUG
 		  std::cout << " estimate cardinality as " << this->hll.estimate() << std::endl;
+#endif
 //#endif
 		  // assume one element per bucket as ideal, resize now.  should not resize if don't need to.
 		  this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));
@@ -2603,7 +2608,9 @@ protected:
 
 			// estimate the number of unique entries in input.
 			//#if defined(REPROBE_STAT)
+#ifndef NDEBUG
 			std::cout << " estimate cardinality as " << this->hll.estimate() << std::endl;
+#endif
 			//#endif
 			// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
 			this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));
@@ -2669,8 +2676,9 @@ protected:
 
 			// estimate the number of unique entries in input.
 	//#if defined(REPROBE_STAT)
+#ifndef NDEBUG
 			std::cout << " estimate cardinality as " << this->hll.estimate() << std::endl;
-	//#endif
+#endif
 
 			// assume one element per bucket as ideal, resize now.  should not resize if don't need to.
 			this->reserve(static_cast<size_t>(static_cast<double>(this->hll.estimate()) * (1.0 + this->hll.est_error_rate)));
@@ -3029,7 +3037,9 @@ protected:
 		size_t total = std::distance(begin, end);
 
 		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
+#if defined(ENABLE_PREFETCH)
 		size_t h;
+#endif
 
 		size_t batch_size = InternalHash::batch_size; // static_cast<size_t>(QUERY_LOOKAHEAD));
 
@@ -3054,6 +3064,7 @@ protected:
 		size_t i = 0;
 		key_type * it = begin;
 		hash_mod2(it, max, bids);
+#if defined(ENABLE_PREFETCH)
 		for (i = 0; i < max; ++it, ++i) {
 			h =  bids[i];
 			// prefetch the info_container entry for ii.
@@ -3062,6 +3073,7 @@ protected:
 			// prefetch container as well - would be NEAR but may not be exact.
 			KH_PREFETCH((const char *)(container + h), _MM_HINT_T0);
 		}
+#endif
 
 		size_t bid, bid1;
 		max = total - (total & lookahead2_mask);
@@ -3503,7 +3515,9 @@ public:
 		size_t total = std::distance(begin, end);
 
 		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
+#if defined(ENABLE_PREFETCH)
 		size_t h;
+#endif
 
 
 		size_t batch_size = InternalHash::batch_size; // static_cast<size_t>(QUERY_LOOKAHEAD));
@@ -3531,6 +3545,7 @@ public:
 		size_t i = 0;
 		key_type const * it = begin;
 		hash_mod2(it, max, bids);
+#if defined(ENABLE_PREFETCH)
 		for (i = 0; i < max; ++it, ++i) {
 
 			h =  bids[i];
@@ -3540,6 +3555,7 @@ public:
 			// prefetch container as well - would be NEAR but may not be exact.
 			KH_PREFETCH((const char *)(container + h), _MM_HINT_T0);
 		}
+#endif
 //		std::cout << "hashed and prefetched [0, " << i << ")" << std::endl;
 
 		size_t bid, bid1;

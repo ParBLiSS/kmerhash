@@ -928,9 +928,9 @@ public:
 		// check it's power of 2
 		size_type n = next_power_of_2(b);
 
-#if defined(REPROBE_STAT)
+//#if defined(REPROBE_STAT)
 		std::cout << "REHASH current " << buckets << " request " << b << " nears 2^x " << n << " lsize " << lsize << std::endl;
-#endif
+//#endif
 
 		//		// early termination
 		//		if (lsize == 0) {
@@ -966,8 +966,8 @@ public:
 
 
 			// this MAY cause infocontainer to be evicted from cache...
-			container_type tmp(n + std::numeric_limits<info_type>::max() + 1);
-			info_container_type tmp_info(n + std::numeric_limits<info_type>::max() + 1, info_empty);
+			container_type tmp(n + info_empty + 1);
+			info_container_type tmp_info(n + info_empty, info_empty);
 
 			if (lsize > 0) {
 				if (n > buckets) {
