@@ -1539,10 +1539,12 @@ int main(int argc, char** argv) {
 	    idx.get_map().get_local_container().reserve(idx.local_size() + kmer_est);
 	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
 #elif (pMAP == RADIXSORT)
-	    if (idx.get_map().get_local_container().capacity() < (avg_distinct_count + delta_distinct))
-	    	idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
+//	    if (idx.get_map().get_local_container().capacity() < (avg_distinct_count + delta_distinct))
+//	    	idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
 	    // do nothing, since on insertion we reserve.
 	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
+#elif (pMAP == BROBINHOOD)
+
 #else
 	    if ((idx.get_map().get_local_container().capacity() * idx.get_map().get_local_container().get_max_load_factor()) < (avg_distinct_count + delta_distinct))
 	    	idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
@@ -1628,10 +1630,12 @@ int main(int argc, char** argv) {
       BL_BENCH_LOOP_RESUME(test, 4);
 #if (pMAP == RADIXSORT)
       // don't estimate...
-      idx.get_map().insert_no_finalize<false>(temp);  // should be insert_no_finalize but just to be safe don't do it right now...
+      //idx.get_map().insert_no_finalize<false>(temp);  // should be insert_no_finalize but just to be safe don't do it right now...
+      idx.get_map().insert_no_finalize<true>(temp);  // should be insert_no_finalize but just to be safe don't do it right now...
 #elif (pMAP == BROBINHOOD)
       // don't estimate...
-	    idx.get_map().insert<false>(temp);
+	    //idx.get_map().insert<false>(temp);
+	    idx.get_map().insert<true>(temp);
 #else
 	    idx.insert(temp);
 #endif
