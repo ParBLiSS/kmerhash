@@ -17,7 +17,7 @@
 
 // include google test
 #include <gtest/gtest.h>
-#include "kmerhash/robinhood_offset_hashmap_ptr.hpp"
+#include "kmerhash/robinhood_offset_hashmap_ptr_pad.hpp"
 
 #include <string>
 #include <unordered_map>
@@ -64,7 +64,7 @@ class Hashtable_OARHDO_PrefixTest : public ::testing::Test
     ::std::vector<std::pair<T, T>> temp;
 
 
-    size_t iters = 100000;  // 16
+    size_t iters = 10000;  // 16
     T min_val = 2;
     T max_val = ::std::numeric_limits<T>::max() - 2;
 
@@ -372,7 +372,7 @@ class Hashmap_OA_RHDO_Prefix_KmerTest : public ::testing::Test
     		typename ::std::vector<std::pair<T, uint32_t> >::iterator,
     		::bliss::kmer::transform::lex_less<T> >;
 
-    size_t iters = 100000; // 16;
+    size_t iters = 10000; // 16;
     int min_val = 2;
     int max_val = 253;
 

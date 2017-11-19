@@ -574,6 +574,23 @@ public:
 template <typename T>
 constexpr uint8_t farm32<T>::batch_size;
 
+
+
+// /// SFINAE templated class for checking for batch_size.  from  https://stackoverflow.com/questions/1005476/how-to-detect-whether-there-is-a-specific-member-variable-in-class
+// /// explanation at https://cpptalk.wordpress.com/2009/09/12/substitution-failure-is-not-an-error-2/
+// template<typename T> struct HasBatchSize { 
+//     struct Fallback { uint8_t batch_size; }; // introduce member name "x"
+//     struct Derived : T, Fallback { };
+
+//     template<typename C, C> struct ChT; 
+
+//     template<typename C> static char (&f(ChT<int Fallback::*, &C::x>*))[1]; 
+//     template<typename C> static char (&f(...))[2]; 
+
+//     static bool const value = sizeof(f<Derived>(0)) == 2;
+// }; 
+
+
 /// custom version of transformed hash that does a few things:
 ///    1. potentially bypass transform if it is identity.
 ///    2. provide batch mode operation, if not supported by transform and hash then do those one by one.
@@ -608,7 +625,8 @@ public:
   using argument_type = Key;
 
   // lowest common multiple of the three.  default to 64byte/sizeof(HASH_VAL_TYPE) for now (cacheline multiple)
-  static constexpr uint8_t batch_size = 64 / sizeof(HASH_VAL_TYPE); //(sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
+  // need to take full advantage of batch size.  for now, set to 32, as that is the largest batch size of hash tables. 
+  static constexpr uint8_t batch_size = 32; // 64 / sizeof(HASH_VAL_TYPE); //(sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
                                                                     // HASH_T::batch_size; //(sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
 
   static_assert((batch_size & (batch_size - 1)) == 0, "ERROR: batch_size should be a power of 2.");
