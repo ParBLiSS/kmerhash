@@ -113,12 +113,6 @@ namespace bliss
 //        /// DEFINE base iterator's value type, should be same as filter_iterator's
 //        typedef value_type base_value_type;
 
-        // accessors
-//        Iterator& getBaseIterator()
-//        {
-//          return _curr;
-//        }
-
         Iterator const & getBaseIterator() const
         {
           return _curr;
@@ -212,13 +206,10 @@ namespace bliss
               return *this;
           }
 
-          ++aux_curr;            // else move forward 1, and check
-          ++_curr;
-          while (aux_curr != aux_end && !_f(*aux_curr)) // need to check to make sure we are not pass the end of the base iterator.
-          {
-            ++_curr;
-            ++aux_curr;
-          }
+          do {
+        	  ++aux_curr;            // else move forward 1, and check
+        	  ++_curr;
+          } while ((aux_curr != aux_end) && !_f(*aux_curr)); // need to check to make sure we are not pass the end of the base iterator.
           return *this;
         }
 
@@ -235,13 +226,13 @@ namespace bliss
         /// compare 2 filter iterators
         inline bool operator==(const type& rhs) const
         {
-          return aux_curr == rhs.aux_curr && _curr == rhs._curr;
+          return (aux_curr == rhs.aux_curr) && (_curr == rhs._curr);
         }
 
         /// compare 2 filter iterators
         inline bool operator!=(const type& rhs) const
         {
-          return aux_curr != rhs.aux_curr || _curr != rhs._curr;
+          return (aux_curr != rhs.aux_curr) || (_curr != rhs._curr);
         }
 
         // note that if _curr is of type const_iterator, then for constness, we need to use pointer type
@@ -304,13 +295,10 @@ namespace bliss
           if (before_start)
             return *this;
 
-          --_curr;
-          --aux_curr;            // else move back 1, and check
-          while (aux_curr != aux_start && !_f(*aux_curr)) // need to check to make sure we are not pass the end of the base iterator.
-          {
-            --_curr;
-            --aux_curr;
-          }
+          do {
+        	  --_curr;
+        	  --aux_curr;            // else move back 1, and check
+          } while ((aux_curr != aux_start) && !_f(*aux_curr)); // need to check to make sure we are not pass the end of the base iterator.
           return *this;
         }
 
