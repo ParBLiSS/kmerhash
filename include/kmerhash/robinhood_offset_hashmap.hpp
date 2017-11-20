@@ -713,7 +713,7 @@ public:
 	}
 
 	iterator end() {
-		return iterator(container.end(), info_container.end(), filter);
+		return iterator(container.begin() + info_container.size(), info_container.end(), filter);
 	}
 
 	const_iterator cbegin() const {
@@ -721,7 +721,7 @@ public:
 	}
 
 	const_iterator cend() const {
-		return const_iterator(container.cend(), info_container.cend(), filter);
+		return const_iterator(container.cbegin() + info_container.size(), info_container.cend(), filter);
 	}
 
 
@@ -882,7 +882,6 @@ public:
 
 		auto it = std::copy(this->cbegin(), this->cend(), output.begin());
 		output.erase(it, output.end());
-
 		return output;
 	}
 
@@ -966,7 +965,7 @@ public:
 
 
 			// this MAY cause infocontainer to be evicted from cache...
-			container_type tmp(n + info_empty + 1);
+			container_type tmp(n + info_empty);
 			info_container_type tmp_info(n + info_empty, info_empty);
 
 			if (lsize > 0) {
@@ -1142,6 +1141,7 @@ protected:
 		assert((target_buckets & (target_buckets - 1)) == 0);   // assert this is a power of 2.
 
 		uint8_t log_buckets = std::log2(buckets);  // should always be power of 2
+//		std::cout << "buckets " << buckets << " log of it " << static_cast<size_t>(log_buckets) << std::endl;
 
 		size_t id, bid, p;
 		size_t pos;
@@ -1153,10 +1153,13 @@ protected:
 		std::vector<size_t> offsets(blocks + 1, 0);
 		std::vector<size_t> len(blocks, 0);
 
+//		std::cout << "offsets: " << offsets[0];
 		// prefill with ideal offsets.
 		for (bl = 0; bl < blocks; ++bl) {
 		  offsets[bl + 1] = bl * buckets;
+//			std::cout << ", " << offsets[bl + 1];
 		}
+//		std::cout << std::endl;
 
     // std::cout << "RESIZE UP from " << buckets << " to " << target_buckets << ", with blocks " << blocks << std::endl;
 
@@ -1169,24 +1172,11 @@ protected:
 		h2(container.data(), container.size(), hashes);  // compute even for empty positions.
 		// load should be high so there should not be too much waste.  also, SSE and AVX.
 
-//    hash_val_type * hashes_orig = ::utils::mem::aligned_alloc<hash_val_type>(container.size());
-//		hash_mod2(container.data(), container.size(), hashes_orig);
-//
-//    if (hashes_orig[0] != (hashes[0] & mask))
-//      std::cout << "ERROR: 0 ORIG hash " << hashes_orig[0] << " new hash " << hashes[0] << " would have been " << (hashes[0] & mask) << std::endl;
-//    for (size_t hh = 1; hh < container.size(); ++hh) {
-//      if ((hashes_orig[hh] != (hashes[hh] & mask)) || ((hashes_orig[hh] > 0) && (hashes_orig[hh - 1] > hashes_orig[hh]))) {
-//        std::cout << "ERROR: " << hh << "\tORIG hash " << hashes_orig[hh-1] << " new hash " << hashes[hh-1] << " would have been " << (hashes[hh-1] & mask) << std::endl;
-//        std::cout << "     : \tORIG hash " << hashes_orig[hh] << " new hash " << hashes[hh] << " would have been " << (hashes[hh] & mask) << std::endl;
-//      }
-//      if (hashes_orig[hh] == 2173)
-//        std::cout << "2173: " << hh << "\tORIG hash " << hashes_orig[hh] << " new hash " << hashes[hh] << " would have been " << (hashes[hh] & mask) << std::endl;
-//    }
-//    free(hashes_orig);
-
 		// try to compute the offsets, so that we can figure out exactly where to store the higher block data.
 		// PROBLEM STATEMENT:  we want to find the index q_i of the last entry of a block i,
 		//      block position p_i may be empty or shifted by some distance <= (q_(i-1) - i * buckets).  empty positions can be used to absorb overflow of prev block
+		//    NOTE THAT WE ASSUME TRAVERSAL OF ORIGINAL HASH TABLE IN ORDER, SO IN-BLOCK TRAVERSAL IS ALSO IN ORDER in new table
+		//		thus the HASH BUCKET ID should be monotonically increasing.
 		// CHALLENGES:
 		//      start of block is shifted by (q_(i-1) - i*buckets), but the shift may be absorbed by empty space in block i.
 		//      The shift may be added to by entries in block i, such that for block (i+1), the starting position may not be shifted by q_i.
@@ -1223,9 +1213,9 @@ protected:
 
 					// figure out which block it is in.
 					bl = id >> log_buckets;
-//					if (bl == 0) {
-//					  std::cout << " count " << bid << " from " << p << " id " << id << std::flush;
-//					  std::cout << " block " << bl << " curr len " << len[bl] << std::flush;
+//					if (bl == 1) {
+//					  std::cout << " orig bucket " << bid << " pos " << p << " new bucket " << id << std::flush;
+//					  std::cout << " block " << bl << " curr len " << len[bl] << " curr offset " << offsets[bl+1] <<  std::flush;
 //					}
 
 					// count.  at least the bucket id + 1, or last insert target position + 1.
@@ -1236,11 +1226,20 @@ protected:
 					offsets[bl+1] = std::max(offsets[bl+1], id) + 1; // where the current entry would go, +1 (for next empty entry).
 
 					len[bl] += 1;
-//					if (bl == 0) std::cout << " max offset " << offsets[bl+1] << " in ideal region len " << len[bl] << std::endl;
+//					if (bl == 1) std::cout << " new offset " << offsets[bl+1] << " new len " << len[bl] << std::endl;
 				}
 			}
 		}
-		// now compute the overflows.
+
+//		std::cout << "after update1 [offsets, len]: " << offsets[0];
+//		// prefill with ideal offsets.
+//		for (bl = 0; bl < blocks; ++bl) {
+//			std::cout << ":" << len[bl] << ", " << offsets[bl + 1];
+//		}
+//		std::cout << std::endl;
+
+		// now compute the overflows.  at this point, we have count in each block, and offsets starting from block boundaries
+		// and overflow in previous block is not yet considered.
 		for (bl = 1; bl <= blocks ; ++bl) {
 //			std::cout << "FINAL block offset " << offsets[bl] << " len in ideal region " << len[bl - 1];
 
@@ -1251,6 +1250,14 @@ protected:
 //			std::cout << " OVERFLOW = " << offsets[bl] << " empties " << len[bl-1] << std::endl;
 		}
 
+//		std::cout << "after update2 [offsets, len]: " << offsets[0];
+//		// prefill with ideal offsets.
+//		for (bl = 0; bl < blocks; ++bl) {
+//			std::cout << ":" << len[bl] << ", " << offsets[bl + 1];
+//		}
+//		std::cout << std::endl;
+
+
 		// now compute the true overflows.
 		for (bl = 2; bl <= blocks ; ++bl) {
 			// increase actual overflow if the block could not absorb all of it.
@@ -1258,6 +1265,15 @@ protected:
 
 //			std::cout << " FINAL OVERFLOW " << offsets[bl] << std::endl;
 		}
+
+//		std::cout << "after update3 [offsets]: ";
+//		// prefill with ideal offsets.
+//		for (bl = 0; bl <= blocks; ++bl) {
+//			std::cout << ", " << offsets[bl];
+//		}
+//		std::cout << std::endl;
+
+
 		// and convert back to offsets
     for (bl = 0; bl <= blocks ; ++bl) {
       // increase actual overflow if the block could not absorb all of it.
@@ -1265,6 +1281,14 @@ protected:
 //      std::cout << " FINAL Offsets " << offsets[bl] << std::endl;
     }
 //		std::cout << "total cnt is " << cnt << " actual entries " << lsize << std::endl;
+
+//	std::cout << "after final update: ";
+//	// prefill with ideal offsets.
+//	for (bl = 0; bl <= blocks; ++bl) {
+//		std::cout << ", " << offsets[bl];
+//	}
+//	std::cout << std::endl;
+
 
 		// now that we have the right offsets,  start moving things.
 		size_t pp;
@@ -1319,10 +1343,10 @@ protected:
 
 			}
 		}
-    for (bl = 0; bl < blocks ; ++bl) {
-      // increase actual overflow if the block could not absorb all of it.
+//    for (bl = 0; bl <= blocks ; ++bl) {
+//      // increase actual overflow if the block could not absorb all of it.
 //      std::cout << " ACTUAL Offsets " << offsets[bl] << std::endl;
-    }
+//    }
 
 		// clean up the last part.
 		size_t new_start;
@@ -3293,7 +3317,7 @@ public:
 			return iterator(container.begin() + get_pos(idx), info_container.begin()+ get_pos(idx),
 					info_container.end(), filter);
 		else
-			return iterator(container.end(), info_container.end(), filter);
+			return this->end();
 
 	}
 
@@ -3315,7 +3339,7 @@ public:
 			return const_iterator(container.cbegin() + get_pos(idx), info_container.cbegin()+ get_pos(idx),
 					info_container.cend(), filter);
 		else
-			return const_iterator(container.cend(), info_container.cend(), filter);
+			return this->cend();
 
 	}
 
