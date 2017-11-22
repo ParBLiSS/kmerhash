@@ -253,9 +253,9 @@ namespace bliss
         }
 
         /// dereference operator.  returned entry passes the predicate test.  guaranteed to be at a valid position
-        inline typename base_traits::reference operator*() {
-          return *_curr;
-        }
+        //inline typename base_traits::value_type operator*() {
+        //  return *_curr;
+        //}
         /// dereference operator.  returned entry passes the predicate test.  guaranteed to be at a valid position
         inline typename base_traits::value_type const & operator*() const {
           return *_curr;
