@@ -117,17 +117,17 @@ class Murmur64AVX
 {
 
 protected:
-  const __m256i mix_const1;
-  const __m256i mix_const2;
-  const __m256i c11;
-  const __m256i c12;
-  const __m256i c13;
-  const __m256i c14;
-  const __m256i c41;
-  const __m256i c42;
-  const __m256i c43;
-  const __m256i c44;
-  const __m256i length;
+  static const __m256i mix_const1;
+  static const __m256i mix_const2;
+  static const __m256i c11;
+  static const __m256i c12;
+  static const __m256i c13;
+  static const __m256i c14;
+  static const __m256i c41;
+  static const __m256i c42;
+  static const __m256i c43;
+  static const __m256i c44;
+  static const __m256i length;
 
 
   template <uint8_t INT_CNT>
@@ -343,75 +343,50 @@ protected:
   // 3. _mm256_permutevar8x32_epi32, _mm256_permute4x64_epi64, and _mm256_insertf128_si256  have latency of 3, CPI of 1.
   // 4. note that most extract calls have latency of 3 and CPI of 1, except for _mm256_extracti128_si256, which has latency of 1.
   // 5. _mm256_insertf128_si256 has latency of 3. and CPI of 1.
-  const __m256i permute1;
-  const __m256i permute16;
-  const __m256i shuffle0; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
-  const __m256i shuffle1; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
-  const __m256i shuffle2; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
-  const __m256i shuffle3; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
-  const __m256i shuffle1_epi8;
-  const __m256i ones;
-  const __m256i zeros;
-  const __m128i zeroi128;
-  mutable __m256i seed;
 
+  // NOTE: use static variable for consts and array for per instance values.  WORK AROUND FOR STACK NOT ALIGNED TO 32 BYTES.
+  //     when too many ymm registers, or for function returns, ymm copy to stack could fail due to insufficient alignment.
+  static const __m256i permute1;
+  static const __m256i permute16;
+  static const __m256i shuffle0; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
+  static const __m256i shuffle1; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
+  static const __m256i shuffle2; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
+  static const __m256i shuffle3; // shuffle1 spaces out the lowest 4 bytes to 16 bytes, by inserting 0s. no lane crossing.
+  static const __m256i shuffle1_epi8;
+  static const __m256i ones;
+  static const __m256i zeros;
+  static const __m128i zeroi128;
 
-  explicit Murmur64AVX(__m256i _seed) : mix_const1(_mm256_set1_epi32(0x85ebca6bU)),
-                                        mix_const2(_mm256_set1_epi32(0xc2b2ae35U)),
-                                        c11(_mm256_set1_epi32(0x239b961bU)),
-										c12(_mm256_set1_epi32(0xab0e9789U)),
-										c13(_mm256_set1_epi32(0x38b34ae5U)),
-										c14(_mm256_set1_epi32(0xa1e38b93U)),
-                                        c41(_mm256_set1_epi32(0x561ccd1bU)),
-										c42(_mm256_set1_epi32(0x0bcaa747U)),
-										c43(_mm256_set1_epi32(0x96cd1c35U)),
-										c44(_mm256_set1_epi32(0x32ac3b17U)),
-                                        length(_mm256_set1_epi32(static_cast<uint32_t>(sizeof(T)))),
-                                        permute1(_mm256_setr_epi32(0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U)),
-                                        permute16(_mm256_setr_epi32(0U, 4U, 2U, 6U, 1U, 5U, 3U, 7U)),
-                                        shuffle0(_mm256_setr_epi32(0x80808000U, 0x80808001U, 0x80808002U, 0x80808003U,
-                                                                   0x80808000U, 0x80808001U, 0x80808002U, 0x80808003U)),
-                                        shuffle1(_mm256_setr_epi32(0x80808004U, 0x80808005U, 0x80808006U, 0x80808007U,
-                                                                   0x80808004U, 0x80808005U, 0x80808006U, 0x80808007U)),
-                                        shuffle2(_mm256_setr_epi32(0x80808008U, 0x80808009U, 0x8080800AU, 0x8080800BU,
-                                                                   0x80808008U, 0x80808009U, 0x8080800AU, 0x8080800BU)),
-                                        shuffle3(_mm256_setr_epi32(0x8080800CU, 0x8080800DU, 0x8080800EU, 0x8080800FU,
-                                                                   0x8080800CU, 0x8080800DU, 0x8080800EU, 0x8080800FU)),
-                                        shuffle1_epi8(_mm256_setr_epi8(0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15,
-                                          0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15)),
-                                        ones(_mm256_cmpeq_epi32(length, length)),
-                                        zeros(_mm256_setzero_si256()),
-										zeroi128(_mm_setzero_si128()),
-                                        seed(_seed)
-
-  {
-  }
+  uint32_t seed_arr[8];
 
 public:
   static constexpr uint8_t batch_size = (sizeof(T) == 1) ? 32 : ((sizeof(T) == 2) ? 16 : 8);
 
-  explicit Murmur64AVX(uint64_t _seed) : Murmur64AVX(_mm256_set1_epi32(_seed))
+  explicit Murmur64AVX(uint32_t const & _seed = 43U) 
+  {
+    for (int i = 0; i < 8; ++i) {
+      seed_arr[i] = _seed;
+    }
+  }
+
+  explicit Murmur64AVX(Murmur64AVX const &other) : Murmur64AVX(other.seed_arr[0])
   {
   }
 
-  explicit Murmur64AVX(Murmur64AVX const &other) : Murmur64AVX(other.seed)
-  {
-  }
-
-  explicit Murmur64AVX(Murmur64AVX &&other) : Murmur64AVX(other.seed)
+  explicit Murmur64AVX(Murmur64AVX &&other) : Murmur64AVX(other.seed_arr[0])
   {
   }
 
   Murmur64AVX &operator=(Murmur64AVX const &other)
   {
-    seed = other.seed;
+    memcpy(seed_arr, other.seed_arr, 8);
 
     return *this;
   }
 
   Murmur64AVX &operator=(Murmur64AVX &&other)
   {
-    seed = other.seed;
+    memcpy(seed_arr, other.seed_arr, 8);
     return *this;
   }
 
@@ -854,7 +829,7 @@ public:
 
     __m256i h2, h3;
     // read input, 8 keys at a time.  need 4 rounds.
-    h0 = h1 = h2 = h3 = seed;
+    h0 = h1 = h2 = h3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(seed_arr));
 
     // read input, 2 keys per vector.
     // combined load and update_part1 and update_part2 (data parallel part.)
@@ -938,7 +913,7 @@ public:
     
             __m256i h2, h3;
         // read input, 8 keys at a time.  need 4 rounds.
-        h0 = h1 = h2 = h3 = seed;
+        h0 = h1 = h2 = h3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(seed_arr));
     
         // read input, 2 keys per vector.
         // combined load and update_part1 and update_part2 (data parallel part.)
@@ -1059,7 +1034,7 @@ public:
 
     // at this point, part2 of update should be done.
     
-    h0 = h1 = hh2 = hh3 = seed;
+    h0 = h1 = hh2 = hh3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(seed_arr));
 
     // UPDATE part2.
     this->template update_part2<4>(t0, t1, t2, t3);
@@ -1158,7 +1133,7 @@ public:
     this->template update_part2<2>(t0, t1, t2, t3);
     //this->template update_part2<VEC_CNT>(t01, t11, t21, t31);
 
-    h0 = h1 = hh2 = hh3 = seed;    
+    h0 = h1 = hh2 = hh3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(seed_arr));    
 
     // final step of update, xor the length, and fmix32.
     // finalization
@@ -1236,7 +1211,7 @@ public:
 
         this->template update_part2<1>(t0, t1, t2, t3);
     
-        h0 = h1 = hh2 = hh3 = seed;
+        h0 = h1 = hh2 = hh3 = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(seed_arr));
 
         // now do part 3.
         this->template xor4<1>(h0, h1, hh2, hh3, t0, t1, t2, t3);
@@ -1322,7 +1297,7 @@ public:
     // example layout, with each dash representing 2 bytes
     //     abcdefgh ijklmnop
     // k0  -------- --------
-    __m256i t00, t10, t2, t3, h2, h3;
+    __m256i t00, t10, t2, t3, h2, h3, seed;
     
         // read input, 8 keys at a time.  need 4 rounds.
     
@@ -1342,7 +1317,7 @@ public:
         mul<2>(this->c12, this->c12, this->c12, this->c12, t00, t10, t2, t3);
     
 
-        h00 = h01 = h10 = h11 = h2 = h3 = seed;
+        h00 = h01 = h10 = h11 = h2 = h3 = seed = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(seed_arr));
 
         // now do part 3.  here is just xor.
         this->template xor4<2>(h00, h10, h2, h3, t00, t10, t2, t3);
@@ -1433,7 +1408,7 @@ public:
     //     abcdefghijklmnop qrstuvwxyz123456
     // k0  ---------------- ----------------
 
-    __m256i t00, t10, t20, t30, t2, t3, h2, h3;
+    __m256i t00, t10, t20, t30, t2, t3, h2, h3, seed;
     
         // read input, 8 keys at a time.  need 4 rounds.
     
@@ -1455,7 +1430,7 @@ public:
         rotl<4>(15, 15, 15, 15, t00, t10, t20, t30);
         mul<4>(this->c12, this->c12, this->c12, this->c12, t00, t10, t20, t30);
     
-        h00 = h10 = h20 = h30 = seed;
+        h00 = h10 = h20 = h30 = seed = _mm256_lddqu_si256(reinterpret_cast<const __m256i *>(seed_arr));
         
         // now do part 3.  here is just xor.
         this->template xor4<4>(h00, h10, h20, h30, t00, t10, t20, t30);
@@ -1528,8 +1503,28 @@ public:
         h30 = t00;
   }
 };
-template <typename T>
-constexpr uint8_t Murmur64AVX<T>::batch_size;
+template <typename T> const __m256i Murmur64AVX<T>::mix_const1 = _mm256_set1_epi32(0x85ebca6bU);
+template <typename T> const __m256i Murmur64AVX<T>::mix_const2 = _mm256_set1_epi32(0xc2b2ae35U);
+template <typename T> const __m256i Murmur64AVX<T>::c11 = _mm256_set1_epi32(0x239b961bU);
+template <typename T> const __m256i Murmur64AVX<T>::c12 = _mm256_set1_epi32(0xab0e9789U);
+template <typename T> const __m256i Murmur64AVX<T>::c13 = _mm256_set1_epi32(0x38b34ae5U);
+template <typename T> const __m256i Murmur64AVX<T>::c14 = _mm256_set1_epi32(0xa1e38b93U);
+template <typename T> const __m256i Murmur64AVX<T>::c41 = _mm256_set1_epi32(0x561ccd1bU);
+template <typename T> const __m256i Murmur64AVX<T>::c42 = _mm256_set1_epi32(0x0bcaa747U);
+template <typename T> const __m256i Murmur64AVX<T>::c43 = _mm256_set1_epi32(0x96cd1c35U);
+template <typename T> const __m256i Murmur64AVX<T>::c44 = _mm256_set1_epi32(0x32ac3b17U);
+template <typename T> const __m256i Murmur64AVX<T>::length = _mm256_set1_epi32(static_cast<uint32_t>(sizeof(T)));
+template <typename T> const __m256i Murmur64AVX<T>::permute1 = _mm256_setr_epi32(0U, 2U, 4U, 6U, 1U, 3U, 5U, 7U);
+template <typename T> const __m256i Murmur64AVX<T>::permute16 = _mm256_setr_epi32(0U, 4U, 2U, 6U, 1U, 5U, 3U, 7U);
+template <typename T> const __m256i Murmur64AVX<T>::shuffle0 = _mm256_setr_epi32(0x80808000U, 0x80808001U, 0x80808002U, 0x80808003U, 0x80808000U, 0x80808001U, 0x80808002U, 0x80808003U);
+template <typename T> const __m256i Murmur64AVX<T>::shuffle1 = _mm256_setr_epi32(0x80808004U, 0x80808005U, 0x80808006U, 0x80808007U, 0x80808004U, 0x80808005U, 0x80808006U, 0x80808007U);
+template <typename T> const __m256i Murmur64AVX<T>::shuffle2 = _mm256_setr_epi32(0x80808008U, 0x80808009U, 0x8080800AU, 0x8080800BU, 0x80808008U, 0x80808009U, 0x8080800AU, 0x8080800BU);
+template <typename T> const __m256i Murmur64AVX<T>::shuffle3 = _mm256_setr_epi32(0x8080800CU, 0x8080800DU, 0x8080800EU, 0x8080800FU, 0x8080800CU, 0x8080800DU, 0x8080800EU, 0x8080800FU);
+template <typename T> const __m256i Murmur64AVX<T>::shuffle1_epi8 = _mm256_setr_epi8(0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15, 0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15);
+template <typename T> const __m256i Murmur64AVX<T>::ones = _mm256_cmpeq_epi32(ones, ones);
+template <typename T> const __m256i Murmur64AVX<T>::zeros = _mm256_setzero_si256();
+template <typename T> const __m128i Murmur64AVX<T>::zeroi128 = _mm_setzero_si128();
+template <typename T> constexpr uint8_t Murmur64AVX<T>::batch_size;
 
 #endif
 
