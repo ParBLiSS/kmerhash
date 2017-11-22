@@ -143,7 +143,7 @@ inline uint8_t leftmost_set_bit(uint32_t x) {
 //   64 bit.  0xIIRRVVVVVV  // MSB: ignored bits II;  high bits: register index RR;  low: values VVVVVV
 template <typename T, typename Hash, uint8_t precision = 12U>
 class hyperloglog64 {
-	  static_assert((precision >= 4ULL) && (precision <= 18ULL),
+	  static_assert((precision >= 4U) && (precision <= 18U),
 			  "ERROR: precision for hyperloglog should be in [4, 18].");
 
 public:

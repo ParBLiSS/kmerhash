@@ -73,7 +73,7 @@ protected:
 
     virtual void SetUp()
     {
-    	hll = HLL(PARAMS::ignore);
+    	hll = std::move(HLL(PARAMS::ignore));
     }
 
 
