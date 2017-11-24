@@ -60,7 +60,7 @@
 //#include "kmerhash/experimental/hashmap_robinhood_doubling_memmove.hpp"
 //#include "kmerhash/experimental/hashmap_robinhood_doubling_offsets2.hpp"
 #include "kmerhash/experimental/hashmap_robinhood_offsets_prefetch.hpp"
-#include "kmerhash/robinhood_offset_hashmap.hpp"
+#include "kmerhash/robinhood_offset_hashmap_ptr.hpp"
 #include "kmerhash/hashmap_radixsort.hpp"
 
 #include "kmerhash/hashmap_robinhood_prefetch.hpp"

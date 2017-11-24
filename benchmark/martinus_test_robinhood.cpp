@@ -10,7 +10,7 @@
 #include "kmerhash/hashmap_robinhood.hpp"
 #include "kmerhash/hashmap_robinhood_prefetch.hpp"
 #include "kmerhash/experimental/hashmap_robinhood_offsets_prefetch.hpp"
-#include "kmerhash/robinhood_offset_hashmap.hpp"
+#include "kmerhash/robinhood_offset_hashmap_ptr.hpp"
 #include "kmerhash/hashmap_linearprobe.hpp"
 #include "kmerhash/hashmap_radixsort.hpp"
 #include "kmerhash/hash_new.hpp"
