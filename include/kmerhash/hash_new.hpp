@@ -71,7 +71,7 @@
 #include <type_traits> // enable_if
 #include <cstring>     // memcpy
 #include <stdexcept>   // logic error
-#include <stdint.h>    // std int strings
+// std int strings
 #include <iostream>    // cout
 
 #include "utils/filter_utils.hpp"
@@ -117,6 +117,8 @@
 
 #include <x86intrin.h>
 
+//#define HASH_DEBUG
+
 namespace fsc
 {
 
@@ -132,7 +134,7 @@ class identity
 {
 
 public:
-  static constexpr uint8_t batch_size = 1;
+  static constexpr size_t batch_size = 1;
   using result_type = uint64_t;
   using argument_type = T;
 
@@ -157,7 +159,7 @@ public:
   }
 };
 template <typename T>
-constexpr uint8_t identity<T>::batch_size;
+constexpr size_t identity<T>::batch_size;
 
 /**
      * @brief MurmurHash.  using lower 64 bits.
@@ -171,7 +173,7 @@ protected:
   uint32_t seed;
 
 public:
-  static constexpr uint8_t batch_size = 1;
+  static constexpr size_t batch_size = 1;
   using result_type = uint32_t;
   using argument_type = T;
 
@@ -189,7 +191,7 @@ public:
   }
 };
 template <typename T>
-constexpr uint8_t murmur32<T>::batch_size;
+constexpr size_t murmur32<T>::batch_size;
 
 /**
      * @brief MurmurHash.  using lower 64 bits.
@@ -203,7 +205,7 @@ protected:
   uint32_t seed;
 
 public:
-  static constexpr uint8_t batch_size = 1;
+  static constexpr size_t batch_size = 1;
   using result_type = uint64_t;
   using argument_type = T;
 
@@ -238,7 +240,7 @@ public:
       uint64_t seed;
     
     public:
-      static constexpr uint8_t batch_size = 1;
+      static constexpr size_t batch_size = 1;
       using result_type = uint64_t;
       using argument_type = T;
     
@@ -257,7 +259,7 @@ public:
     };
 
 template <typename T>
-constexpr uint8_t murmur<T>::batch_size;
+constexpr size_t murmur<T>::batch_size;
 
 #if defined(__SSE4_2__)
 
@@ -390,7 +392,7 @@ protected:
   }
 
 public:
-  static constexpr uint8_t batch_size = 4;
+  static constexpr size_t batch_size = 4;
 
   using result_type = uint32_t;
   using argument_type = T;
@@ -486,7 +488,7 @@ public:
 //  }
 };
 template <typename T>
-constexpr uint8_t crc32c<T>::batch_size;
+constexpr size_t crc32c<T>::batch_size;
 
 #endif
 
@@ -505,7 +507,7 @@ protected:
   mutable size_t rand_numbers[RANDOM_64BITWORDS_NEEDED_FOR_CLHASH] __attribute__((aligned(16)));
 
 public:
-  static constexpr uint8_t batch_size = 1;
+  static constexpr size_t batch_size = 1;
   using result_type = uint64_t;
   using argument_type = T;
 
@@ -525,7 +527,7 @@ public:
   }
 };
 template <typename T>
-constexpr uint8_t clhash<T>::batch_size;
+constexpr size_t clhash<T>::batch_size;
 #endif
 
 template <typename T>
@@ -536,7 +538,7 @@ protected:
   uint64_t seed;
 
 public:
-  static constexpr uint8_t batch_size = 1;
+  static constexpr size_t batch_size = 1;
   using result_type = uint64_t;
   using argument_type = T;
 
@@ -549,7 +551,7 @@ public:
   }
 };
 template <typename T>
-constexpr uint8_t farm<T>::batch_size;
+constexpr size_t farm<T>::batch_size;
 
 template <typename T>
 class farm32
@@ -559,7 +561,7 @@ protected:
   uint32_t seed;
 
 public:
-  static constexpr uint8_t batch_size = 1;
+  static constexpr size_t batch_size = 1;
   using result_type = uint32_t;
   using argument_type = T;
 
@@ -572,23 +574,30 @@ public:
   }
 };
 template <typename T>
-constexpr uint8_t farm32<T>::batch_size;
+constexpr size_t farm32<T>::batch_size;
 
 
 
-// /// SFINAE templated class for checking for batch_size.  from  https://stackoverflow.com/questions/1005476/how-to-detect-whether-there-is-a-specific-member-variable-in-class
-// /// explanation at https://cpptalk.wordpress.com/2009/09/12/substitution-failure-is-not-an-error-2/
-// template<typename T> struct HasBatchSize { 
-//     struct Fallback { uint8_t batch_size; }; // introduce member name "x"
-//     struct Derived : T, Fallback { };
+/// SFINAE templated class for checking for batch_size.
+/// modified from https://stackoverflow.com/questions/11927032/sfinae-check-for-static-member-using-decltype
+// info from https://stackoverflow.com/questions/1005476/how-to-detect-whether-there-is-a-specific-member-variable-in-class
+//   is not useful here because batch_size should be a static member variable.
+// explanation at https://cpptalk.wordpress.com/2009/09/12/substitution-failure-is-not-an-error-2/
+// modified from https://stackoverflow.com/questions/36709958/type-trait-check-if-reference-member-variable-is-static-or-not
+template <class T>
+class batch_traits
+{
+public:
+	// if static class variable exists.  (what about if no variable of that name exists? or if it refers to a function?
+    template<class U = T, class = typename std::enable_if<!std::is_member_object_pointer<decltype(&U::batch_size)>::value>::type>
+        static constexpr size_t get_batch_size(int) { return U::batch_size; };
 
-//     template<typename C, C> struct ChT; 
+    // fallback for all others.  (function, non-existent, non-static member variables)
+    template <class U = T>
+        static constexpr size_t get_batch_size(...) { return 1ULL; };
+};
 
-//     template<typename C> static char (&f(ChT<int Fallback::*, &C::x>*))[1]; 
-//     template<typename C> static char (&f(...))[2]; 
 
-//     static bool const value = sizeof(f<Derived>(0)) == 2;
-// }; 
 
 
 /// custom version of transformed hash that does a few things:
@@ -624,15 +633,30 @@ public:
       decltype(::std::declval<PostTransform<HASH_VAL_TYPE>>().operator()(::std::declval<HASH_VAL_TYPE>()));
   using argument_type = Key;
 
+protected:
+  using POSTTRANS_T = PostTransform<HASH_VAL_TYPE>;
+
+public:
+  //
+  static constexpr size_t pretrans_batch_size = batch_traits<PRETRANS_T>::get_batch_size(0);
+  static constexpr size_t hash_batch_size = batch_traits<HASH_T>::get_batch_size(0);
+  static constexpr size_t posttrans_batch_size = batch_traits<POSTTRANS_T>::get_batch_size(0);
+
   // lowest common multiple of the three.  default to 64byte/sizeof(HASH_VAL_TYPE) for now (cacheline multiple)
   // need to take full advantage of batch size.  for now, set to 32, as that is the largest batch size of hash tables. 
-  static constexpr uint8_t batch_size = 32; // 64 / sizeof(HASH_VAL_TYPE); //(sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
-                                                                    // HASH_T::batch_size; //(sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
+  static constexpr size_t batch_size =
+		  constexpr_lcm(constexpr_lcm(pretrans_batch_size, hash_batch_size),
+				  constexpr_lcm(posttrans_batch_size, 128UL / sizeof(HASH_VAL_TYPE)));
+  	 // 128/sizeof(HASH_VAL_TYPE) = 16 appear to be a sweet spot for performance.  above and below are not great.
+		  // 32;
+		  // 64 / sizeof(HASH_VAL_TYPE);
+		  //(sizeof(HASH_VAL_TYPE) == 4 ? 8 : 4);
+          // HASH_T::batch_size;
+
 
   static_assert((batch_size & (batch_size - 1)) == 0, "ERROR: batch_size should be a power of 2.");
 
 protected:
-  using POSTTRANS_T = PostTransform<HASH_VAL_TYPE>;
 
   // need some buffers
   // use local static array instead of dynamic ones so when
@@ -666,6 +690,9 @@ public:
                 int>::type = 1>
   inline result_type operator()(Key const &k) const
   {
+#ifdef HASH_DEBUG
+	  std::cout << "1" << std::flush;
+#endif
     return h(k);
   }
   template <typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
@@ -675,6 +702,10 @@ public:
                 int>::type = 1>
   inline result_type operator()(Key const &k) const
   {
+#ifdef HASH_DEBUG
+	  std::cout << "2" << std::flush;
+#endif
+
     return h(trans(k));
   }
   template <typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
@@ -684,6 +715,10 @@ public:
                 int>::type = 1>
   inline result_type operator()(Key const &k) const
   {
+#ifdef HASH_DEBUG
+	  std::cout << "3" << std::flush;
+#endif
+
     return posttrans(h(k));
   }
   template <typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
@@ -693,17 +728,28 @@ public:
                 int>::type = 1>
   inline result_type operator()(Key const &k) const
   {
+#ifdef HASH_DEBUG
+	  std::cout << "4" << std::flush;
+#endif
+
     return posttrans(h(trans(k)));
   }
 
   template <typename V>
   inline result_type operator()(::std::pair<Key, V> const &x) const
   {
+#ifdef HASH_DEBUG
+	  std::cout << "5" << std::flush;
+#endif
     return this->operator()(x.first);
   }
   template <typename V>
   inline result_type operator()(::std::pair<const Key, V> const &x) const
   {
+#ifdef HASH_DEBUG
+	  std::cout << "6" << std::flush;
+#endif
+
     return this->operator()(x.first);
   }
 
@@ -718,28 +764,41 @@ protected:
   // case when both transforms are identity.  last param is dummy.
   template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
             typename ::std::enable_if<
-                ::std::is_same<PrT, ::bliss::transform::identity<Key>>::value && ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE>>::value, // &&
-                                                                                                                                                          //					::std::is_same<size_t,
-                                                                                                                                                          //					 decltype(std::declval<HT>().operator()(
-                                                                                                                                                          //							 std::declval<PRETRANS_VAL_TYPE const *>(),
-                                                                                                                                                          //							 std::declval<size_t>(),
-                                                                                                                                                          //							 std::declval<HASH_VAL_TYPE *>()))>::value,
+                ::std::is_same<PrT, ::bliss::transform::identity<Key>>::value &&
+				::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE>>::value,
+				 // &&
+                 //					::std::is_same<size_t,
+                 //					 decltype(std::declval<HT>().operator()(
+                 //							 std::declval<PRETRANS_VAL_TYPE const *>(),
+                 //							 std::declval<size_t>(),
+                 //							 std::declval<HASH_VAL_TYPE *>()))>::value,
                 int>::type = 1>
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, int, int) const
       -> decltype(::std::declval<HT>()(k, count, out), size_t())
   {
-    h(k, count, out);
-    return count;
+#ifdef HASH_DEBUG
+	  std::cout << "A" << std::flush;
+#endif
+	  h(k, count, out);
+
+#ifdef HASH_DEBUG
+	  std::cout << count << std::flush;
+#endif
+	  return count;
     // no last part
   }
   template <typename HT = HASH_T, typename PrT = PRETRANS_T, typename PoT = POSTTRANS_T,
             typename ::std::enable_if<
-                ::std::is_same<PrT, ::bliss::transform::identity<Key>>::value && ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE>>::value,
+                ::std::is_same<PrT, ::bliss::transform::identity<Key>>::value &&
+				 ::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE>>::value,
                 int>::type = 1>
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, long, int) const
       -> decltype(::std::declval<HT>()(::std::declval<Key>()), size_t())
   {
-    // no batched part.
+#ifdef HASH_DEBUG
+	  std::cout << "b0" << std::flush;
+#endif
+	  // no batched part.
     return 0;
   }
   // pretrans is not identity, post is identity.
@@ -751,6 +810,9 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, int, int) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(trans_buf, count, out), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "C" << std::flush;
+#endif
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0;
@@ -759,6 +821,9 @@ protected:
       trans(k + i, batch_size, trans_buf);
       h(trans_buf, batch_size, out + i);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -770,6 +835,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, long, int) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(*trans_buf), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "D" << std::flush;
+#endif
+
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0, j = 0;
@@ -779,6 +848,9 @@ protected:
       for (j = 0; j < batch_size; ++j)
         out[i + j] = h(trans_buf[j]);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -790,6 +862,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, long, int, int) const
       -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(trans_buf, count, out), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "E" << std::flush;
+#endif
+
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0, j = 0;
@@ -799,6 +875,9 @@ protected:
         trans_buf[j] = trans(k[i + j]);
       h(trans_buf, batch_size, out + i);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -810,6 +889,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, long, long, int) const
       -> decltype(::std::declval<PrT>()(::std::declval<Key>()), ::std::declval<HT>()(::std::declval<PRETRANS_VAL_TYPE>()), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "f0" << std::flush;
+#endif
+
     // no batched part.
     return 0;
   }
@@ -822,6 +905,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, int, int) const
       -> decltype(::std::declval<HT>()(k, count, hash_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "G" << std::flush;
+#endif
+
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0;
@@ -830,6 +917,9 @@ protected:
       h(k + i, batch_size, hash_buf);
       posttrans(hash_buf, batch_size, out + i);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -841,6 +931,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, long, int) const
       -> decltype(::std::declval<HT>()(*k), ::std::declval<PoT>()(hash_buf, count, out), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "H" << std::flush;
+#endif
+
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0, j = 0;
@@ -850,6 +944,9 @@ protected:
         hash_buf[j] = h(k[i + j]);
       posttrans(hash_buf, batch_size, out + i);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -861,6 +958,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, int, long) const
       -> decltype(::std::declval<HT>()(k, count, hash_buf), ::std::declval<PoT>()(*hash_buf), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "I" << std::flush;
+#endif
+
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0, j = 0;
@@ -870,6 +971,9 @@ protected:
       for (j = 0; j < batch_size; ++j)
         out[i + j] = posttrans(hash_buf[j]);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -879,8 +983,12 @@ protected:
                     !::std::is_same<PoT, ::bliss::transform::identity<HASH_VAL_TYPE>>::value,
                 int>::type = 1>
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, long, long) const
-      -> decltype(::std::declval<HT>()(::std::declval<Key>()), ::std::declval<PoT>()(::std::declval<HASH_VAL_TYPE>()), size_t())
+      -> decltype(::std::declval<HT>()(*k), ::std::declval<PoT>()(*hash_buf), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "j0" << std::flush;
+#endif
+
     // no batched part.
     return 0;
   }
@@ -893,6 +1001,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, int, int) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(trans_buf, count, hash_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "K" << std::flush;
+#endif
+
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0;
@@ -902,6 +1014,9 @@ protected:
       h(trans_buf, batch_size, hash_buf);
       posttrans(hash_buf, batch_size, out + i);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -913,6 +1028,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, long, int) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(*trans_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "L" << std::flush;
+#endif
+
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0, j = 0;
@@ -923,6 +1042,9 @@ protected:
         hash_buf[j] = h(trans_buf[j]);
       posttrans(hash_buf, batch_size, out + i);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -934,6 +1056,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, long, int, int) const
       -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(trans_buf, count, hash_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "M" << std::flush;
+#endif
+
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0, j = 0;
@@ -944,6 +1070,9 @@ protected:
       h(trans_buf, batch_size, hash_buf);
       posttrans(hash_buf, batch_size, out + i);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -955,6 +1084,9 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, long, long, int) const
       -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(*trans_buf), ::std::declval<PoT>()(hash_buf, count, out), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "N" << std::flush;
+#endif
 
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0, j = 0;
@@ -964,6 +1096,9 @@ protected:
         hash_buf[j] = h(trans(k[i + j]));
       posttrans(hash_buf, batch_size, out + i);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -975,6 +1110,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, int, long) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(trans_buf, count, hash_buf), ::std::declval<PoT>()(*hash_buf), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "O" << std::flush;
+#endif
+
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0, j = 0;
@@ -985,6 +1124,9 @@ protected:
       for (j = 0; j < batch_size; ++j)
         out[i + j] = posttrans(hash_buf[j]);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -996,6 +1138,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, int, long, long) const
       -> decltype(::std::declval<PrT>()(k, count, trans_buf), ::std::declval<HT>()(*trans_buf), ::std::declval<PoT>()(*hash_buf), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "P" << std::flush;
+#endif
+
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0, j = 0;
@@ -1005,6 +1151,9 @@ protected:
       for (j = 0; j < batch_size; ++j)
         out[i + j] = posttrans(h(trans_buf[j]));
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -1016,6 +1165,10 @@ protected:
   inline auto batch_op(Key const *k, size_t const &count, result_type *out, long, int, long) const
       -> decltype(::std::declval<PrT>()(*k), ::std::declval<HT>()(trans_buf, count, hash_buf), ::std::declval<PoT>()(*hash_buf), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "Q" << std::flush;
+#endif
+
     // first part.
     size_t max = count - (count & (batch_size - 1));
     size_t i = 0, j = 0;
@@ -1027,6 +1180,9 @@ protected:
       for (j = 0; j < batch_size; ++j)
         out[i + j] = posttrans(hash_buf[j]);
     }
+#ifdef HASH_DEBUG
+    std::cout << max << std::flush;
+#endif
     // no last part
     return max;
   }
@@ -1040,6 +1196,10 @@ protected:
                   ::std::declval<HT>()(::std::declval<PRETRANS_VAL_TYPE>()),
                   ::std::declval<PoT>()(::std::declval<HASH_VAL_TYPE>()), size_t())
   {
+#ifdef HASH_DEBUG
+	  std::cout << "r0" << std::flush;
+#endif
+
     // no batched part.
     return 0;
   }
@@ -1047,55 +1207,108 @@ protected:
 public:
   inline void operator()(Key const *k, size_t const &count, result_type *out) const
   {
+#ifdef HASH_DEBUG
+	    std::cout << count << "/" << static_cast<size_t>(batch_size) << " -" << std::flush;
+#endif
+
     size_t max = count - (count & (batch_size - 1));
     max = this->batch_op(k, max, out, 0, 0, 0); // 0 has type int....
+
+#ifdef HASH_DEBUG
+    std::cout << "." << std::flush;
+#endif
 
     for (size_t i = max; i < count; ++i)
     {
       out[i] = this->operator()(k[i]);
     }
+#ifdef HASH_DEBUG
+    std::cout << ";" << std::endl;
+#endif
+
   }
 
   template <typename V>
   inline void operator()(::std::pair<Key, V> const *x, size_t const &count, result_type *out) const
   {
+#ifdef HASH_DEBUG
+	    std::cout << count << "/" << static_cast<size_t>(batch_size) << " =" << std::flush;
+#endif
     size_t max = count - (count & (batch_size - 1));
-    size_t i = 0, j = 0;
-    for (; i < max; i += batch_size)
+    size_t i = 0, j = 0, done;
+    for (; i < max; ) // i += batch_size)
     {
       for (j = 0; j < batch_size; ++j)
         key_buf[j] = x[i + j].first;
-      this->batch_op(key_buf, batch_size, out + i, 0, 0, 0);
+      done = this->batch_op(key_buf, batch_size, out + i, 0, 0, 0);
+      if (done == 0) {
+#ifdef HASH_DEBUG
+    	  std::cout << "X" << std::flush;
+#endif
+     	  break;
+      } else if (done != batch_size) {
+#ifdef HASH_DEBUG
+    	  std::cout << "x" << std::flush;
+#endif
+      }
+      i += done;
     }
+#ifdef HASH_DEBUG
+    std::cout << "." << std::flush;
+#endif
     // last part
     for (; i < count; ++i)
     {
       out[i] = this->operator()(x[i].first);
     }
+#ifdef HASH_DEBUG
+    std::cout << ";" << std::endl;
+#endif
+
   }
 
   template <typename V>
   inline void operator()(::std::pair<const Key, V> const *x, size_t const &count, result_type *out) const
   {
+#ifdef HASH_DEBUG
+	    std::cout << count << "/" << static_cast<size_t>(batch_size) << " +" << std::flush;
+#endif
     size_t max = count - (count & (batch_size - 1));
-    size_t i = 0, j = 0;
-    for (; i < max; i += batch_size)
+    size_t i = 0, j = 0, done;
+    for (; i < max; ) // i += batch_size)
     {
       for (j = 0; j < batch_size; ++j)
         key_buf[j] = x[i + j].first;
-      this->batch_op(key_buf, batch_size, out + i, 0, 0, 0);
+      done = this->batch_op(key_buf, batch_size, out + i, 0, 0, 0);
+      if (done == 0) {
+#ifdef HASH_DEBUG
+    	  std::cout << "X" << std::flush;
+#endif
+    	  break;
+      } else if (done != batch_size) {
+#ifdef HASH_DEBUG
+    	  std::cout << "x" << std::flush;
+#endif
+      }
+      i += done;
     }
+#ifdef HASH_DEBUG
+    std::cout << "." << std::flush;
+#endif
     // last part
     for (; i < count; ++i)
     {
       out[i] = this->operator()(x[i].first);
     }
+#ifdef HASH_DEBUG
+    std::cout << ";" << std::endl;
+#endif
   }
 };
 template <typename Key, template <typename> class Hash,
           template <typename> class PreTransform,
           template <typename> class PostTransform>
-constexpr uint8_t TransformedHash<Key, Hash, PreTransform, PostTransform>::batch_size;
+constexpr size_t TransformedHash<Key, Hash, PreTransform, PostTransform>::batch_size;
 
 // TODO:  [ ] batch mode transformed_predicate
 //		[ ] batch mode transformed_comparator
