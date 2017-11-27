@@ -360,7 +360,7 @@ protected:
   uint32_t seed_arr[8];
 
 public:
-  static constexpr uint8_t batch_size = (sizeof(T) == 1) ? 32 : ((sizeof(T) == 2) ? 16 : 8);
+  static constexpr size_t batch_size = (sizeof(T) == 1) ? 32 : ((sizeof(T) == 2) ? 16 : 8);
 
   explicit Murmur64AVX(uint32_t const & _seed = 43U) 
   {
@@ -1524,7 +1524,7 @@ template <typename T> const __m256i Murmur64AVX<T>::shuffle1_epi8 = _mm256_setr_
 template <typename T> const __m256i Murmur64AVX<T>::ones = _mm256_cmpeq_epi32(ones, ones);
 template <typename T> const __m256i Murmur64AVX<T>::zeros = _mm256_setzero_si256();
 template <typename T> const __m128i Murmur64AVX<T>::zeroi128 = _mm_setzero_si128();
-template <typename T> constexpr uint8_t Murmur64AVX<T>::batch_size;
+template <typename T> constexpr size_t Murmur64AVX<T>::batch_size;
 
 #endif
 
@@ -1548,7 +1548,7 @@ template <typename T>
 class murmur3avx64
 {
 public:
-  static constexpr uint8_t batch_size = ::fsc::hash::sse::Murmur64AVX<T>::batch_size;
+  static constexpr size_t batch_size = ::fsc::hash::sse::Murmur64AVX<T>::batch_size;
 
 protected:
   ::fsc::hash::sse::Murmur64AVX<T> hasher;
@@ -1645,7 +1645,7 @@ public:
   // TODO: [ ] add a transform_hash_mod.
 };
 template <typename T>
-constexpr uint8_t murmur3avx64<T>::batch_size;
+constexpr size_t murmur3avx64<T>::batch_size;
 
 #endif
 

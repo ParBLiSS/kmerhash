@@ -322,7 +322,7 @@ protected:
   uint32_t seed_arr[8];
   
 public:
-  static constexpr uint8_t batch_size = 32;
+  static constexpr size_t batch_size = 32;
 
 
   explicit Murmur32AVX(uint32_t const & _seed = 43U) 
@@ -1227,7 +1227,7 @@ template <typename T> const __m256i Murmur32AVX<T>::shuffle3 = _mm256_setr_epi32
 template <typename T> const __m256i Murmur32AVX<T>::ones = _mm256_cmpeq_epi32(ones, ones);
 template <typename T> const __m256i Murmur32AVX<T>::zeros = _mm256_setzero_si256();
 template <typename T> const __m128i Murmur32AVX<T>::zeroi128 = _mm_setzero_si128();
-template <typename T> constexpr uint8_t Murmur32AVX<T>::batch_size;
+template <typename T> constexpr size_t Murmur32AVX<T>::batch_size;
 
 #endif
 
@@ -1251,7 +1251,7 @@ template <typename T>
 class murmur3avx32
 {
 public:
-  static constexpr uint8_t batch_size = ::fsc::hash::sse::Murmur32AVX<T>::batch_size;
+  static constexpr size_t batch_size = ::fsc::hash::sse::Murmur32AVX<T>::batch_size;
 
 protected:
   ::fsc::hash::sse::Murmur32AVX<T> hasher;
@@ -1348,7 +1348,7 @@ public:
   // TODO: [ ] add a transform_hash_mod.
 };
 template <typename T>
-constexpr uint8_t murmur3avx32<T>::batch_size;
+constexpr size_t murmur3avx32<T>::batch_size;
 
 #endif
 
