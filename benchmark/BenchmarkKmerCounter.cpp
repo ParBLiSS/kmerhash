@@ -1058,13 +1058,14 @@ size_t writeToPOSIX(C const & container, std::string const & out_filename) {
 	// compute some step sizes.  then 8192 - (8192 % lcm)
 		// get lowest common multiple of 512 and tuple type size
 		size_t step512 = lcm(512UL, out_elem_size);
-		size_t step_bytes = CHUNK_SIZE - (CHUNK_SIZE % step512);  // user specified.
+		size_t step_bytes = std::max(CHUNK_SIZE, step512);
+		step_bytes = step_bytes - (step_bytes % step512);  // user specified.
 		size_t container_bytes = container.size() * out_elem_size;
 		container_bytes = ((container_bytes + step512 - 1) / step512) * step512;  // next multiple of step512.
 		step_bytes = std::min(step_bytes, container_bytes); // at most CHUNK_SIZE, and exact multiple of 512.
     size_t step = step_bytes / out_elem_size;  // number of elements - always divisible by sizeof(TupleType)
 		
-		std::cout << "ELEM SIZE " << out_elem_size << " lcm " << step512 << " total bytes " << step_bytes << " step " << step << " container size " << container.size() <<  std::endl;
+		std::cout << "ELEM SIZE " << out_elem_size << " CHUNK_SIZE " << CHUNK_SIZE << " lcm " << step512 << " total bytes " << step_bytes << " step " << step << " container size " << container.size() <<  std::endl;
 
 	// open file.
 		int fd = open_out_file(out_filename, direct);
@@ -1426,7 +1427,7 @@ int main(int argc, char** argv) {
       max_load = idx.get_map().get_local_container().get_max_load_factor() * buckets;
 #endif
       free_mem = get_free_mem_per_proc(comm); // - total_file_size;  // free memory usage after last insert.
-      usable_mem = free_mem - std::min((1UL << 33) / comm.size(), free_mem / 4UL);   // reserve either 1/4 or 8GB of GLOBAL TOTAL.  (to deal with 10 GB files?)
+      usable_mem = free_mem - std::min((1UL << 33U) / comm.size(), free_mem / 4UL);   // reserve either 1/4 or 8GB of GLOBAL TOTAL.  (to deal with 10 GB files?)
 
       file_size = 0;
       iter_file_size = 0;
@@ -1811,9 +1812,9 @@ int main(int argc, char** argv) {
       if (i == group.rank()) {
 				// writing
 				if (writer_algo == 5)
-					copied = writeToPOSIX<false, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
+					copied = writeToPOSIX<false, (1UL << 20U)>(idx.get_map().get_local_container(), out_filename);
 				else
-					copied = writeToPOSIX<true, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
+					copied = writeToPOSIX<true, (1UL << 20U)>(idx.get_map().get_local_container(), out_filename);
       }
 			group.barrier();  // use barrier to force one from a node at a time.
 
@@ -1836,9 +1837,9 @@ int main(int argc, char** argv) {
 
 		size_t copied = 0;
 		if (writer_algo == 6)
-			copied = writeToPOSIX<false, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
+			copied = writeToPOSIX<false, (1UL << 20U)>(idx.get_map().get_local_container(), out_filename);
 		else {
-			copied = writeToPOSIX<true, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
+			copied = writeToPOSIX<true, (1UL << 20U)>(idx.get_map().get_local_container(), out_filename);
 		}
     BL_BENCH_COLLECTIVE_END(test, ((writer_algo == 6) ? "write_6" : "write_8"), copied, comm);
 
