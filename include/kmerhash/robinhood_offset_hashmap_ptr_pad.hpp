@@ -206,73 +206,79 @@ protected:
 
 	template <typename S>
 	struct modulus2 {
-#if defined(__AVX2__)
-		static constexpr size_t batch_size = (sizeof(S) == 4 ? 8 : 4);
-#elif defined(__SSE2__)
-		static constexpr size_t batch_size = (sizeof(S) == 4 ? 4 : 2);
-#else
-		static constexpr size_t batch_size = 1;
-#endif
 
-#if defined(__AVX2__)
-		__m256i vmask;
-#elif defined(__SSE2__)
-		__m128i vmask;
-#endif
+		static_assert(((sizeof(S) & (sizeof(S) - 1)) == 0) && (sizeof(S) <= 8), "only support 4- and 8-byte elements up to 8 bytes right now.");
+		//==== AVX and SSE code commmented out because they are not correct and are causing problems with even copy_upsize.
+//#if defined(__AVX2__)
+//		static constexpr size_t batch_size = 32 / sizeof(S);
+//#elif defined(__SSE2__)
+//		static constexpr size_t batch_size = 16 / sizeof(S);
+//#else
+		static constexpr size_t batch_size = 1;
+//#endif
+//
+//#if defined(__AVX2__)
+//		__m256i vmask;
+//#elif defined(__SSE2__)
+//		__m128i vmask;
+//#endif
 		S mask;
 
 		modulus2(S const & _mask) :
-#if defined(__AVX2__)
-				vmask(sizeof(S) == 4 ?  _mm256_set1_epi32(_mask) : _mm256_set1_epi64x(_mask)),
-#elif defined(__SSE2__)
-				vmask(sizeof(S) == 4 ?  _mm_set1_epi32(_mask) : _mm_set1_epi64x(_mask)),
-#endif
+//#if defined(__AVX2__)
+//				vmask(sizeof(S) == 4 ?  _mm256_set1_epi32(_mask) : _mm256_set1_epi64x(_mask)),
+//#elif defined(__SSE2__)
+//				vmask(sizeof(S) == 4 ?  _mm_set1_epi32(_mask) : _mm_set1_epi64x(_mask)),
+//#endif
 						mask(_mask)
 				{}
 
 		template <typename IN>
 		inline IN operator()(IN const & x) const { return (x & mask); }
 
+		// for in and out being different types.
 		template <typename IN, typename OUT>
 		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
 			// TODO: [ ] do SSE version here
 			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
 		}
 
-#if defined(__AVX2__)
-		// when input nad output are the same types
-		template <typename IN>
-		inline void operator()(IN const * x, size_t const & _count, IN * y) const {
-			// 32 bytes at a time.  input should be
-			int i = 0;
-			int imax;
-
-			__m256i xx;
-			for (i = 0, imax = _count - modulus2<S>::batch_size; i < imax; i += modulus2<S>::batch_size)  {
-				xx = _mm256_and_si256(*(reinterpret_cast<__m256i const *>(x + i)), vmask);
-				_mm256_storeu_si256(reinterpret_cast<__m256i *>(y + i), xx);
-			}
-			for (imax = _count; i < imax; ++i)
-				y[i] = x[i] & mask;
-		}
-#elif defined(__SSE2__)
-		// when input nad output are the same types
-		template <typename IN>
-		inline void operator()(IN const * x, size_t const & _count, IN * y) const {
-			// 32 bytes at a time.  input should be
-			int i = 0;
-			int imax;
-
-			__m128i xx;
-			for (i = 0, imax = _count - modulus2<S>::batch_size; i < imax; i += modulus2<S>::batch_size)  {
-				xx = _mm_and_si128(*(reinterpret_cast<__m128i const *>(x + i)), vmask);
-				_mm_storeu_si128(reinterpret_cast<__m128i *>(y + i), xx);
-			}
-			for (imax = _count; i < imax; ++i)
-				y[i] = x[i] & mask;
-		}
-
-#endif
+//#if defined(__AVX2__)
+//		// when input nad output are the same types
+//		template <typename IN>
+//		inline void operator()(IN const * x, size_t const & _count, IN * y) const {
+//			// 32 bytes at a time.  input should be
+//			int i = 0;
+//			int imax;
+//
+//			__m256i xx;
+//			for (i = 0, imax = _count - batch_size; i < imax; i += batch_size)  {
+//				xx = _mm256_lddqu_si256(reinterpret_cast<__m256i const *>(x + i));
+//				xx = _mm256_and_si256(xx, vmask);
+//				_mm256_storeu_si256(reinterpret_cast<__m256i *>(y + i), xx);
+//			}
+//			for (imax = _count; i < imax; ++i)
+//				y[i] = x[i] & mask;
+//		}
+//#elif defined(__SSE2__)
+//		// when input nad output are the same types
+//		template <typename IN>
+//		inline void operator()(IN const * x, size_t const & _count, IN * y) const {
+//			// 32 bytes at a time.  input should be
+//			int i = 0;
+//			int imax;
+//
+//			__m128i xx;
+//			for (i = 0, imax = _count - batch_size; i < imax; i += batch_size)  {
+//				xx = _mm_lddqu_si128(reinterpret_cast<__m128i const *>(x + i));
+//				xx = _mm_and_si128(xx, vmask);
+//				_mm_storeu_si128(reinterpret_cast<__m128i *>(y + i), xx);
+//			}
+//			for (imax = _count; i < imax; ++i)
+//				y[i] = x[i] & mask;
+//		}
+//
+//#endif
 	};
 
 	// mod 2 okay since hashtable size is always power of 2.
@@ -302,13 +308,13 @@ protected:
 		return x < info_empty;  // normal. both top bits are set. 0xC0
 	}
 	inline void set_empty(info_type & x) {
-		x |= info_empty;  // nothing here.
+		x |= info_empty;
 	}
 	inline void set_normal(info_type & x) {
-		x &= info_mask;  // nothing here.
+		x &= info_mask;
 	}
 	inline info_type get_offset(info_type const & x) const {
-		return x & info_mask;  // nothing here.
+		return x & info_mask;
 	}
 	// make above explicit by preventing automatic type conversion.
 	template <typename TT> inline bool is_empty(TT const & x) const  = delete;
@@ -1169,7 +1175,7 @@ protected:
 		assert((target_buckets & (target_buckets - 1)) == 0);   // assert this is a power of 2.
 
 		uint8_t log_buckets = std::log2(buckets);  // should always be power of 2
-		std::cout << "buckets " << buckets << " log of it " << log_buckets << std::endl;
+		std::cout << "buckets " << buckets << " log of it " << static_cast<size_t>(log_buckets) << std::endl;
 
 		size_t id, bid, p;
 		size_t pos;
@@ -1181,10 +1187,14 @@ protected:
 		std::vector<size_t> offsets(blocks + 1, 0);
 		std::vector<size_t> len(blocks, 0);
 
+//		std::cout << "offsets: " << offsets[0];
 		// prefill with ideal offsets.
 		for (bl = 0; bl < blocks; ++bl) {
 		  offsets[bl + 1] = bl * buckets;
+//			std::cout << ", " << offsets[bl + 1];
 		}
+//		std::cout << std::endl;
+
 
     // std::cout << "RESIZE UP from " << buckets << " to " << target_buckets << ", with blocks " << blocks << std::endl;
 
@@ -1197,24 +1207,11 @@ protected:
 		h2(container, buckets + info_empty, hashes);  // compute even for empty positions.
 		// load should be high so there should not be too much waste.  also, SSE and AVX.
 
-//    hash_val_type * hashes_orig = ::utils::mem::aligned_alloc<hash_val_type>(container.size());
-//		hash_mod2(container.data(), container.size(), hashes_orig);
-//
-//    if (hashes_orig[0] != (hashes[0] & mask))
-//      std::cout << "ERROR: 0 ORIG hash " << hashes_orig[0] << " new hash " << hashes[0] << " would have been " << (hashes[0] & mask) << std::endl;
-//    for (size_t hh = 1; hh < container.size(); ++hh) {
-//      if ((hashes_orig[hh] != (hashes[hh] & mask)) || ((hashes_orig[hh] > 0) && (hashes_orig[hh - 1] > hashes_orig[hh]))) {
-//        std::cout << "ERROR: " << hh << "\tORIG hash " << hashes_orig[hh-1] << " new hash " << hashes[hh-1] << " would have been " << (hashes[hh-1] & mask) << std::endl;
-//        std::cout << "     : \tORIG hash " << hashes_orig[hh] << " new hash " << hashes[hh] << " would have been " << (hashes[hh] & mask) << std::endl;
-//      }
-//      if (hashes_orig[hh] == 2173)
-//        std::cout << "2173: " << hh << "\tORIG hash " << hashes_orig[hh] << " new hash " << hashes[hh] << " would have been " << (hashes[hh] & mask) << std::endl;
-//    }
-//    free(hashes_orig);
-
 		// try to compute the offsets, so that we can figure out exactly where to store the higher block data.
 		// PROBLEM STATEMENT:  we want to find the index q_i of the last entry of a block i,
 		//      block position p_i may be empty or shifted by some distance <= (q_(i-1) - i * buckets).  empty positions can be used to absorb overflow of prev block
+		//    NOTE THAT WE ASSUME TRAVERSAL OF ORIGINAL HASH TABLE IN ORDER, SO IN-BLOCK TRAVERSAL IS ALSO IN ORDER in new table
+		//		thus the HASH BUCKET ID should be monotonically increasing.
 		// CHALLENGES:
 		//      start of block is shifted by (q_(i-1) - i*buckets), but the shift may be absorbed by empty space in block i.
 		//      The shift may be added to by entries in block i, such that for block (i+1), the starting position may not be shifted by q_i.
@@ -1238,7 +1235,7 @@ protected:
 		//      o_i += max(o_(i-1), empty_i) - empty_i.
 		//REQUIRE: hash values in original array be in increasing order - this SHOULD BE TRUE.
 
-		// step 1.  compute the count.
+		// step 1.  compute the POSITIONS and COUNTS.
 		size_t cnt = 0;
 		for (bid = 0; bid < buckets; ++bid) {
 			if (is_normal(info_container[bid])) {
@@ -1251,33 +1248,50 @@ protected:
 
 					// figure out which block it is in.
 					bl = id >> log_buckets;
-//					if (bl == 0) {
-//					  std::cout << " count " << bid << " from " << p << " id " << id << std::flush;
-//					  std::cout << " block " << bl << " curr len " << len[bl] << std::flush;
+//					if (bl == 1) {
+//					  std::cout << " orig bucket " << std::hex << bid  << std::dec  << " pos " << p << " new bucket " << std::hex << id  << " mask " << mask << std::dec << std::flush;
+//					  std::cout << " block " << bl << " curr len " << len[bl] << " curr offset " << offsets[bl+1] <<  std::flush;
 //					}
 
 					// count.  at least the bucket id + 1, or last insert target position + 1.
 					// increment by at least 1, or by the target bucket id (counting empty) within the current block
 
 					// offsets store the maximum NEXT offset of the entries in the block.
-					// note that id should increase within each block, but really should not just JUMP.
+					// note that id should increase within each block, but really should not JUMP BACK.
 					offsets[bl+1] = std::max(offsets[bl+1], id) + 1; // where the current entry would go, +1 (for next empty entry).
 
 					len[bl] += 1;
-//					if (bl == 0) std::cout << " max offset " << offsets[bl+1] << " in ideal region len " << len[bl] << std::endl;
+//					if (bl == 1) std::cout << " new offset " << offsets[bl+1] << " new len " << len[bl] << std::endl;
 				}
 			}
 		}
-		// now compute the overflows.
+
+//		std::cout << "after update1 [offsets, len]: " << offsets[0];
+//		// prefill with ideal offsets.
+//		for (bl = 0; bl < blocks; ++bl) {
+//			std::cout << ":" << len[bl] << ", " << offsets[bl + 1];
+//		}
+//		std::cout << std::endl;
+
+		// now compute the overflows.  at this point, we have count in each block, and offsets starting from block boundaries
+		// and overflow in previous block is not yet considered.
 		for (bl = 1; bl <= blocks ; ++bl) {
 //			std::cout << "FINAL block offset " << offsets[bl] << " len in ideal region " << len[bl - 1];
 
 			// compute the actual overflows.
 			offsets[bl] = (offsets[bl] > (bl * buckets)) ? (offsets[bl] - (bl * buckets)) : 0;
 			// recall that overflow region has no empty slots.  to (len - offsets[bl]) is the number in the ideal region, and buckets - that is the empty count.
-			len[bl - 1] = buckets - (len[bl - 1] - offsets[bl]);
+			len[bl - 1] = buckets - (len[bl - 1] - offsets[bl]);  //
 //			std::cout << " OVERFLOW = " << offsets[bl] << " empties " << len[bl-1] << std::endl;
 		}
+
+//		std::cout << "after update2 [offsets, len]: " << offsets[0];
+//		// prefill with ideal offsets.
+//		for (bl = 0; bl < blocks; ++bl) {
+//			std::cout << ":" << len[bl] << ", " << offsets[bl + 1];
+//		}
+//		std::cout << std::endl;
+
 
 		// now compute the true overflows.
 		for (bl = 2; bl <= blocks ; ++bl) {
@@ -1286,6 +1300,15 @@ protected:
 
 //			std::cout << " FINAL OVERFLOW " << offsets[bl] << std::endl;
 		}
+
+//		std::cout << "after update3 [offsets]: ";
+//		// prefill with ideal offsets.
+//		for (bl = 0; bl <= blocks; ++bl) {
+//			std::cout << ", " << offsets[bl];
+//		}
+//		std::cout << std::endl;
+
+
 		// and convert back to offsets
     for (bl = 0; bl <= blocks ; ++bl) {
       // increase actual overflow if the block could not absorb all of it.
@@ -1294,12 +1317,20 @@ protected:
     }
 //		std::cout << "total cnt is " << cnt << " actual entries " << lsize << std::endl;
 
+//	std::cout << "after final update: ";
+//	// prefill with ideal offsets.
+//	for (bl = 0; bl <= blocks; ++bl) {
+//		std::cout << ", " << offsets[bl];
+//	}
+//	std::cout << std::endl;
+
+
 		// now that we have the right offsets,  start moving things.
 		size_t pp;
 		for (bid = 0; bid < buckets; ++bid) {
-      std::fill(len.begin(), len.end(), 0);
+		  std::fill(len.begin(), len.end(), 0);
 
-      if (is_normal(info_container[bid])) {
+		  if (is_normal(info_container[bid])) {
 
 				pos = bid + get_offset(info_container[bid]);
 				endd = bid + 1 + get_offset(info_container[bid + 1]);
@@ -1347,10 +1378,10 @@ protected:
 
 			}
 		}
-//     for (bl = 0; bl < blocks ; ++bl) {
-//       // increase actual overflow if the block could not absorb all of it.
-// //      std::cout << " ACTUAL Offsets " << offsets[bl] << std::endl;
-//     }
+//    for (bl = 0; bl <= blocks ; ++bl) {
+//      // increase actual overflow if the block could not absorb all of it.
+//      std::cout << " ACTUAL Offsets " << offsets[bl] << std::endl;
+//    }
 
 		// clean up the last part.
 		size_t new_start;
@@ -1361,19 +1392,8 @@ protected:
 			//		std::cout << " info: " << bid << " info " << static_cast<size_t>(target_info[bid]) << " entry " << target[bid].first << std::endl;
 		}
 
+		free(hashes);
 
-    free(hashes);
-
-//
-//    hash_val_type * hashes2 = ::utils::mem::aligned_alloc<hash_val_type>(target_buckets);
-//
-//    // compute and store all hashes,
-//    h2(target.data(), target_buckets, hashes2);  // compute even for empty positions.
-//
-//    for (size_t hh = 1; hh < target_buckets; ++hh)
-//      if ((hashes[hh] > 0) && (hashes[hh - 1] > hashes[hh]))
-//        std::cout << "FINAL hash " << hashes2[hh] << "id " << (hashes2[hh] & (target_buckets - 1))<< std::endl;
-//    free(hashes2);
 	}
 
 
@@ -1960,7 +1980,7 @@ protected:
     // compute the first part of the hashes
     size_t max_prefetch = std::min(input_size, lookahead2);
     //compute hash and prefetch a little.
-    hash_mod2(input, max_prefetch, hashes);
+    hash_mod2(input, hash_mod2.batch_size, hashes);
     for (j = 0; j < max_prefetch; ++j) {
       // prefetch the info_container entry for ii.
       KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + hashes[j]), _MM_HINT_T0);
@@ -1978,7 +1998,8 @@ protected:
     // do blocks of batch_size
     for (; i < max; ) {
     	// now hash a bunch
-    	hash_mod2(input + i + j, batch_size - j, hashes + j);
+    	//hash_mod2(input + i + j, batch_size - j, hashes + j);
+    	hash_mod2(input + i + hash_mod2.batch_size, batch_size - hash_mod2.batch_size, hashes + hash_mod2.batch_size);
 
     	// and loop and insert.
     	for (k = 0, kmax = batch_size - lookahead2; k < kmax; ++k, ++i) {
@@ -2045,7 +2066,7 @@ protected:
     	// exhasuted indices for prefetching.  fetch some more.
     	if (input_size > (i+lookahead2)) {
     		max_prefetch = std::min(input_size - (i + lookahead2), lookahead2);
-    		hash_mod2(input + i + lookahead2, max_prefetch, hashes);
+    		hash_mod2(input + i + lookahead2, hash_mod2.batch_size, hashes);
 			for (j = 0; j < max_prefetch; ++j) {
           // prefetch the info_container entry for ii.
           KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + hashes[j]), _MM_HINT_T0);
@@ -3324,7 +3345,7 @@ public:
 			return iterator(container + get_pos(idx), info_container.begin()+ get_pos(idx),
 					info_container.begin() + buckets + info_empty, filter);
 		else
-			return iterator(container + buckets + info_empty, info_container.begin() + buckets + info_empty, filter);
+			return this->end();
 
 	}
 
@@ -3346,7 +3367,7 @@ public:
 			return const_iterator(container + get_pos(idx), info_container.cbegin()+ get_pos(idx),
 					info_container.cbegin() + buckets + info_empty, filter);
 		else
-			return const_iterator(container  + buckets + info_empty, info_container.cbegin() + buckets + info_empty, filter);
+			return this->cend();
 
 	}
 
