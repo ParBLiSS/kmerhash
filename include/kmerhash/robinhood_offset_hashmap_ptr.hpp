@@ -895,9 +895,9 @@ public:
 		// check it's power of 2
 		size_type n = next_power_of_2(b);
 
-//#if defined(REPROBE_STAT)
+#if defined(REPROBE_STAT)
 		std::cout << "REHASH current " << buckets << " request " << b << " nears 2^x " << n << " lsize " << lsize << std::endl;
-//#endif
+#endif
 
 		//		// early termination
 		//		if (lsize == 0) {

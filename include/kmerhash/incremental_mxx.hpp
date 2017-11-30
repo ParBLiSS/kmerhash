@@ -2729,13 +2729,13 @@ namespace khmxx
     BL_BENCH_END(distribute, "realloc_out", output.size());
 
 //    std::cout << "send counts " << std::endl;
-//    std::cout << _comm.rank() << ",";
+//    std::cout << comm_rank << ",";
 //    for (int ii = 0; ii < _comm.size(); ++ii) {
 //      std::cout << send_counts[ii] << ",";
 //    }
 //    std::cout << std::endl;
 //    std::cout << "recv counts " << std::endl;
-//    std::cout << _comm.rank() << ",";
+//    std::cout << comm_rank << ",";
 //    for (int ii = 0; ii < _comm.size(); ++ii) {
 //      std::cout << recv_counts[ii] << ",";
 //    }
@@ -3335,10 +3335,12 @@ namespace khmxx
 //								   size_t batch_size = 1) {
 
       BL_BENCH_INIT(idist);
+      int comm_size = _comm.size();
+      int comm_rank = _comm.rank();
 
       size_t input_size = ::std::distance(permuted, permuted_end);
 
-      assert((static_cast<int>(send_counts.size()) == _comm.size()) && "send_count size not same as _comm size.");
+      assert((static_cast<int>(send_counts.size()) == comm_size) && "send_count size not same as _comm size.");
 
       // make sure tehre is something to do.
       BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
@@ -3352,7 +3354,7 @@ namespace khmxx
       }
 
       // if there is comm size is 1.
-      if (_comm.size() == 1) {
+      if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
         compute(permuted, permuted_end);
         BL_BENCH_END(idist, "compute_1", input_size);
@@ -3366,8 +3368,8 @@ namespace khmxx
     // DEBUG.  get the send counts.
     {
 		std::stringstream ss;
-		ss << "ia2av_modify SEND_COUNT rank " << _comm.rank() << ": ";
-		for (int i = 0; i < _comm.size(); ++i) {
+		ss << "ia2av_modify SEND_COUNT rank " << comm_rank << ": ";
+		for (int i = 0; i < comm_size; ++i) {
 			ss << send_counts[i] << ", ";
 		}
 		std::cout << ss.str() << std::endl;
@@ -3385,7 +3387,7 @@ namespace khmxx
       // compute displacement for send and recv, also compute the max buffer size needed
       SIZE buffer_max = 0;
       send_displs.emplace_back(0UL);
-      for (int i = 0; i < _comm.size(); ++i) {
+      for (int i = 0; i < comm_size; ++i) {
         buffer_max = std::max(buffer_max, recv_counts[i]);
 
         send_displs.emplace_back(send_displs.back() + send_counts[i]);
@@ -3398,16 +3400,11 @@ namespace khmxx
       using V = typename ::std::iterator_traits<IT>::value_type;
 
       // allocate recv_compressed
-      V* buffers = nullptr;
-      int ret = posix_memalign(reinterpret_cast<void **>(&buffers), 64, (buffer_max << 1) * sizeof(V));
-      if (ret) {
-        free(buffers);
-        throw std::length_error("failed to allocate aligned memory");
-      }
+      V* buffers = ::utils::mem::aligned_alloc<V>(buffer_max << 1, 64);
       V* recving = buffers;
       V* computing = buffers + buffer_max;
 
-      BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
+      BL_BENCH_END(idist, "a2av_alloc", buffer_max << 1);
 
 
 
@@ -3417,12 +3414,10 @@ namespace khmxx
       const int ialltoallv_tag = 1773;
 
       // local (step 0) - skip the send recv, just directly process.
-      int comm_size = _comm.size();
-      int comm_rank = _comm.rank();
       int curr_peer = comm_rank;
 
       mxx::datatype dt = mxx::get_datatype<V>();
-      std::vector<MPI_Request> reqs(_comm.size() - 1);
+      std::vector<MPI_Request> reqs(comm_size - 1);
 
       // process self data
       compute(&(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
@@ -3533,99 +3528,262 @@ namespace khmxx
 		BL_BENCH_LOOP_END(idist, 2, "loop_wait", total  );
 
 
+      BL_BENCH_START(idist);
+      MPI_Waitall(comm_size - 1, reqs.data(), MPI_STATUSES_IGNORE);
 
-#if 0
-      // probe based impl  - allows progress when peer is out of order.
-      // PERFORMANCE REGRESSION:  nearly 2x slower than above.  "wait" for early iterations, ranks 0-50 out of 64 were over 10x slower than compute (in 2.5s range)
-      // note that probe checkes for messages from source ranks in increasing order, from 0 to ...
-      // therefore, we need to use iprobe...
-
-
-//      BL_BENCH_START(idist);
-      // loop over probing.  use blocking probe as iprobe would add code complexity right now.
-      //MPI_Status stat;
-      for (step = 1; step < comm_size; ++step) {
-        //====  first setup send and recv.
-//        BL_BENCH_INIT(idist_loop);
+      free(buffers);
+      BL_BENCH_END(idist, "waitall_cleanup", buffer_max);
 
 
-        //        BL_BENCH_LOOP_RESUME(idist, 0);
-//        BL_BENCH_START(idist_loop);
-
-        // blocking probe, only to get the source rank for irecv
-        size_t s = step;
-        if ( is_pow2 )  {  // power of 2
-			do {
-				curr_peer = comm_rank ^ s;
-
-			  MPI_Iprobe(curr_peer, ialltoallv_tag, _comm, &completed, MPI_STATUS_IGNORE);
-			  ++s;
-			} while (!completed);
-		  } else {
-			  do {
-				  curr_peer = (comm_rank + s) % comm_size;
-
-				MPI_Iprobe(curr_peer, ialltoallv_tag, _comm, &completed, MPI_STATUS_IGNORE);
-				++s;
-			  } while (!completed);
-		  }
-        // get the peer.
-        //curr_peer = stat.MPI_SOURCE;
-
-        MPI_Irecv(recving, recv_counts[curr_peer], dt.type(),
-                  curr_peer, ialltoallv_tag, _comm, &req );
-
-        //        BL_BENCH_LOOP_PAUSE(idist, 0);
-//        BL_BENCH_END(idist_loop, "irecv", curr_peer);
+      BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+    }
 
 
-//        BL_BENCH_LOOP_RESUME(idist, 1);
-//        BL_BENCH_START(idist_loop);
-        // process previously received.
-        compute(computing, computing + recv_counts[prev_peer]);
+    template <int BATCH = 8, typename IT, typename SIZE, typename OP,
+        typename ::std::enable_if<::std::is_same<typename ::std::iterator_traits<IT>::iterator_category,
+                                                 ::std::random_access_iterator_tag >::value, int>::type = 1 >
+      void ialltoallv_and_modify_batch(IT permuted, IT permuted_end,
+    		  	  	  	  	  	  ::std::vector<SIZE> const & send_counts,
+								  OP compute,
+								  ::mxx::comm const &_comm) {//,
+//								   size_t batch_size = 1) {
 
-        // prep for next iteration
-        total += recv_counts[prev_peer];
-
-        // set up next iteration.
-//        BL_BENCH_LOOP_PAUSE(idist, 1);
-//        BL_BENCH_END(idist_loop, "compute", recv_counts[prev_peer]);
+      BL_BENCH_INIT(idist);
+      int comm_size = _comm.size();
+      int comm_rank = _comm.rank();
 
 
-//        BL_BENCH_LOOP_RESUME(idist, 2);
-//        BL_BENCH_START(idist_loop);
-        // now wait for irecv from this iteration to complete, in order to continue.
-        MPI_Wait(&req, MPI_STATUS_IGNORE);
-//        BL_BENCH_LOOP_PAUSE(idist, 2);
-//        BL_BENCH_END(idist_loop, "wait", prev_peer);
+      size_t input_size = ::std::distance(permuted, permuted_end);
 
-        prev_peer = curr_peer;
+      assert((static_cast<int>(send_counts.size()) == comm_size) && "send_count size not same as _comm size.");
 
-        // then swap pointer
-        ::std::swap(recving, computing);
+      // make sure there is something to do.
+      BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
+      bool empty = input_size == 0;
+      empty = mxx::all_of(empty);
+      BL_BENCH_END(idist, "empty", input_size);
 
-//        BL_BENCH_REPORT_NAMED(idist_loop, "khmxx:exch_permute_mod local");
+      if (empty) {
+        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+        return;
+      }
+
+      // if there is comm size is 1.
+      if (comm_size == 1) {
+        BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
+        compute(permuted, permuted_end);
+        BL_BENCH_END(idist, "compute_1", input_size);
+
+        BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
+        return;
+      }
+
+
+#if defined(DEBUG_COMM_VOLUME)
+    // DEBUG.  get the send counts.
+    {
+		std::stringstream ss;
+		ss << "ia2av_modify SEND_COUNT rank " << comm_rank << ": ";
+		for (int i = 0; i < comm_size; ++i) {
+			ss << send_counts[i] << ", ";
+		}
+		std::cout << ss.str() << std::endl;
+    }
+#endif
+
+      // get the recv counts.
+      BL_BENCH_COLLECTIVE_START(idist, "a2a_counts", _comm);
+      ::std::vector<SIZE> recv_counts(send_counts.size(), 0);
+      mxx::all2all(send_counts.data(), 1, recv_counts.data(), _comm);
+
+      ::std::vector<size_t> send_displs;
+      send_displs.reserve(send_counts.size() + 1);
+
+      // compute displacement for send and recv, also compute the max buffer size needed
+      SIZE buffer_max = 0;
+      send_displs.emplace_back(0UL);
+      for (int i = 0; i < comm_size; ++i) {
+        buffer_max = std::max(buffer_max, recv_counts[i]);
+
+        send_displs.emplace_back(send_displs.back() + send_counts[i]);
+      }
+      BL_BENCH_END(idist, "a2a_counts", buffer_max);
+
+
+      // setup the temporary storage.  double buffered.
+      BL_BENCH_COLLECTIVE_START(idist, "a2av_alloc", _comm);
+      using V = typename ::std::iterator_traits<IT>::value_type;
+
+      // allocate recv_compressed
+      V* buffers = ::utils::mem::aligned_alloc<V>(buffer_max * BATCH * 2, 64);
+      V* recving[BATCH];
+      V* computing[BATCH];
+      for (int i = 0; i < BATCH; ++i) {
+    	recving[i] = buffers + i * buffer_max;
+    	computing[i] = recving[i] + BATCH * buffer_max;
+      }
+      BL_BENCH_END(idist, "a2av_alloc", buffer_max * BATCH * 2);
+
+
+
+      // loop and process each processor's assignment.  use isend and irecv.
+      BL_BENCH_COLLECTIVE_START(idist, "a2av_isend", _comm);
+
+      const int ialltoallv_tag = 1773;
+
+      // local (step 0) - skip the send recv, just directly process.
+      int curr_peer = comm_rank;
+
+      mxx::datatype dt = mxx::get_datatype<V>();
+      std::vector<MPI_Request> reqs(comm_size - 1);
+
+
+      bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
+      int step;
+
+
+      if (is_pow2) {
+          for (step = 1; step < comm_size; ++step) {
+            //====  first setup send and recv.
+
+            // target rank
+            curr_peer = comm_rank ^ step;
+
+            // issend all, avoids buffering.
+            MPI_Issend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], dt.type(),
+            			curr_peer, ialltoallv_tag, _comm, &reqs[step - 1] );
+          }
+      } else {
+          for (step = 1; step < comm_size; ++step) {
+            //====  first setup send and recv.
+
+            // target rank
+              curr_peer = (comm_rank + comm_size - step) % comm_size;
+
+            // issend all, avoids buffering.
+            MPI_Issend(&(*(permuted + send_displs[curr_peer])), send_counts[curr_peer], dt.type(),
+            			curr_peer, ialltoallv_tag, _comm, &reqs[step - 1] );
+          }
 
       }
-      // last process
-//      BL_BENCH_LOOP_RESUME(idist, 1);
-      compute(computing, computing + recv_counts[prev_peer]);
-      total += recv_counts[prev_peer];
-//      BL_BENCH_LOOP_PAUSE(idist, 1);
 
-      // wait for all send to finish.
-//      BL_BENCH_LOOP_END(idist, 0, "loop_irecv", total);
-//      BL_BENCH_LOOP_END(idist, 1, "loop_compute", total);
-//      BL_BENCH_LOOP_END(idist, 2, "loop_wait", total  );
-//      BL_BENCH_END(idist, "irecv_compute", total);
+      // kick start send.
 
-#endif
+      int completed;
+      MPI_Testall(comm_size - 1, reqs.data(), &completed, MPI_STATUSES_IGNORE);
+      BL_BENCH_END(idist, "a2av_isend", comm_size);
+
+      // loop and process each processor's assignment.  use isend and irecv.
+      // don't use collective start because Issend before...
+      BL_BENCH_LOOP_START(idist, 0);
+      BL_BENCH_LOOP_START(idist, 1);
+      BL_BENCH_LOOP_START(idist, 2);
+
+      // process self data
+      BL_BENCH_LOOP_RESUME(idist, 1);
+      compute(&(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
+      BL_BENCH_LOOP_PAUSE(idist, 1);
+
+
+      int prev_peer = comm_rank;
+      int stepMax;
+      size_t total = 0;
+
+      std::vector<MPI_Request> r_reqs(BATCH);
+
+
+      int i = 1;
+      for (; i < comm_size; i += BATCH ) {
+
+    	// set up irecvs.
+		BL_BENCH_LOOP_RESUME(idist, 0);
+    	stepMax = std::min(comm_size - i, BATCH);
+    	  if (is_pow2) {
+    		  for (step = 0; step < stepMax; ++step) {
+    			  curr_peer = comm_rank ^ (step + i);
+  				MPI_Irecv(recving[step], recv_counts[curr_peer], dt.type(),
+  					  curr_peer, ialltoallv_tag, _comm, &r_reqs[step] );
+    		  }
+    	  } else {
+			  // receive peer.  note that this is diff than send peer.
+    		  for (step = 0; step < stepMax; ++step) {
+    			  curr_peer = (comm_rank + step + i) % comm_size;
+  				MPI_Irecv(recving[step], recv_counts[curr_peer], dt.type(),
+  					  curr_peer, ialltoallv_tag, _comm, &r_reqs[step] );
+    		  }
+    	  }
+		BL_BENCH_LOOP_PAUSE(idist, 0);
+
+
+		// compute now.
+		BL_BENCH_LOOP_RESUME(idist, 1);
+		// process previously received. note: delayed by 1 cycle.
+		if (i > BATCH) {  // after the first batch is done
+			stepMax = std::min(comm_size - (i-BATCH), BATCH);
+
+	    	  if (is_pow2) {
+	    		  for (step = 0; step < stepMax; ++step) {
+	    			  prev_peer = comm_rank ^ (step + i - BATCH);
+	  				compute(computing[step], computing[step] + recv_counts[prev_peer]);
+	  				total += recv_counts[prev_peer];
+	    		  }
+	    	  } else {
+				  // receive peer.  note that this is diff than send peer.
+	    		  for (step = 0; step < stepMax; ++step) {
+	    			  prev_peer = (comm_rank + step + i - BATCH) % comm_size;
+		  				compute(computing[step], computing[step] + recv_counts[prev_peer]);
+		  				total += recv_counts[prev_peer];
+	    		  }
+	    	  }
+		}
+		BL_BENCH_LOOP_PAUSE(idist, 1);
+
+		// now wait for irecv from this iteration to complete, in order to continue.
+		BL_BENCH_LOOP_RESUME(idist, 2);
+    	stepMax = std::min(comm_size - i, BATCH);
+    	MPI_Waitall(stepMax, r_reqs.data(), MPI_STATUSES_IGNORE);
+
+    	// swap the arrays.
+    	for (step = 0; step < BATCH; ++step) {
+    		::std::swap(recving[step], computing[step]);
+    	}
+
+    	BL_BENCH_LOOP_PAUSE(idist, 2);
+
+      }
+
+      // handle the last part compute
+		BL_BENCH_LOOP_RESUME(idist, 1);
+		// process last batch
+		stepMax = comm_size - (i-BATCH);
+
+		  if (is_pow2) {
+			  for (step = 0; step < stepMax; ++step) {
+				  prev_peer = comm_rank ^ (step + i - BATCH);
+				compute(computing[step], computing[step] + recv_counts[prev_peer]);
+				total += recv_counts[prev_peer];
+			  }
+		  } else {
+			  // receive peer.  note that this is diff than send peer.
+			  for (step = 0; step < stepMax; ++step) {
+				  prev_peer = (comm_rank + step + i - BATCH) % comm_size;
+					compute(computing[step], computing[step] + recv_counts[prev_peer]);
+					total += recv_counts[prev_peer];
+			  }
+		  }
+		BL_BENCH_LOOP_PAUSE(idist, 1);
+
+
+      BL_BENCH_LOOP_END(idist, 0, "loop_irecv", total);
+      BL_BENCH_LOOP_END(idist, 1, "loop_compute", total);
+      BL_BENCH_LOOP_END(idist, 2, "loop_wait", total  );
+
 
       BL_BENCH_START(idist);
       MPI_Waitall(comm_size - 1, reqs.data(), MPI_STATUSES_IGNORE);
 
       free(buffers);
-      BL_BENCH_END(idist, "waitall_cleanup", comm_size - 1);
+      BL_BENCH_END(idist, "waitall_cleanup", buffer_max);
 
 
       BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -3643,10 +3801,12 @@ namespace khmxx
 //								   size_t batch_size = 1) {
 
       BL_BENCH_INIT(idist);
+      int comm_size = _comm.size();
+      int comm_rank = _comm.rank();
 
       size_t input_size = ::std::distance(permuted, permuted_end);
 
-      assert((static_cast<int>(send_counts.size()) == _comm.size()) && "send_count size not same as _comm size.");
+      assert((static_cast<int>(send_counts.size()) == comm_size) && "send_count size not same as _comm size.");
 
       // make sure tehre is something to do.
       BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
@@ -3660,7 +3820,7 @@ namespace khmxx
       }
 
       // if there is comm size is 1.
-      if (_comm.size() == 1) {
+      if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
         compute(permuted, permuted_end);
         BL_BENCH_END(idist, "compute_1", input_size);
@@ -3674,8 +3834,8 @@ namespace khmxx
     // DEBUG.  get the send counts.
     {
 		std::stringstream ss;
-		ss << "ia2av_modify SEND_COUNT rank " << _comm.rank() << ": ";
-		for (int i = 0; i < _comm.size(); ++i) {
+		ss << "ia2av_modify SEND_COUNT rank " << comm_rank << ": ";
+		for (int i = 0; i < comm_size; ++i) {
 			ss << send_counts[i] << ", ";
 		}
 		std::cout << ss.str() << std::endl;
@@ -3697,7 +3857,7 @@ namespace khmxx
 
       send_displs.emplace_back(0UL);
       recv_displs.emplace_back(0UL);
-      for (int i = 0; i < _comm.size(); ++i) {
+      for (int i = 0; i < comm_size; ++i) {
         buffer_max += recv_counts[i];
 
         send_displs.emplace_back(send_displs.back() + send_counts[i]);
@@ -3713,7 +3873,7 @@ namespace khmxx
       // allocate recv_compressed
       V* buffers = ::utils::mem::aligned_alloc<V>(buffer_max);
 
-      BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
+      BL_BENCH_END(idist, "a2av_alloc", buffer_max);
 
       // loop and process each processor's assignment.  use isend and irecv.
       BL_BENCH_COLLECTIVE_START(idist, "a2av_isend", _comm);
@@ -3721,13 +3881,11 @@ namespace khmxx
       const int ialltoallv_tag = 2773;
 
       // local (step 0) - skip the send recv, just directly process.
-      int comm_size = _comm.size();
-      int comm_rank = _comm.rank();
       int curr_peer = comm_rank;
 
       mxx::datatype dt = mxx::get_datatype<V>();
-      std::vector<MPI_Request> send_reqs(_comm.size() - 1);
-      std::vector<MPI_Request> recv_reqs(_comm.size() - 1);
+      std::vector<MPI_Request> send_reqs(comm_size - 1);
+      std::vector<MPI_Request> recv_reqs(comm_size - 1);
 
       // process self data
       compute(&(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
@@ -3844,7 +4002,7 @@ namespace khmxx
       MPI_Waitall(comm_size - 1, send_reqs.data(), MPI_STATUSES_IGNORE);
 
       free(buffers);
-      BL_BENCH_END(idist, "waitall_cleanup", comm_size - 1);
+      BL_BENCH_END(idist, "waitall_cleanup", buffer_max);
 
 
       BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -3862,10 +4020,12 @@ namespace khmxx
 //								   size_t batch_size = 1) {
 
       BL_BENCH_INIT(idist);
+      int comm_size = _comm.size();
+      int comm_rank = _comm.rank();
 
       size_t input_size = ::std::distance(permuted, permuted_end);
 
-      assert((static_cast<int>(send_counts.size()) == _comm.size()) && "send_count size not same as _comm size.");
+      assert((static_cast<int>(send_counts.size()) == comm_size) && "send_count size not same as _comm size.");
 
       // make sure tehre is something to do.
       BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
@@ -3879,7 +4039,7 @@ namespace khmxx
       }
 
       // if there is comm size is 1.
-      if (_comm.size() == 1) {
+      if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
         compute(permuted, permuted_end);
         BL_BENCH_END(idist, "compute_1", input_size);
@@ -3888,16 +4048,14 @@ namespace khmxx
         return;
       }
 
-      int comm_size = _comm.size();
-      int comm_rank = _comm.rank();
       int curr_peer = comm_rank;
 
 #if defined(DEBUG_COMM_VOLUME)
     // DEBUG.  get the send counts.
     {
 		std::stringstream ss;
-		ss << "ia2av_modify SEND_COUNT rank " << _comm.rank() << ": ";
-		for (int i = 0; i < _comm.size(); ++i) {
+		ss << "ia2av_modify SEND_COUNT rank " << comm_rank << ": ";
+		for (int i = 0; i < comm_size; ++i) {
 			ss << send_counts[i] << ", ";
 		}
 		std::cout << ss.str() << std::endl;
@@ -3915,7 +4073,7 @@ namespace khmxx
       send_displs.emplace_back(0UL);
 
       // collect locally.
-      for (int i = 0; i < _comm.size(); ++i) {
+      for (int i = 0; i < comm_size; ++i) {
         buffer_min = std::min(buffer_min, recv_counts[i]);
 
         send_displs.emplace_back(send_displs.back() + send_counts[i]);
@@ -3944,8 +4102,8 @@ namespace khmxx
       ::std::vector<size_t> p2_recv_counts;
       p2_recv_counts.reserve(send_counts.size());
 
-      for (int i = 0; i < _comm.size(); ++i) {
-    	  if (i == _comm.rank()) {
+      for (int i = 0; i < comm_size; ++i) {
+    	  if (i == comm_rank) {
   			p2_send_counts.emplace_back(0);
   			p2_send_displs.emplace_back(send_displs[i+1] );
   			p2_recv_counts.emplace_back(0);
@@ -3961,7 +4119,7 @@ namespace khmxx
       ::std::vector<size_t> p2_recv_displs;
       p2_recv_displs.reserve(send_counts.size());
       p2_recv_displs.emplace_back(0UL);
-      for (int i = 1; i < _comm.size(); ++i) {
+      for (int i = 1; i < comm_size; ++i) {
     	  p2_recv_displs.emplace_back(p2_recv_displs.back() + p2_recv_counts[i-1]);
       }
 
@@ -3979,7 +4137,7 @@ namespace khmxx
       V* recving = buffers;
       V* computing = buffers + buffer_min;
 
-      BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
+      BL_BENCH_END(idist, "a2av_alloc", buffer_max);
 
       // loop and process each processor's assignment.  use isend and irecv.
       BL_BENCH_COLLECTIVE_START(idist, "a2av_isend", _comm);
@@ -3989,10 +4147,7 @@ namespace khmxx
       // local (step 0) - skip the send recv, just directly process.
 
       mxx::datatype dt = mxx::get_datatype<V>();
-      std::vector<MPI_Request> reqs(_comm.size() - 1);
-
-      // process self data
-      compute(&(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
+      std::vector<MPI_Request> reqs(comm_size - 1);
 
       bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
       int step;
@@ -4037,9 +4192,15 @@ namespace khmxx
      BL_BENCH_LOOP_START(idist, 1);
      BL_BENCH_LOOP_START(idist, 2);
 
+     // process self data
+     BL_BENCH_LOOP_RESUME(idist, 1);
+     compute(&(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
+     BL_BENCH_LOOP_PAUSE(idist, 1);
+
+
       MPI_Request req;
       int step2;
-
+      size_t total = 0;
 
       for (step = 1, step2 = 0; step2 < comm_size; ++step, ++step2) {
         //====  first setup send and recv.
@@ -4070,6 +4231,7 @@ namespace khmxx
         // process previously received.
         if (step2 > 0)  {
         	compute(computing, computing + buffer_min);
+        	total += buffer_min;
         }
 
         // set up next iteration.
@@ -4093,17 +4255,30 @@ namespace khmxx
 
       }
 
+		BL_BENCH_LOOP_END(idist, 0, "loop_irecv", total);
+		BL_BENCH_LOOP_END(idist, 1, "loop_compute", total);
+		BL_BENCH_LOOP_END(idist, 2, "loop_wait", total  );
+
+
+
      BL_BENCH_START(idist);
       MPI_Waitall(comm_size - 1, reqs.data(), MPI_STATUSES_IGNORE);
-
+      BL_BENCH_END(idist, "waitall", comm_size - 1);
 
       // NOW DO THE LAST PART.
-      mxx::all2allv(permuted, p2_send_counts, p2_send_displs, buffers, p2_recv_counts, p2_recv_displs, _comm);
-      // and process
-      compute(buffers, buffers + p2_max);
 
+      BL_BENCH_START(idist);
+      mxx::all2allv(permuted, p2_send_counts, p2_send_displs, buffers, p2_recv_counts, p2_recv_displs, _comm);
+      BL_BENCH_END(idist, "a2av_p2", p2_max);
+      // and process
+
+      BL_BENCH_START(idist);
+      compute(buffers, buffers + p2_max);
+      BL_BENCH_END(idist, "compute_p2", p2_max);
+
+      BL_BENCH_START(idist);
       free(buffers);
-     BL_BENCH_END(idist, "waitall_cleanup", comm_size - 1);
+      BL_BENCH_END(idist, "cleanup", buffer_max);
 
 
       BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -4126,9 +4301,12 @@ namespace khmxx
 
       BL_BENCH_INIT(idist);
 
+      int comm_size = _comm.size();
+      int comm_rank = _comm.rank();
+
       size_t input_size = std::distance(permuted, permuted_end);
 
-      assert((send_counts.size() == static_cast<size_t>(_comm.size())) && "send_count size not same as _comm size.");
+      assert((send_counts.size() == static_cast<size_t>(comm_size)) && "send_count size not same as _comm size.");
 
       // make sure tehre is something to do.
       BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
@@ -4142,7 +4320,7 @@ namespace khmxx
       }
 
       // if there is comm size is 1.
-      if (_comm.size() == 1) {
+      if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
         compute(permuted, permuted_end, result);
         BL_BENCH_END(idist, "compute_1", input_size);
@@ -4156,8 +4334,8 @@ namespace khmxx
     // DEBUG.  get the send counts.
     {
 		std::stringstream ss;
-		ss << "ia2av_query SEND_COUNT rank " << _comm.rank() << ": ";
-		for (int i = 0; i < _comm.size(); ++i) {
+		ss << "ia2av_query SEND_COUNT rank " << comm_rank << ": ";
+		for (int i = 0; i < comm_size; ++i) {
 			ss << send_counts[i] << ", ";
 		}
 		std::cout << ss.str() << std::endl;
@@ -4176,13 +4354,12 @@ namespace khmxx
       // compute displacement for send and recv, also compute the max buffer size needed
       SIZE buffer_max = 0;
       send_displs.emplace_back(0UL);
-      for (int i = 0; i < _comm.size(); ++i) {
+      for (int i = 0; i < comm_size; ++i) {
         buffer_max = std::max(buffer_max, recv_counts[i]);
 
         send_displs.emplace_back(send_displs.back() + send_counts[i]);
       }
       BL_BENCH_END(idist, "a2a_counts", buffer_max);
-
 
       // TODO need to estimate total, else we'd see a lot of growth in the array.
       // this could be a big problem.
@@ -4204,8 +4381,7 @@ namespace khmxx
       U* storing = out_buffers;
       U* sending = out_buffers + buffer_max;
 
-      BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
-
+      BL_BENCH_END(idist, "a2av_alloc", buffer_max << 1);
 
       // loop and process each processor's assignment.  use isend and irecv.
       BL_BENCH_COLLECTIVE_START(idist, "a2av_reqs", _comm);
@@ -4214,15 +4390,13 @@ namespace khmxx
       const int resp_tag = 1779;
 
       // local (step 0) - skip the send recv, just directly process.
-      int comm_size = _comm.size();
-      int comm_rank = _comm.rank();
-      int curr_peer;
+      int curr_peer = comm_rank;
 
       mxx::datatype q_dt = mxx::get_datatype<V>();
-      std::vector<MPI_Request> q_reqs(_comm.size() - 1);
+      std::vector<MPI_Request> q_reqs(comm_size - 1);
 
       mxx::datatype r_dt = mxx::get_datatype<U>();
-      std::vector<MPI_Request> r_reqs(_comm.size() - 1);
+      std::vector<MPI_Request> r_reqs(comm_size - 1);
 
 
       // PIPELINE:  send_q, recv_q, compute, send_r, recv_r.
@@ -4257,8 +4431,6 @@ namespace khmxx
       }
       _comm.barrier();  // need to make sure all Irecv are posted in order for Irsend to work.
       BL_BENCH_END(idist, "a2av_reqs", comm_size);
-
-
 
       // loop and process each processor's assignment.  use isend and irecv.
       BL_BENCH_LOOP_START(idist, 0);
@@ -4299,7 +4471,7 @@ namespace khmxx
           // send and recv next.  post recv first.
           MPI_Irecv(recving, recv_counts[curr_peer], q_dt.type(),
                     curr_peer, query_tag, _comm, &q_req );
-          // if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " recv Q from " << curr_peer << std::endl;
+          // if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " recv Q from " << curr_peer << std::endl;
         }
         BL_BENCH_LOOP_PAUSE(idist, 0);
 //        BL_BENCH_END(idist_loop, "irecv", curr_peer);
@@ -4312,7 +4484,7 @@ namespace khmxx
           // send results.  use rsend to avoid buffering
           MPI_Irsend(sending, recv_counts[prev_peer2], r_dt.type(),
                      prev_peer2, resp_tag, _comm, &r_req );
-          // if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " send R to " << prev_peer2 << std::endl;
+          // if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " send R to " << prev_peer2 << std::endl;
         }
         BL_BENCH_LOOP_PAUSE(idist, 2);
 //        BL_BENCH_END(idist_loop, "irecv", curr_peer);
@@ -4322,7 +4494,7 @@ namespace khmxx
         // process previously received.
         if ((step2 > 0) && (step2 < comm_size)) {
 			compute(computing, computing + recv_counts[prev_peer], storing);
-			// if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " compute for " << prev_peer << std::endl;
+			// if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " compute for " << prev_peer << std::endl;
 			total += recv_counts[prev_peer];
         }
         BL_BENCH_LOOP_PAUSE(idist, 1);
@@ -4333,7 +4505,7 @@ namespace khmxx
         // now wait for irecv from this iteration to complete, in order to continue.
         if (step < comm_size) {
         	MPI_Wait(&q_req, MPI_STATUS_IGNORE);
-        	// if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " recved Q from " << curr_peer << std::endl;
+        	// if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " recved Q from " << curr_peer << std::endl;
         }
         BL_BENCH_LOOP_PAUSE(idist, 3);
 //        BL_BENCH_END(idist_loop, "irecv", curr_peer);
@@ -4342,7 +4514,7 @@ namespace khmxx
 
         if (step3 > 0) {
         	MPI_Wait(&r_req, MPI_STATUS_IGNORE);
-        	// if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " sent R to " << prev_peer2 << std::endl;
+        	// if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " sent R to " << prev_peer2 << std::endl;
         }
         BL_BENCH_LOOP_PAUSE(idist, 4);
 //        BL_BENCH_END(idist_loop, "irecv", curr_peer);
@@ -4363,16 +4535,18 @@ namespace khmxx
 		BL_BENCH_LOOP_END(idist, 3, "loop_waitsend", total);
 		BL_BENCH_LOOP_END(idist, 4, "loop_waitrecv", total  );
 
+      BL_BENCH_COLLECTIVE_START(idist, "waitall_q", _comm);
+      MPI_Waitall(comm_size - 1, q_reqs.data(), MPI_STATUSES_IGNORE);
+      BL_BENCH_END(idist, "waitall_q", comm_size - 1);
 
+      BL_BENCH_COLLECTIVE_START(idist, "waitall_r", _comm);
+      MPI_Waitall(comm_size - 1, r_reqs.data(), MPI_STATUSES_IGNORE);
+      BL_BENCH_END(idist, "waitall_r", comm_size - 1);
 
       BL_BENCH_COLLECTIVE_START(idist, "cleanup", _comm);
-      MPI_Waitall(comm_size - 1, q_reqs.data(), MPI_STATUSES_IGNORE);
-
-      MPI_Waitall(comm_size - 1, r_reqs.data(), MPI_STATUSES_IGNORE);
-
       free(buffers);
       free(out_buffers);
-      BL_BENCH_END(idist, "cleanup", comm_size - 1);
+      BL_BENCH_END(idist, "cleanup", buffer_max);
 
 
       BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -4392,10 +4566,12 @@ namespace khmxx
                                           ::mxx::comm const &_comm) {
 
       BL_BENCH_INIT(idist);
+      int comm_size = _comm.size();
+      int comm_rank = _comm.rank();
 
       size_t input_size = std::distance(permuted, permuted_end);
 
-      assert((send_counts.size() == static_cast<size_t>(_comm.size())) && "send_count size not same as _comm size.");
+      assert((send_counts.size() == static_cast<size_t>(comm_size)) && "send_count size not same as _comm size.");
 
       // make sure tehre is something to do.
       BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
@@ -4409,7 +4585,7 @@ namespace khmxx
       }
 
       // if there is comm size is 1.
-      if (_comm.size() == 1) {
+      if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
         compute(permuted, permuted_end, result);
         BL_BENCH_END(idist, "compute_1", input_size);
@@ -4423,8 +4599,8 @@ namespace khmxx
     // DEBUG.  get the send counts.
     {
 		std::stringstream ss;
-		ss << "ia2av_query SEND_COUNT rank " << _comm.rank() << ": ";
-		for (int i = 0; i < _comm.size(); ++i) {
+		ss << "ia2av_query SEND_COUNT rank " << comm_rank << ": ";
+		for (int i = 0; i < comm_size; ++i) {
 			ss << send_counts[i] << ", ";
 		}
 		std::cout << ss.str() << std::endl;
@@ -4446,7 +4622,7 @@ namespace khmxx
       SIZE buffer_max = 0;
       send_displs.emplace_back(0UL);
       recv_displs.emplace_back(0UL);
-      for (int i = 0; i < _comm.size(); ++i) {
+      for (int i = 0; i < comm_size; ++i) {
         buffer_max += recv_counts[i];
 
         send_displs.emplace_back(send_displs.back() + send_counts[i]);
@@ -4469,7 +4645,7 @@ namespace khmxx
       // allocate recv_compressed
       U* out_buffers = ::utils::mem::aligned_alloc<U>(buffer_max);
 
-      BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
+      BL_BENCH_END(idist, "a2av_alloc", buffer_max);
 
 
       // loop and process each processor's assignment.  use isend and irecv.
@@ -4479,17 +4655,15 @@ namespace khmxx
       const int resp_tag = 2779;
 
       // local (step 0) - skip the send recv, just directly process.
-      int comm_size = _comm.size();
-      int comm_rank = _comm.rank();
-      int curr_peer;
+      int curr_peer = comm_rank;
 
       mxx::datatype q_dt = mxx::get_datatype<V>();
-      std::vector<MPI_Request> qsend_reqs(_comm.size() - 1);
-      std::vector<MPI_Request> qrecv_reqs(_comm.size() - 1);
+      std::vector<MPI_Request> qsend_reqs(comm_size - 1);
+      std::vector<MPI_Request> qrecv_reqs(comm_size - 1);
 
       mxx::datatype r_dt = mxx::get_datatype<U>();
-      std::vector<MPI_Request> rsend_reqs(_comm.size() - 1);
-      std::vector<MPI_Request> rrecv_reqs(_comm.size() - 1);
+      std::vector<MPI_Request> rsend_reqs(comm_size - 1);
+      std::vector<MPI_Request> rrecv_reqs(comm_size - 1);
 
 
       // PIPELINE:  send_q, recv_q, compute, send_r, recv_r.
@@ -4649,14 +4823,22 @@ namespace khmxx
 		BL_BENCH_LOOP_END(idist, 3, "loop_waitrecvq", total);
 
 
-      BL_BENCH_COLLECTIVE_START(idist, "cleanup", _comm);
-      MPI_Waitall(comm_size - 1, rsend_reqs.data(), MPI_STATUSES_IGNORE);
-      MPI_Waitall(comm_size - 1, qsend_reqs.data(), MPI_STATUSES_IGNORE);
-      MPI_Waitall(comm_size - 1, rrecv_reqs.data(), MPI_STATUSES_IGNORE);
+	      BL_BENCH_COLLECTIVE_START(idist, "waitall_rsend", _comm);
+	      MPI_Waitall(comm_size - 1, rsend_reqs.data(), MPI_STATUSES_IGNORE);
+	      BL_BENCH_END(idist, "waitall_rsend", comm_size - 1);
 
+	      BL_BENCH_COLLECTIVE_START(idist, "waitall_qsend", _comm);
+      MPI_Waitall(comm_size - 1, qsend_reqs.data(), MPI_STATUSES_IGNORE);
+      BL_BENCH_END(idist, "waitall_rsend", comm_size - 1);
+
+      BL_BENCH_COLLECTIVE_START(idist, "waitall_rrecv", _comm);
+      MPI_Waitall(comm_size - 1, rrecv_reqs.data(), MPI_STATUSES_IGNORE);
+      BL_BENCH_END(idist, "waitall_rrecv", comm_size - 1);
+
+      BL_BENCH_COLLECTIVE_START(idist, "cleanup", _comm);
       free(buffers);
       free(out_buffers);
-      BL_BENCH_END(idist, "cleanup", comm_size - 1);
+      BL_BENCH_END(idist, "cleanup", buffer_max);
 
 
       BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -4679,10 +4861,12 @@ namespace khmxx
                                           ::mxx::comm const &_comm) {
 
       BL_BENCH_INIT(idist);
+      int comm_size = _comm.size();
+      int comm_rank = _comm.rank();
 
       size_t input_size = std::distance(permuted, permuted_end);
 
-      assert((send_counts.size() == static_cast<size_t>(_comm.size())) && "send_count size not same as _comm size.");
+      assert((send_counts.size() == static_cast<size_t>(comm_size)) && "send_count size not same as _comm size.");
 
       // make sure tehre is something to do.
       BL_BENCH_COLLECTIVE_START(idist, "empty", _comm);
@@ -4696,7 +4880,7 @@ namespace khmxx
       }
 
       // if there is comm size is 1.
-      if (_comm.size() == 1) {
+      if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
         compute(permuted, permuted_end, result);
         BL_BENCH_END(idist, "compute_1", input_size);
@@ -4705,8 +4889,6 @@ namespace khmxx
         return;
       }
 
-      int comm_size = _comm.size();
-      int comm_rank = _comm.rank();
       int curr_peer = comm_rank;
 
 
@@ -4714,8 +4896,8 @@ namespace khmxx
     // DEBUG.  get the send counts.
     {
 		std::stringstream ss;
-		ss << "ia2av_query SEND_COUNT rank " << _comm.rank() << ": ";
-		for (int i = 0; i < _comm.size(); ++i) {
+		ss << "ia2av_query SEND_COUNT rank " << comm_rank << ": ";
+		for (int i = 0; i < comm_size; ++i) {
 			ss << send_counts[i] << ", ";
 		}
 		std::cout << ss.str() << std::endl;
@@ -4734,7 +4916,7 @@ namespace khmxx
       send_displs.emplace_back(0UL);
 
       // collect locally.
-      for (int i = 0; i < _comm.size(); ++i) {
+      for (int i = 0; i < comm_size; ++i) {
         buffer_min = std::min(buffer_min, recv_counts[i]);
 
         send_displs.emplace_back(send_displs.back() + send_counts[i]);
@@ -4763,8 +4945,8 @@ namespace khmxx
       ::std::vector<size_t> p2_recv_counts;
       p2_recv_counts.reserve(send_counts.size());
 
-      for (int i = 0; i < _comm.size(); ++i) {
-    	  if (i == _comm.rank()) {
+      for (int i = 0; i < comm_size; ++i) {
+    	  if (i == comm_rank) {
   			p2_send_counts.emplace_back(0);
   			p2_send_displs.emplace_back(send_displs[i+1] );
   			p2_recv_counts.emplace_back(0);
@@ -4780,7 +4962,7 @@ namespace khmxx
       ::std::vector<size_t> p2_recv_displs;
       p2_recv_displs.reserve(send_counts.size());
       p2_recv_displs.emplace_back(0UL);
-      for (int i = 1; i < _comm.size(); ++i) {
+      for (int i = 1; i < comm_size; ++i) {
     	  p2_recv_displs.emplace_back(p2_recv_displs.back() + p2_recv_counts[i-1]);
       }
 
@@ -4809,7 +4991,7 @@ namespace khmxx
       U* storing = out_buffers;
       U* sending = out_buffers + buffer_min;
 
-      BL_BENCH_END(idist, "a2av_alloc", send_counts.size());
+      BL_BENCH_END(idist, "a2av_alloc", buffer_max);
 
 
       // loop and process each processor's assignment.  use isend and irecv.
@@ -4820,10 +5002,10 @@ namespace khmxx
 
       // local (step 0) - skip the send recv, just directly process.
       mxx::datatype q_dt = mxx::get_datatype<V>();
-      std::vector<MPI_Request> q_reqs(_comm.size() - 1);
+      std::vector<MPI_Request> q_reqs(comm_size - 1);
 
       mxx::datatype r_dt = mxx::get_datatype<U>();
-      std::vector<MPI_Request> r_reqs(_comm.size() - 1);
+      std::vector<MPI_Request> r_reqs(comm_size - 1);
 
 
       // PIPELINE:  send_q, recv_q, compute, send_r, recv_r.
@@ -4895,7 +5077,7 @@ namespace khmxx
           // send and recv next.  post recv first.
           MPI_Irecv(recving, buffer_min, q_dt.type(),
                     curr_peer, query_tag, _comm, &q_req );
-          // if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " recv Q from " << curr_peer << std::endl;
+          // if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " recv Q from " << curr_peer << std::endl;
         }
         BL_BENCH_LOOP_PAUSE(idist, 0);
         BL_BENCH_LOOP_RESUME(idist, 2);
@@ -4905,7 +5087,7 @@ namespace khmxx
           // send results.  use rsend to avoid buffering
           MPI_Irsend(sending, buffer_min, r_dt.type(),
                      prev_peer2, resp_tag, _comm, &r_req );
-          // if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " send R to " << prev_peer2 << std::endl;
+          // if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " send R to " << prev_peer2 << std::endl;
         }
         BL_BENCH_LOOP_PAUSE(idist, 2);
 
@@ -4914,7 +5096,7 @@ namespace khmxx
         // process previously received.
         if ((step2 > 0) && (step2 < comm_size)) {
 			compute(computing, computing + buffer_min, storing);
-			// if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " compute for " << prev_peer << std::endl;
+			// if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " compute for " << prev_peer << std::endl;
 	          total += buffer_min;
         }
         BL_BENCH_LOOP_PAUSE(idist, 1);
@@ -4924,7 +5106,7 @@ namespace khmxx
         // now wait for irecv from this iteration to complete, in order to continue.
         if (step < comm_size) {
         	MPI_Wait(&q_req, MPI_STATUS_IGNORE);
-        	// if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " recved Q from " << curr_peer << std::endl;
+        	// if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " recved Q from " << curr_peer << std::endl;
         }
         BL_BENCH_LOOP_PAUSE(idist, 3);
 
@@ -4932,7 +5114,7 @@ namespace khmxx
 
         if (step3 > 0) {
         	MPI_Wait(&r_req, MPI_STATUS_IGNORE);
-        	// if (_comm.rank() == 0) std::cout << "step " << step << " rank " << _comm.rank() << " sent R to " << prev_peer2 << std::endl;
+        	// if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " sent R to " << prev_peer2 << std::endl;
         }
         BL_BENCH_LOOP_PAUSE(idist, 4);
 
@@ -4952,18 +5134,20 @@ namespace khmxx
 		BL_BENCH_LOOP_END(idist, 4, "loop_waitrecv", total  );
 
 
-      BL_BENCH_COLLECTIVE_START(idist, "waitall", _comm);
+	      BL_BENCH_COLLECTIVE_START(idist, "waitall_q", _comm);
       MPI_Waitall(comm_size - 1, q_reqs.data(), MPI_STATUSES_IGNORE);
+      BL_BENCH_END(idist, "waitall_q", comm_size - 1);
 
+      BL_BENCH_COLLECTIVE_START(idist, "waitall_r", _comm);
       MPI_Waitall(comm_size - 1, r_reqs.data(), MPI_STATUSES_IGNORE);
-      BL_BENCH_END(idist, "waitall", comm_size - 1);
+      BL_BENCH_END(idist, "waitall_r", comm_size - 1);
 
 
       BL_BENCH_START(idist);
       mxx::all2allv(&(*permuted), p2_send_counts, p2_send_displs, buffers, p2_recv_counts, p2_recv_displs, _comm);
       BL_BENCH_END(idist, "a2av_q_p2", p2_max);
       // and process
-      BL_BENCH_START(idist);
+      BL_BENCH_COLLECTIVE_START(idist, "compute_p2", _comm);
       compute(buffers, buffers + p2_max, out_buffers);
       BL_BENCH_END(idist, "compute_p2", p2_max);
       // then send back
@@ -4976,7 +5160,7 @@ namespace khmxx
       BL_BENCH_START(idist);
       free(buffers);
       free(out_buffers);
-      BL_BENCH_END(idist, "cleanup", comm_size - 1);
+      BL_BENCH_END(idist, "cleanup", buffer_max);
 
 
       BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -5182,13 +5366,13 @@ namespace khmxx
 
 
 //    std::cout << "send counts " << std::endl;
-//    std::cout << _comm.rank() << ",";
+//    std::cout << comm_rank << ",";
 //    for (int ii = 0; ii < _comm.size(); ++ii) {
 //      std::cout << send_counts[ii] << ",";
 //    }
 //    std::cout << std::endl;
 //    std::cout << "recv counts " << std::endl;
-//    std::cout << _comm.rank() << ",";
+//    std::cout << comm_rank << ",";
 //    for (int ii = 0; ii < _comm.size(); ++ii) {
 //      std::cout << recv_counts[ii] << ",";
 //    }
