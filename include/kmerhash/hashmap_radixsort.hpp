@@ -493,18 +493,18 @@ public:
 	{
 		if(coherence == INSERT)
 		{
-			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+//			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
 			finalize_insert();
 		} else if (coherence == ERASE) {
-		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+//		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
 		  finalize_erase();
 		}
 
 
 
-		::std::cout << "RESIZING:  size=" << totalKeyCount
-				<< " prev capacity=" << capacity()
-				<< " new capacity=" << _newNumBuckets << std::endl;
+//		::std::cout << "RESIZING:  size=" << totalKeyCount
+//				<< " prev capacity=" << capacity()
+//				<< " new capacity=" << _newNumBuckets << std::endl;
 		//::std::cout << "key count " << totalKeyCount << " elem size " << sizeof(HashElement) << std::endl;
 			HashElement *oldElemArray = (HashElement *)_mm_malloc((totalKeyCount + PFD) * sizeof(HashElement), 64);
 		//printf("CURR numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
@@ -850,7 +850,7 @@ public:
     {
         if((coherence != COHERENT) && (coherence != INSERT))
         {
-            printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
+//            printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
             return 0;
         }
         int32_t i;
@@ -996,7 +996,7 @@ public:
     {
         if((coherence != COHERENT) && (coherence != INSERT))
         {
-            printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
+//            printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
             return 0;
         }
         int32_t i;
@@ -1122,7 +1122,7 @@ public:
     {
         if(coherence != INSERT)
         {
-            printf("ERROR! The hashtable coherence is not set to INSERT at the moment. finalize_insert() can not be serviced\n");
+//            printf("ERROR! The hashtable coherence is not set to INSERT at the moment. finalize_insert() can not be serviced\n");
             return;
         }
         int i, j;
@@ -1183,7 +1183,7 @@ public:
     {
         if(coherence != COHERENT)
         {
-            printf("ERROR! The hashtable is not coherent at the moment. find() can not be serviced\n");
+//            printf("ERROR! The hashtable is not coherent at the moment. find() can not be serviced\n");
             return 0ULL;
         }
         size_t foundCount = 0;
@@ -1248,7 +1248,7 @@ public:
     {
         if(coherence != COHERENT)
         {
-            printf("ERROR! The hashtable is not coherent at the moment. count() can not be serviced\n");
+//            printf("ERROR! The hashtable is not coherent at the moment. count() can not be serviced\n");
             return 0ULL;
         }
         size_t foundCount = 0;
@@ -1314,7 +1314,7 @@ public:
     {
         if((coherence != COHERENT) && (coherence != ERASE))
         {
-            printf("ERROR! The hashtable is not coherent at the moment. erase() can not be serviced\n");
+//            printf("ERROR! The hashtable is not coherent at the moment. erase() can not be serviced\n");
             return;
         }
         coherence = ERASE;
@@ -1374,7 +1374,7 @@ public:
     {
         if(coherence != ERASE)
         {
-            printf("ERROR! The hashtable coherence is not set to ERASE at the moment. finalize_erase() can not be serviced\n");
+//            printf("ERROR! The hashtable coherence is not set to ERASE at the moment. finalize_erase() can not be serviced\n");
             return 0;
         }
         int32_t i;
@@ -1543,7 +1543,7 @@ public:
     size_t size() const {
 		if(coherence != COHERENT)
 		{
-			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+//			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
 			throw std::logic_error("size() called on incoherent hash table");
 		}
 
@@ -1553,10 +1553,10 @@ public:
     size_t size() {
 		if(coherence == INSERT)
 		{
-			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+//			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
 			finalize_insert();
 		} else if (coherence == ERASE) {
-		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+//		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
 		  finalize_erase();
 		}
 
@@ -1577,7 +1577,7 @@ public:
 	{
         if((coherence != COHERENT))
         {
-            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
+//            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
             return NULL;
         }
 		::std::pair<Key, V> *result = (::std::pair<Key, V> *)_mm_malloc(totalKeyCount * sizeof(::std::pair<Key, V>), 64);
@@ -1612,7 +1612,7 @@ public:
 	{
         if((coherence != COHERENT))
         {
-            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
+//            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
             return 0;
         }
 
@@ -1646,7 +1646,7 @@ public:
 	{
         if((coherence != COHERENT))
         {
-            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
+//            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
             return 0;
         }
 

@@ -974,6 +974,19 @@ namespace dsc  // distributed std container
 
   	      BL_BENCH_END(insert, "a2av_insert", this->c.size());
 
+#elif defined(OVERLAPPED_COMM_BATCH)
+
+          BL_BENCH_COLLECTIVE_START(insert, "a2av_insert", this->comm);
+
+          ::khmxx::incremental::ialltoallv_and_modify_batch(input.data(), input.data() + input.size(), send_counts,
+                                                      [this](::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
+                                                         this->c.insert_no_estimate(b, e);
+                                                      },
+                                                      this->comm);
+
+          BL_BENCH_END(insert, "a2av_insert", this->c.size());
+
+
 #elif defined(OVERLAPPED_COMM_FULLBUFFER)
 
   	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_fullbuf", this->comm);
@@ -1270,6 +1283,7 @@ if (measure_mode == MEASURE_RESERVE)
   std::vector<size_t> recv_counts(this->comm.size());
     mxx::all2all(send_counts.data(), 1, recv_counts.data(), this->comm);
 
+
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_A2A)
       __itt_pause();
@@ -1280,7 +1294,7 @@ if (measure_mode == MEASURE_RESERVE)
 
 
 
-#if defined(OVERLAPPED_COMM)
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_BATCH)
 
               BL_BENCH_COLLECTIVE_START(count, "alloc out", this->comm);
             // get mapping to proc
@@ -1708,7 +1722,7 @@ if (measure_mode == MEASURE_RESERVE)
 
 
 
-#if defined(OVERLAPPED_COMM)
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_BATCH)
 
               BL_BENCH_COLLECTIVE_START(find, "alloc out", this->comm);
             // get mapping to proc
@@ -2314,6 +2328,20 @@ if (measure_mode == MEASURE_A2A)
 
   	      BL_BENCH_END(erase, "a2av_erase", this->c.size());
 
+#elif defined(OVERLAPPED_COMM_BATCH)
+
+
+          BL_BENCH_COLLECTIVE_START(erase, "a2av_erase", this->comm);
+
+          ::khmxx::incremental::ialltoallv_and_modify_batch(
+              input.data(), input.data() + input.size(), send_counts,
+                                                      [this, &pred](Key* b, Key* e){
+                                                         this->c.erase(b, ::std::distance(b, e));
+                                                      },
+                                                      this->comm);
+
+          BL_BENCH_END(erase, "a2av_erase", this->c.size());
+
 
 #elif defined(OVERLAPPED_COMM_FULLBUFFER)
 
@@ -2779,7 +2807,7 @@ if (measure_mode == MEASURE_TRANSFORM)
 	// allocate the bucket sizes array
 std::vector<size_t> send_counts(comm_size, 0);
 
-#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_BATCH) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
 	if (estimate) {
 	  if (comm_size <= std::numeric_limits<uint8_t>::max())
 		  this->assign_count_estimate_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
@@ -2802,7 +2830,7 @@ std::vector<size_t> send_counts(comm_size, 0);
               this->assign_count_permute(buffer, buffer + input.size(), static_cast<uint32_t>(comm_size), send_counts,
                       input.data() );
 
-#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_BATCH) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
 	}
 #endif
 
@@ -2830,7 +2858,7 @@ if (measure_mode == MEASURE_A2A)
 #endif
 	  	  	  BL_BENCH_END(insert, "a2a_count", recv_counts.size());
 
-#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
+#if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_BATCH) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
     if (estimate) {
 	  	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
 	  	        if (this->comm.rank() == 0) std::cout << "local estimated size " << this->hll.estimate() << std::endl;
@@ -2859,6 +2887,17 @@ if (measure_mode == MEASURE_A2A)
 	                                                  this->comm);
 
 	      BL_BENCH_END(insert, "a2av_insert", this->c.size());
+#elif defined(OVERLAPPED_COMM_BATCH)
+
+        BL_BENCH_COLLECTIVE_START(insert, "a2av_insert", this->comm);
+
+        ::khmxx::incremental::ialltoallv_and_modify_batch(input.data(), input.data() + input.size(), send_counts,
+                                                    [this](Key* b, Key* e){
+                                                       this->c.insert(b, std::distance(b, e));
+                                                    },
+                                                    this->comm);
+
+        BL_BENCH_END(insert, "a2av_insert", this->c.size());
 
 #elif defined(OVERLAPPED_COMM_FULLBUFFER)
 

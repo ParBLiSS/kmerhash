@@ -184,6 +184,13 @@ endforeach(map)
 		add_dist_hashmap_target(overlap2P-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_2P ENABLE_PREFETCH)
 		add_dist_hashmap_target(overlap2P-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM_2P ENABLE_PREFETCH)
 		endforeach(hash)
+		
+		#overlapped comm in batch.
+		foreach(hash MURMUR32avx MURMUR64avx) #CLHASH) 
+		#FARM FARM32 MURMUR MURMUR32 MURMUR32sse MURMUR32avx CRC32C)
+		add_dist_hashmap_target(overlapBatch-KmerIndex ${map} ${hash} ${hash} OVERLAPPED_COMM_BATCH ENABLE_PREFETCH)
+		add_dist_hashmap_target(overlapBatch-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM_BATCH ENABLE_PREFETCH)
+		endforeach(hash)
 	endforeach(map)
 
 
@@ -251,6 +258,10 @@ SET_TARGET_PROPERTIES(benchmark_hashtables_martinus
 target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
 #cotire(benchmark_hashtables_martinus)
 
+
+
+#add_executable(benchmark_a2a benchmark_mpi_alltoall.cpp)
+#target_link_libraries(benchmark_a2a ${EXTRA_LIBS})
 
 
 #add_executable(hash_vs_sort hash_vs_sort.cpp)
