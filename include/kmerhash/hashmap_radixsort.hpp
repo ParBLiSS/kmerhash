@@ -518,7 +518,7 @@ public:
 			int y = std::min(count, binSize - 1);
 			for(j = 0; j < y; j++)
 			{
-				oldElemArray[elemCount++] = hashTable[i * binSize + y];
+				oldElemArray[elemCount++] = hashTable[i * binSize + j];
 			}
             int32_t overflowBufId;
             overflowBufId = hashTable[i * binSize + binSize - 1].bucketId;
