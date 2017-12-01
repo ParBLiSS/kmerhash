@@ -245,6 +245,15 @@ foreach(map BROBINHOOD RADIXSORT)
 	endforeach(hash)
 
 endforeach(map)
+	foreach(hash MURMUR32 MURMUR) # CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
+		add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH)
+		add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH)
+	
+		foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
+			add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH)
+			add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH)
+		endforeach(k)
+	endforeach(hash)
 
 
 
@@ -260,8 +269,11 @@ target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
 
 
 
-#add_executable(benchmark_a2a benchmark_mpi_alltoall.cpp)
-#target_link_libraries(benchmark_a2a ${EXTRA_LIBS})
+add_executable(benchmark_a2a benchmark_mpi_alltoall.cpp)
+target_link_libraries(benchmark_a2a ${EXTRA_LIBS})
+
+add_executable(benchmark_a2av benchmark_mpi_a2av.cpp)
+target_link_libraries(benchmark_a2av ${EXTRA_LIBS})
 
 
 #add_executable(hash_vs_sort hash_vs_sort.cpp)
