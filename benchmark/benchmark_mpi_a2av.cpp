@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include "bliss-config.hpp"
+
 #include <cstdio>
 #include <stdint.h>
 #include <vector>
@@ -22,17 +24,22 @@
 #include <algorithm>
 #include <unistd.h> // usleep
 
+#include "tclap/CmdLine.h"
+#include "utils/tclap_utils.hpp"
+
 #include "utils/benchmark_utils.hpp"
 #include "kmerhash/mem_utils.hpp"
+
+#include "kmerhash/incremental_mxx.hpp"
 
 #include "mxx/env.hpp"
 #include "mxx/comm.hpp"
 
 // generate about 10000 elements, with +/- 5% variability
-std::vector<size_t> generateCounts(size_t const & per_pair_elem_count, mxx::comm const & comm){
+std::vector<size_t> generateCounts(size_t const & per_pair_elem_count, float const & window, mxx::comm const & comm){
   srand(comm.rank());
 
-  size_t var = per_pair_elem_count / 10;
+  size_t var = per_pair_elem_count * window;
 
 
   std::vector<size_t> counts;
@@ -45,8 +52,41 @@ std::vector<size_t> generateCounts(size_t const & per_pair_elem_count, mxx::comm
   return counts;
 }
 
+struct sim_work {
+    size_t cycles;
+
+    sim_work(size_t const & c = 20) : cycles(c) {}
+
+    template <typename T>
+    void operator()(T & x) {
+       for (size_t i = 0; i < cycles; ++i) {
+         x += i;
+       }
+    }
+};
+
+struct sim_work2 {
+    size_t cycles;
+    volatile size_t result;
+
+    sim_work2(size_t const & c = 20) : cycles(c) {}
+
+    template <typename T>
+    void operator()(T const * start, T const * end) {
+      for (T const * it = start; it != end; ++it) {
+        T x = *it;
+        for (size_t i = 0; i < cycles; ++i) {
+          x += i;
+        }
+
+       result ^= x;
+      }
+    }
+};
+
 
 int main(int argc, char** argv) {
+
 
   BL_BENCH_INIT(bm);
 
@@ -62,12 +102,62 @@ int main(int argc, char** argv) {
   mxx::datatype dt = mxx::get_datatype<size_t>();
   BL_BENCH_END(bm, "mpi_init", comm_size);
 
+
+  int work_cpe = 20;
+  float variance = 0.03;
+
+
+  // Wrap everything in a try block.  Do this every time,
+  // because exceptions will be thrown for problems.
+  try {
+
+    // Define the command line object, and insert a message
+    // that describes the program. The "Command description message"
+    // is printed last in the help text. The second argument is the
+    // delimiter (usually space) and the last one is the version number.
+    // The CmdLine object parses the argv array based on the Arg objects
+    // that it contains.
+    TCLAP::CmdLine cmd("MPI_AllToallv microbenchmark", ' ', "0.1");
+
+    // MPI friendly commandline output.
+    ::bliss::utils::tclap::MPIOutput cmd_output(comm);
+    cmd.setOutput(&cmd_output);
+
+    // Define a value argument and add it to the command line.
+    // A value arg defines a flag and a type of value that it expects,
+    // such as "-n Bishop".
+
+    // output algo 7 and 8 are not working.
+    TCLAP::ValueArg<int> cpeArg("c",
+                                 "work-cpe", "Cycle Per Element for computation, for simulating comm-compute overlap.  Default=20",
+                                 false, work_cpe, "int", cmd);
+    TCLAP::ValueArg<float> varArg("v",
+                                     "variance", "range in which the number of elements for each rank-pair can vary, as percent of everage.  Default=0.03",
+                                     false, variance, "float", cmd);
+
+    // Parse the argv array.
+    cmd.parse( argc, argv );
+
+    work_cpe = cpeArg.getValue();
+    variance = varArg.getValue();
+
+
+  } catch (TCLAP::ArgException &e)  // catch any exceptions
+  {
+    std::cerr << "error: " << e.error() << " for arg " << e.argId() << std::endl;
+    exit(-1);
+  }
+
+
+  sim_work sw(work_cpe);
+  sim_work2 sw2(work_cpe);
+
   if (comm_rank == 0) std::cout << "BENCHMARKING MPI_Alltoallv with " << argv[0] << " comm size = " << comm_size << std::endl << std::flush;
 
   {
 
     BL_BENCH_COLLECTIVE_START(bm, "alloc_src", comm);
-    std::vector<size_t> send_counts = generateCounts(20000, comm);
+    std::vector<size_t> send_counts = generateCounts(20000, variance, comm);
     std::vector<size_t> send_displs(comm_size);
 
     size_t src_size = std::accumulate(send_counts.begin(), send_counts.end(), static_cast<size_t>(0));
@@ -77,14 +167,14 @@ int main(int argc, char** argv) {
     size_t * src = ::utils::mem::aligned_alloc<size_t>(src_size);
     BL_BENCH_END(bm, "alloc_src", src_size);
 
-    BL_BENCH_COLLECTIVE_START(bm, "init_src", comm);
+    BL_BENCH_START(bm);
     srand(comm_rank);
     for (size_t i = 0; i < src_size; ++i) {
       src[i] = static_cast<size_t>(rand()) << 32 | static_cast<size_t>(rand());
     }
     BL_BENCH_END(bm, "init_src", src_size);
 
-    BL_BENCH_COLLECTIVE_START(bm, "alloc_dest", comm);
+    BL_BENCH_START(bm);
     std::vector<size_t> recv_counts = mxx::all2all(send_counts.data(), 1, comm);
     std::vector<size_t> recv_displs(comm_size);
 
@@ -92,7 +182,6 @@ int main(int argc, char** argv) {
     // ex scan
     std::partial_sum(recv_counts.begin(), recv_counts.begin() + recv_counts.size() - 1, recv_displs.begin() + 1);
     size_t * gold = ::utils::mem::aligned_alloc<size_t>(dest_size);
-    size_t * dest = ::utils::mem::aligned_alloc<size_t>(dest_size);
     BL_BENCH_END(bm, "alloc_dest", dest_size);
 
     ///////////////// -----------
@@ -104,8 +193,11 @@ int main(int argc, char** argv) {
 
       BL_BENCH_COLLECTIVE_START(bm1, "mxx::alltoallv", comm);
       mxx::all2allv(src, send_counts, gold, recv_counts, comm);
-      usleep(static_cast<unsigned int>(static_cast<double>(dest_size) * 0.025d));
       BL_BENCH_END(bm1, "mxx::alltoallv", src_size);
+
+      BL_BENCH_START(bm1);
+      ::std::for_each(gold, gold + dest_size, sw);
+      BL_BENCH_END(bm1, "compute", dest_size);
 
       BL_BENCH_REPORT_MPI_NAMED(bm1, "mxx::a2av", comm);
     }
@@ -113,11 +205,13 @@ int main(int argc, char** argv) {
 
     ///////////////// -----------
 
+    size_t * dest = ::utils::mem::aligned_alloc<size_t>(dest_size);
+
 
     BL_BENCH_COLLECTIVE_START(bm, "a2av_isend", comm);
     {
+      BL_TIMER_INIT(bm_loop);
       BL_BENCH_INIT(bm2);
-
 
       BL_BENCH_COLLECTIVE_START(bm2, "a2av_isend_alloc", comm);
       // find the max recv size.
@@ -130,16 +224,8 @@ int main(int argc, char** argv) {
       BL_BENCH_END(bm2, "a2av_isend_alloc", max_recv_n * 2);
 
 
-      // process self.
-      BL_BENCH_COLLECTIVE_START(bm2, "a2av_isend_self", comm);
-
-      std::copy(src + send_displs[comm_rank], src + send_displs[comm_rank] + send_counts[comm_rank],
-                dest + recv_displs[comm_rank]);
-
-      BL_BENCH_END(bm2, "a2av_isend_self", send_counts[comm_rank]);
-
       // set up all the sends.
-      BL_BENCH_COLLECTIVE_START(bm2, "a2av_isend_setup", comm);
+      BL_BENCH_START(bm2);
       mxx::datatype dt = mxx::get_datatype<size_t>();
       std::vector<MPI_Request> reqs(comm_size - 1);
 
@@ -160,8 +246,15 @@ int main(int argc, char** argv) {
 
       BL_BENCH_END(bm2, "a2av_isend_setup", comm_size - 1);
 
+      BL_TIMER_START(bm_loop);
+      comm.barrier();
+      BL_TIMER_END(bm_loop, "bar", 0);
 
-      BL_BENCH_COLLECTIVE_START(bm2, "a2av_isend_proc", comm);
+
+      BL_BENCH_LOOP_START(bm2, 0);
+      BL_BENCH_LOOP_START(bm2, 1);
+      BL_BENCH_LOOP_START(bm2, 2);
+
 
       MPI_Request req;
       size_t total = 0;
@@ -169,56 +262,188 @@ int main(int argc, char** argv) {
 
       for (step = 1; step < comm_size; ++step) {
 
+        BL_TIMER_START(bm_loop);
+        BL_BENCH_LOOP_RESUME(bm2, 0);
         curr_peer = (comm_rank + step) % comm_size;
 
         MPI_Irecv(recv, recv_counts[curr_peer], dt.type(),
                   curr_peer, 1234, comm, &req );
         MPI_Test(&req, &flag, MPI_STATUS_IGNORE);
+        BL_BENCH_LOOP_PAUSE(bm2, 0);
+        BL_TIMER_END(bm_loop, "0", recv_counts[curr_peer]);
 
 
-        if (step > 1) {
+        if (step == 1) {
+            // process self.
+            BL_TIMER_START(bm_loop);
+            BL_BENCH_LOOP_RESUME(bm2, 1);
+            std::copy(src + send_displs[comm_rank],
+                      src + send_displs[comm_rank] + send_counts[comm_rank],
+                      dest + recv_displs[comm_rank]);
+            ::std::for_each(dest + recv_displs[comm_rank],
+                dest + recv_displs[comm_rank] + recv_counts[comm_rank], sw);
+            BL_BENCH_LOOP_PAUSE(bm2, 1);
+            BL_TIMER_END(bm_loop, "1", recv_counts[comm_rank]);
+
+        } else {
+          BL_TIMER_START(bm_loop);
+          BL_BENCH_LOOP_RESUME(bm2, 1);
           curr_peer = (comm_rank + step - 1) % comm_size;
           std::copy(proc, proc + recv_counts[curr_peer],
                     dest + recv_displs[curr_peer]);
+          ::std::for_each(dest + recv_displs[curr_peer],
+              dest + recv_displs[curr_peer] + recv_counts[curr_peer], sw);
           total += recv_counts[curr_peer];
+          BL_BENCH_LOOP_PAUSE(bm2, 1);
+          BL_TIMER_END(bm_loop, "1", recv_counts[curr_peer]);
+
         }
 
+        BL_TIMER_START(bm_loop);
+        BL_BENCH_LOOP_RESUME(bm2, 2);
         MPI_Wait(&req, MPI_STATUS_IGNORE);
-
         ::std::swap(recv, proc);
+
+        BL_BENCH_LOOP_PAUSE(bm2, 2);
+        BL_TIMER_END(bm_loop, "2", 0);
+
 
       }
       if (comm_size > 1) {
+        BL_TIMER_START(bm_loop);
+        BL_BENCH_LOOP_RESUME(bm2, 1);
+
 		  // final piece.
 		  curr_peer = (comm_rank + comm_size - 1) % comm_size;
-		  usleep(static_cast<unsigned int>(static_cast<double>(recv_counts[curr_peer]) * 0.025d));
 		  std::copy(proc, proc + recv_counts[curr_peer],
 					dest + recv_displs[curr_peer]);
-		  total += recv_counts[curr_peer];
+      ::std::for_each(dest + recv_displs[curr_peer],
+          dest + recv_displs[curr_peer] + recv_counts[curr_peer], sw);
+          total += recv_counts[curr_peer];
+          BL_BENCH_LOOP_PAUSE(bm2, 1);
+          BL_TIMER_END(bm_loop, "1", recv_counts[curr_peer]);
+
       }
-      BL_BENCH_END(bm2, "a2av_isend_proc", total);
+      //BL_BENCH_END(bm2, "a2av_isend_proc", total);
+
+      BL_BENCH_LOOP_END(bm2, 0, "loop_irecv", total);
+      BL_BENCH_LOOP_END(bm2, 1, "loop_compute", total);
+      BL_BENCH_LOOP_END(bm2, 2, "loop_wait", total  );
 
 
-      BL_BENCH_COLLECTIVE_START(bm2, "a2av_isend_cleanup", comm);
+
+      BL_BENCH_START(bm2);
       ::utils::mem::aligned_free(buff);
       BL_BENCH_END(bm2, "a2av_isend_cleanup", max_recv_n * 2);
 
       BL_BENCH_REPORT_MPI_NAMED(bm2, "a2av_isend", comm);
+      BL_TIMER_REPORT_MPI_NAMED(bm_loop, "a2av_isend_loop", comm);
     }
     BL_BENCH_END(bm, "a2av_isend", dest_size);
 
 
-    BL_BENCH_COLLECTIVE_START(bm, "compare", comm);
+    BL_BENCH_START(bm);
     bool eq = std::equal(dest, dest+dest_size, gold);
     //std::cout << "EQUAL ? " << (eq ? "YES" : "NO") << std::endl;
+    ::utils::mem::aligned_free(dest);
     BL_BENCH_END(bm, "compare", eq ? 1 : 0);
+
+
+    ///////////////// ============  algo 1.  should be same as above.
+
+
+
+
+
+    BL_BENCH_COLLECTIVE_START(bm, "khmxx::a2av1", comm);
+    {
+      BL_BENCH_INIT(bm1);
+
+      BL_BENCH_COLLECTIVE_START(bm1, "khmxx::a2av_comp1", comm);
+      khmxx::incremental::ialltoallv_and_modify(src, src + src_size, send_counts, sw2, comm);
+      BL_BENCH_END(bm1, "khmxx::a2av_comp1", src_size);
+
+      BL_BENCH_REPORT_MPI_NAMED(bm1, "khmxx::a2av_comp1", comm);
+    }
+    BL_BENCH_END(bm, "khmxx::a2av1", src_size);
+
+
+
+    BL_BENCH_COLLECTIVE_START(bm, "khmxx::a2av2", comm);
+    {
+      BL_BENCH_INIT(bm1);
+
+      BL_BENCH_COLLECTIVE_START(bm1, "khmxx::a2av_comp2", comm);
+      khmxx::incremental::ialltoallv_and_modify_fullbuffer(src, src + src_size, send_counts, sw2, comm);
+      BL_BENCH_END(bm1, "khmxx::a2av_comp2", src_size);
+
+      BL_BENCH_REPORT_MPI_NAMED(bm1, "khmxx::a2av_comp2", comm);
+    }
+    BL_BENCH_END(bm, "khmxx::a2av2", src_size);
+
+
+    BL_BENCH_COLLECTIVE_START(bm, "khmxx::a2av3", comm);
+    {
+      BL_BENCH_INIT(bm1);
+
+      BL_BENCH_COLLECTIVE_START(bm1, "khmxx::a2av_comp3", comm);
+      khmxx::incremental::ialltoallv_and_modify_2phase(src, src + src_size, send_counts, sw2, comm);
+      BL_BENCH_END(bm1, "khmxx::a2av_comp3", src_size);
+
+      BL_BENCH_REPORT_MPI_NAMED(bm1, "khmxx::a2av_comp3", comm);
+    }
+    BL_BENCH_END(bm, "khmxx::a2av3", src_size);
+
+
+
+    BL_BENCH_COLLECTIVE_START(bm, "khmxx::a2av1B_8", comm);
+    {
+      BL_BENCH_INIT(bm1);
+
+      BL_BENCH_COLLECTIVE_START(bm1, "khmxx::a2av_comp1B_8", comm);
+      khmxx::incremental::ialltoallv_and_modify_batch<8>(src, src + src_size, send_counts, sw2, comm);
+      BL_BENCH_END(bm1, "khmxx::a2av_comp1B_8", src_size);
+
+      BL_BENCH_REPORT_MPI_NAMED(bm1, "khmxx::a2av_comp1B_8", comm);
+    }
+    BL_BENCH_END(bm, "khmxx::a2av1B_8", src_size);
+
+
+
+    BL_BENCH_COLLECTIVE_START(bm, "khmxx::a2av1B_16", comm);
+    {
+      BL_BENCH_INIT(bm1);
+
+      BL_BENCH_COLLECTIVE_START(bm1, "khmxx::a2av_comp1B_16", comm);
+      khmxx::incremental::ialltoallv_and_modify_batch<16>(src, src + src_size, send_counts, sw2, comm);
+      BL_BENCH_END(bm1, "khmxx::a2av_comp1B_16", src_size);
+
+      BL_BENCH_REPORT_MPI_NAMED(bm1, "khmxx::a2av_comp1B_16", comm);
+    }
+    BL_BENCH_END(bm, "khmxx::a2av1B_16", src_size);
+
+
+    BL_BENCH_COLLECTIVE_START(bm, "khmxx::a2av1B_32", comm);
+    {
+      BL_BENCH_INIT(bm1);
+
+      BL_BENCH_COLLECTIVE_START(bm1, "khmxx::a2av_comp1B_32", comm);
+      khmxx::incremental::ialltoallv_and_modify_batch<32>(src, src + src_size, send_counts, sw2, comm);
+      BL_BENCH_END(bm1, "khmxx::a2av_comp1B_32", src_size);
+
+      BL_BENCH_REPORT_MPI_NAMED(bm1, "khmxx::a2av_comp1B_32", comm);
+    }
+    BL_BENCH_END(bm, "khmxx::a2av1B_32", src_size);
+
 
 
     ///////////////// -----------
 
+    size_t * dest2 = ::utils::mem::aligned_alloc<size_t>(dest_size);
 
     BL_BENCH_COLLECTIVE_START(bm, "a2av_isend2", comm);
     {
+      BL_TIMER_INIT(bm_loop);
       BL_BENCH_INIT(bm2);
 
       BL_BENCH_COLLECTIVE_START(bm2, "a2av_isend2_order", comm);
@@ -273,12 +498,12 @@ int main(int argc, char** argv) {
       forward_ranks.reserve(comm_size);
 
       // so now all we have to do is traverse the reordered ranks in sequence
-      if ((comm_rank == 1) ) std::cout << "rank " << comm_rank << ", forward: ";
+//      if ((comm_rank == 1) ) std::cout << "rank " << comm_rank << ", forward: ";
       for (int i = 0; i < comm_size; ++i) {
     	  forward_ranks.emplace_back(std::get<2>(node_coords[i]));
-    	  if ((comm_rank == 1) ) std::cout << std::get<2>(node_coords[i]) << ",";
+//    	  if ((comm_rank == 1) ) std::cout << std::get<2>(node_coords[i]) << ",";
       }
-      if ((comm_rank == 1) ) std::cout << std::endl;
+//      if ((comm_rank == 1) ) std::cout << std::endl;
 
 
       // now generate the reverse order (for send).  first negate the node_id and node_rank
@@ -299,17 +524,17 @@ int main(int argc, char** argv) {
       reverse_ranks.reserve(comm_size);
 
       // so now all we have to do is traverse the reordered ranks in sequence
-      if ((comm_rank == 1)) std::cout << "rank " << comm_rank << ", reverse: ";
+//      if ((comm_rank == 1)) std::cout << "rank " << comm_rank << ", reverse: ";
       for (int i = 0; i < comm_size; ++i) {
     	  reverse_ranks.emplace_back(std::get<2>(node_coords[i]));
-    	  if ( (comm_rank == 1)) std::cout << std::get<2>(node_coords[i]) << ",";
+//    	  if ( (comm_rank == 1)) std::cout << std::get<2>(node_coords[i]) << ",";
       }
-      if ( (comm_rank == 1)) std::cout << std::endl;
+//      if ( (comm_rank == 1)) std::cout << std::endl;
 
       BL_BENCH_END(bm2, "a2av_isend2_order", comm_size);
 
 
-      BL_BENCH_COLLECTIVE_START(bm2, "a2av_isend2_alloc", comm);
+      BL_BENCH_START(bm2);
       // find the max recv size.
       size_t max_recv_n = *(std::max_element(recv_counts.begin(), recv_counts.end()));
 
@@ -323,16 +548,9 @@ int main(int argc, char** argv) {
       size_t curr_peer = comm_rank;
 
 
-      // process self.
-      BL_BENCH_COLLECTIVE_START(bm2, "a2av_isend2_self", comm);
-      curr_peer = forward_ranks[0];
-      std::copy(src + send_displs[curr_peer], src + send_displs[curr_peer] + send_counts[curr_peer],
-                dest + recv_displs[curr_peer]);
-      BL_BENCH_END(bm2, "a2av_isend2_self", send_counts[comm_rank]);
-
 
       // set up all the sends.
-      BL_BENCH_COLLECTIVE_START(bm2, "a2av_isend2_setup", comm);
+      BL_BENCH_START(bm2);
       mxx::datatype dt = mxx::get_datatype<size_t>();
       std::vector<MPI_Request> reqs(comm_size - 1);
 
@@ -354,8 +572,15 @@ int main(int argc, char** argv) {
 
       BL_BENCH_END(bm2, "a2av_isend2_setup", comm_size - 1);
 
+      BL_TIMER_START(bm_loop);
+      comm.barrier();
+      BL_TIMER_END(bm_loop, "bar", 0);
 
-      BL_BENCH_COLLECTIVE_START(bm2, "a2av_isend2_proc", comm);
+
+      BL_BENCH_LOOP_START(bm2, 0);
+      BL_BENCH_LOOP_START(bm2, 1);
+      BL_BENCH_LOOP_START(bm2, 2);
+
 
       MPI_Request req;
       size_t total = 0;
@@ -363,20 +588,50 @@ int main(int argc, char** argv) {
 
       for (step = 1; step < comm_size; ++step) {
 
+        BL_TIMER_START(bm_loop);
+        BL_BENCH_LOOP_RESUME(bm2, 0);
+
         curr_peer = forward_ranks[step];
 
         MPI_Irecv(recv, recv_counts[curr_peer], dt.type(),
                   curr_peer, 1234, comm, &req );
         MPI_Test(&req, &flag, MPI_STATUS_IGNORE);
+        BL_BENCH_LOOP_PAUSE(bm2, 0);
+        BL_TIMER_END(bm_loop, "0", recv_counts[curr_peer]);
 
-        if (step > 1) {
+        if (step == 1) {
+            // process self.
+            BL_TIMER_START(bm_loop);
+            BL_BENCH_LOOP_RESUME(bm2, 1);
+            curr_peer = forward_ranks[0];
+            std::copy(src + send_displs[curr_peer],
+                      src + send_displs[curr_peer] + send_counts[curr_peer],
+                      dest2 + recv_displs[curr_peer]);
+            ::std::for_each(dest2 + recv_displs[curr_peer],
+                dest2 + recv_displs[curr_peer] + recv_counts[curr_peer], sw);
+            BL_BENCH_LOOP_PAUSE(bm2, 1);
+            BL_TIMER_END(bm_loop, "1", recv_counts[curr_peer]);
+
+        } else {
+          BL_TIMER_START(bm_loop);
+          BL_BENCH_LOOP_RESUME(bm2, 1);
+
           curr_peer = forward_ranks[step - 1];
           std::copy(proc, proc + recv_counts[curr_peer],
-                    dest + recv_displs[curr_peer]);
+                    dest2 + recv_displs[curr_peer]);
+          ::std::for_each(dest2 + recv_displs[curr_peer],
+              dest2 + recv_displs[curr_peer] + recv_counts[curr_peer], sw);
           total += recv_counts[curr_peer];
+          BL_BENCH_LOOP_PAUSE(bm2, 1);
+          BL_TIMER_END(bm_loop, "1", recv_counts[curr_peer]);
         }
 
+        BL_TIMER_START(bm_loop);
+        BL_BENCH_LOOP_RESUME(bm2, 2);
+
         MPI_Wait(&req, MPI_STATUS_IGNORE);
+        BL_BENCH_LOOP_PAUSE(bm2, 2);
+        BL_TIMER_END(bm_loop, "2", 0);
 
 
         ::std::swap(recv, proc);
@@ -384,39 +639,51 @@ int main(int argc, char** argv) {
       }
       // final piece.
       if (comm_size > 1) {
+        BL_TIMER_START(bm_loop);
+        BL_BENCH_LOOP_RESUME(bm2, 1);
+
 		  curr_peer = forward_ranks.back();
-		  usleep(static_cast<unsigned int>(static_cast<double>(recv_counts[curr_peer]) * 0.025d));
 		  std::copy(proc, proc + recv_counts[curr_peer],
-					dest + recv_displs[curr_peer]);
+					dest2 + recv_displs[curr_peer]);
+      ::std::for_each(dest2 + recv_displs[curr_peer],
+          dest2 + recv_displs[curr_peer] + recv_counts[curr_peer], sw);
 		  total += recv_counts[curr_peer];
+      BL_BENCH_LOOP_PAUSE(bm2, 1);
+      BL_TIMER_END(bm_loop, "1", recv_counts[curr_peer]);
+
+
       }
-      BL_BENCH_END(bm2, "a2av_isend2_proc", total);
+//      BL_BENCH_END(bm2, "a2av_isend2_proc", total);
 
 
-      BL_BENCH_COLLECTIVE_START(bm2, "a2av_isend2_cleanup", comm);
+      BL_BENCH_LOOP_END(bm2, 0, "loop_irecv", total);
+      BL_BENCH_LOOP_END(bm2, 1, "loop_compute", total);
+      BL_BENCH_LOOP_END(bm2, 2, "loop_wait", total  );
+
+      BL_BENCH_START(bm2);
       ::utils::mem::aligned_free(buff);
       BL_BENCH_END(bm2, "a2av_isend2_cleanup", max_recv_n * 2);
 
 
 
       BL_BENCH_REPORT_MPI_NAMED(bm2, "a2av_isend2", comm);
+      BL_TIMER_REPORT_MPI_NAMED(bm_loop, "a2av_isend2_loop", comm);
+
     }
     BL_BENCH_END(bm, "a2av_isend2", dest_size);
 
 
 
-    BL_BENCH_COLLECTIVE_START(bm, "compare2", comm);
-    eq = std::equal(dest, dest+dest_size, gold);
+    BL_BENCH_START(bm);
+    eq = std::equal(dest2, dest2+dest_size, gold);
     //std::cout << "EQUAL2 ? " << (eq ? "YES" : "NO") << std::endl;
+    ::utils::mem::aligned_free(dest2);
     BL_BENCH_END(bm, "compare2", eq ? 1 : 0);
 
     //////////////////////----------------
 
-    BL_BENCH_COLLECTIVE_START(bm, "cleanup", comm);
     ::utils::mem::aligned_free(src);
-    ::utils::mem::aligned_free(dest);
     ::utils::mem::aligned_free(gold);
-    BL_BENCH_END(bm, "cleanup", src_size + dest_size);
 
     BL_BENCH_REPORT_MPI_NAMED(bm, "benchmark", comm);
 

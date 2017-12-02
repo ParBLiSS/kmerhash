@@ -26,7 +26,7 @@
 #ifndef KHMXX_HPP
 #define KHMXX_HPP
 
-
+#include <utility>
 #include <algorithm>
 #include <mxx/datatypes.hpp>
 #include <mxx/comm.hpp>
@@ -951,7 +951,7 @@ namespace khmxx
         // do a few cachelines at a time.  probably a good compromise is to do batch_size number of cachelines
         // 64 / sizeof(ASSIGN_TYPE)...
         constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) *
-            decltype(declval<decltype(declval<Func>().proc_trans_hash)>().h)::batch_size;
+            decltype(::std::declval<decltype(::std::declval<Func>().proc_trans_hash)>().h)::batch_size;
         IT it = _begin;
         IT eit = _begin;
         std::advance(eit, input_size - (input_size % block_size) );
