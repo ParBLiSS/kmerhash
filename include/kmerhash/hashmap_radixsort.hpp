@@ -491,6 +491,7 @@ public:
 	// return fail or success
 	bool resize(uint32_t _newNumBuckets )
 	{
+        int64_t preStart = __rdtsc();
 		if(coherence == INSERT)
 		{
 //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
@@ -499,14 +500,14 @@ public:
 //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
 		  finalize_erase();
 		}
-
-
+        int64_t preTicks = __rdtsc() - preStart;
+        int64_t initStart = __rdtsc();
 
 //		::std::cout << "RESIZING:  size=" << totalKeyCount
 //				<< " prev capacity=" << capacity()
 //				<< " new capacity=" << _newNumBuckets << std::endl;
 		//::std::cout << "key count " << totalKeyCount << " elem size " << sizeof(HashElement) << std::endl;
-			HashElement *oldElemArray = (HashElement *)_mm_malloc((totalKeyCount + PFD) * sizeof(HashElement), 64);
+        Key *keyArray = (Key *)_mm_malloc((totalKeyCount + PFD) * sizeof(Key), 64);
 		//printf("CURR numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
 		//        numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
 
@@ -518,27 +519,33 @@ public:
 			int y = std::min(count, binSize - 1);
 			for(j = 0; j < y; j++)
 			{
-				oldElemArray[elemCount++] = hashTable[i * binSize + j];
+				keyArray[elemCount++] = hashTable[i * binSize + j].key;
 			}
             int32_t overflowBufId;
             overflowBufId = hashTable[i * binSize + binSize - 1].bucketId;
             for(; j < count; j++)
             {
-                oldElemArray[elemCount++] = overflowBuf[overflowBufId * binSize + j - (binSize - 1)];
+                keyArray[elemCount++] = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].key;
             }
 		}
+        int64_t initTicks = __rdtsc() - initStart;
 #ifndef NDEBUG
 		printf("elemCount = %d\n", elemCount);
 #endif
 
+        int64_t allocStart = __rdtsc();
 		while (elemCount > _newNumBuckets)  _newNumBuckets <<= 1;
 		//ssstd::cout << "before " << numBuckets << std::endl;
 		resize_alloc(_newNumBuckets, binSize);
+        int64_t allocTicks = __rdtsc() - allocStart;
+        int64_t insertStart = __rdtsc();
 		//std::cout << "allocated " << _newNumBuckets << std::endl;
-		int resize_result = resize_insert(oldElemArray, elemCount);
+		int resize_result = resize_insert(keyArray, elemCount);
 		//std::cout << "inserted " << std::endl;
+        int64_t insertTicks = __rdtsc() - insertStart;
 
-
+        
+        int64_t whileStart = __rdtsc();
 		int tries = 2;
 		while ( (resize_result > 0) && (tries > 0)) {
 			std::cout << "resizing again and reinserting " << std::endl;
@@ -553,14 +560,21 @@ public:
 			}
 
 			--tries;
-			resize_result = resize_insert(oldElemArray, elemCount);  // double binSize, which returns to old number of bin.
+			resize_result = resize_insert(keyArray, elemCount);  // double binSize, which returns to old number of bin.
 		}
-		_mm_free(oldElemArray);
+        _mm_free(keyArray);
+        int64_t whileTicks = __rdtsc() - whileStart;
 
-		if (resize_result == 0) finalize_insert();
+        int64_t finalizeStart = __rdtsc();
+		if (resize_result == 0) resize_finalize_insert();
 		else throw std::logic_error("ERROR: failed to resize, binSize doubled and still failed.");
+        int64_t finalizeTicks = __rdtsc() - finalizeStart;
 
-
+#ifndef NDEBUG
+        int myrank = 0;
+        MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+        printf("%d] %ld, %ld, %ld, %ld, %ld, %ld\n", myrank, preTicks, initTicks, allocTicks, insertTicks, whileTicks, finalizeTicks);
+#endif
 		return true;
 	}
 
@@ -605,7 +619,7 @@ public:
 	  }
 
         // return fail or success
-        bool resize_insert(HashElement * oldElemArray, int32_t elemCount)
+        bool resize_insert(Key * keyArray, int32_t numKeys)
         {
               int32_t i;
     // insert the elements again
@@ -613,12 +627,6 @@ public:
 
         hash_mod2.posttrans.mask = bucketMask;
         
-        Key *keyArray = (Key *)_mm_malloc(elemCount * sizeof(Key), 64);
-        for(i = 0; i < elemCount; i++)
-        {
-          keyArray[i] = oldElemArray[i].key;
-        }
-        int32_t numKeys = elemCount;
 		int32_t hash_batch_size = 512;
         hash_val_type bucketIdArray[2 * hash_batch_size];
 		memset(bucketIdArray, 0, 2 * hash_batch_size * sizeof(hash_val_type));
@@ -685,10 +693,55 @@ public:
 			}
         }
 
-        _mm_free(keyArray);
     return 0;
   }
 
+    void resize_finalize_insert()
+    {
+        if(coherence != INSERT)
+        {
+//            printf("ERROR! The hashtable coherence is not set to INSERT at the moment. finalize_insert() can not be serviced\n");
+            return;
+        }
+        int i, j;
+        totalKeyCount = 0;
+        for(i = 0; i < numBins; i++)
+        {
+            int32_t count = countArray[i];
+            int32_t firstBucketId = i << binShift;
+            int32_t lastBucketId = firstBucketId + sortBufSize - 1;
+            int32_t prevBucketId = firstBucketId - 1;
+            int32_t k;
+            int32_t y = std::min(count, binSize - 1);
+            for(j = 0; j < y; j++)
+            {
+                int32_t bucketId = hashTable[i * binSize + j].bucketId;
+                if(bucketId != prevBucketId)
+                {
+                    for(k = prevBucketId; k < bucketId; k++)
+                        info_container[k + 1] = j;
+                    prevBucketId = bucketId;
+                }
+            }
+            int32_t overflowBufId;
+            overflowBufId = hashTable[i * binSize + binSize - 1].bucketId;
+            for(; j < count; j++)
+            {
+                int32_t bucketId = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].bucketId;
+                if(bucketId != prevBucketId)
+                {
+                    for(k = prevBucketId; k < bucketId; k++)
+                        info_container[k + 1] = j;
+                    prevBucketId = bucketId;
+                }
+            }
+            for(k = prevBucketId; k < lastBucketId; k++)
+                info_container[k + 1] = count;
+            countArray[i] = count;
+            totalKeyCount += count;
+        }
+        coherence = COHERENT;
+    }
     //uint64_t hash(uint64_t x)
     //{
     //    uint64_t y[2];
