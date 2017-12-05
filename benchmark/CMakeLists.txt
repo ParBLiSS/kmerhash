@@ -361,7 +361,7 @@ target_link_libraries(test_prealloc ${EXTRA_LIBS})
 
 if(NOT TARGET microbenchmarks)
 	add_custom_target(microbenchmarks)
-	add_dependencies(microbenchmarks benchmark_mpi_a2a benchmark_a2av hash_vs_sort pointer_vs_ref)
+	add_dependencies(microbenchmarks benchmark_a2a benchmark_a2av)
 	if (Boost_FOUND)
 		add_dependencies(microbenchmarks cust_alloc)
 	endif(Boost_FOUND)
