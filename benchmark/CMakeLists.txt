@@ -296,12 +296,12 @@ foreach(map BROBINHOOD RADIXSORT)
 		add_dist_counter_target(testKmerCounter FASTQ 31 ${map} ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
 	endforeach(hash)
 endforeach(map)
-#foreach(hash MURMUR32 MURMUR) # CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
-#	add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
-#	add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
-#	add_dist_counter_target(testKmerCounter FASTQ 31 DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
-#	add_dist_counter_target(testKmerCounter FASTQ 31 DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
-#endforeach(hash)
+foreach(hash MURMUR32 MURMUR) # CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
+	add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
+	add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
+	add_dist_counter_target(testKmerCounter FASTQ 31 DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
+	add_dist_counter_target(testKmerCounter FASTQ 31 DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
+endforeach(hash)
 	
 
 #k scalability
@@ -313,12 +313,12 @@ foreach(map BROBINHOOD RADIXSORT)
 		endforeach(k)
 	endforeach(hash)
 endforeach(map)
-#foreach(hash MURMUR32 MURMUR) # CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
-#	foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
-#		add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH k_benchmarks)
-#		add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH k_benchmarks)
-#	endforeach(k)
-#endforeach(hash)
+foreach(hash MURMUR32 MURMUR) # CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
+	foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
+		add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH k_benchmarks)
+		add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH k_benchmarks)
+	endforeach(k)
+endforeach(hash)
 
 
 
