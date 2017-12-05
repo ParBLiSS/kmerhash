@@ -174,7 +174,7 @@ struct ReplaceReducer {
  *
  *  [ ] update erase
  *  [ ] update insert.
- *
+ *  [x] use array instead of vector.
  */
 template <typename Key, typename T,
 		template <typename> class Hash = ::std::hash,
@@ -203,18 +203,18 @@ protected:
 
 	template <typename S>
 	struct modulus2 {
-		static constexpr size_t batch_size = (sizeof(S) == 4 ? 8 : 4);
+		static constexpr size_t batch_size = 1; //(sizeof(S) == 4 ? 8 : 4);
 		S mask;
 		modulus2(S const & _mask) : mask(_mask) {}
 
 		template <typename IN>
 		inline IN operator()(IN const & x) const { return (x & mask); }
 
-		template <typename IN, typename OUT>
-		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
-			// TODO: [ ] do SSE version here
-			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
-		}
+//		template <typename IN, typename OUT>
+//		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
+//			// TODO: [ ] do SSE version here
+//			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
+//		}
 	};
 
 	// mod 2 okay since hashtable size is always power of 2.
@@ -1287,10 +1287,10 @@ protected:
 
 			}
 		}
-    for (bl = 0; bl < blocks ; ++bl) {
-      // increase actual overflow if the block could not absorb all of it.
+//    for (bl = 0; bl <= blocks ; ++bl) {
+//      // increase actual overflow if the block could not absorb all of it.
 //      std::cout << " ACTUAL Offsets " << offsets[bl] << std::endl;
-    }
+//    }
 
 		// clean up the last part.
 		size_t new_start;
@@ -3264,7 +3264,7 @@ public:
 			return iterator(container + get_pos(idx), info_container.begin()+ get_pos(idx),
 					info_container.end(), filter);
 		else
-			return iterator(container + info_container.size(), info_container.end(), filter);
+			return this->end();
 
 	}
 
@@ -3286,7 +3286,7 @@ public:
 			return const_iterator(container + get_pos(idx), info_container.cbegin()+ get_pos(idx),
 					info_container.cend(), filter);
 		else
-			return const_iterator(container + info_container.size(), info_container.cend(), filter);
+			return this->cend();
 
 	}
 
