@@ -788,6 +788,11 @@ namespace dsc  // distributed std container
         return this->c.size();
       }
 
+      virtual size_t local_capacity() const {
+    	  return this->c.capacity();
+      }
+
+
       /// get number of entries in local container
       virtual size_t local_unique_size() const {
         return this->local_size();

@@ -362,37 +362,39 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 
 
 #else  // hashmap
-		struct MSBSplitter {
-		    template <typename Kmer>
-		    bool operator()(Kmer const & kmer) const {
-		      return (kmer.getData()[Kmer::nWords - 1] & ~(~(static_cast<typename Kmer::KmerWordType>(0)) >> 2)) > 0;
-		    }
-
-		    template <typename Kmer, typename V>
-		    bool operator()(std::pair<Kmer, V> const & x) const {
-		      return (x.first.getData()[Kmer::nWords - 1] & ~(~(static_cast<typename Kmer::KmerWordType>(0)) >> 2)) > 0;
-		    }
-		};
+//		struct MSBSplitter {
+//		    template <typename Kmer>
+//		    bool operator()(Kmer const & kmer) const {
+//		      return (kmer.getData()[Kmer::nWords - 1] & ~(~(static_cast<typename Kmer::KmerWordType>(0)) >> 2)) > 0;
+//		    }
+//
+//		    template <typename Kmer, typename V>
+//		    bool operator()(std::pair<Kmer, V> const & x) const {
+//		      return (x.first.getData()[Kmer::nWords - 1] & ~(~(static_cast<typename Kmer::KmerWordType>(0)) >> 2)) > 0;
+//		    }
+//		};
+		//	#if (pDNA == 5) || (pKmerStore == CANONICAL)
+		//	using Splitter = ::bliss::filter::TruePredicate;
+		//	#else
+		//	using Splitter = typename ::std::conditional<(KmerType::nBits == (KmerType::nWords * sizeof(typename KmerType::KmerWordType) * 8)),
+		//			MSBSplitter, ::bliss::filter::TruePredicate>::type;
+		//	#endif
 
 
   // choose a MapParam based on type of map and kmer model (canonical, original, bimolecule)
   #if (pKmerStore == SINGLE)  // single stranded
     template <typename Key>
     using MapParams = ::bliss::index::kmer::SingleStrandHashMapParams<Key, DistHash, StoreHash, DistTrans>;
+  using SpecialKeys = ::bliss::kmer::hash::sparsehash::special_keys<KmerType, false>;
   #elif (pKmerStore == CANONICAL)
     template <typename Key>
     using MapParams = ::bliss::index::kmer::CanonicalHashMapParams<Key, DistHash, StoreHash>;
+  using SpecialKeys = ::bliss::kmer::hash::sparsehash::special_keys<KmerType, true>;
   #elif (pKmerStore == BIMOLECULE)  // bimolecule
     template <typename Key>
     using MapParams = ::bliss::index::kmer::BimoleculeHashMapParams<Key, DistHash, StoreHash>;
+  using SpecialKeys = ::bliss::kmer::hash::sparsehash::special_keys<KmerType, false>;
   #endif
-
-	#if (pDNA == 5) || (pKmerStore == CANONICAL)
-	using Splitter = ::bliss::filter::TruePredicate;
-	#else
-	using Splitter = typename ::std::conditional<(KmerType::nBits == (KmerType::nWords * sizeof(typename KmerType::KmerWordType) * 8)),
-			MSBSplitter, ::bliss::filter::TruePredicate>::type;
-	#endif
 
 
   // DEFINE THE MAP TYPE base on the type of data to be stored.
@@ -413,12 +415,12 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 	//          KmerType, ValType, MapParams>;
     #elif (pMAP == DENSEHASH)
       using MapType = ::dsc::densehash_multimap<
-          KmerType, ValType, MapParams, Splitter>;
+          KmerType, ValType, MapParams, SpecialKeys>;
     #endif
   #elif (pINDEX == COUNT)  // map
     #if (pMAP == DENSEHASH)
       using MapType = ::dsc::counting_densehash_map<
-        KmerType, ValType, MapParams, Splitter>;
+        KmerType, ValType, MapParams, SpecialKeys>;
 #elif (pMAP == ROBINHOOD)
   using MapType = ::dsc::counting_robinhood_map<
       KmerType, ValType, MapParams>;
@@ -1321,21 +1323,21 @@ int main(int argc, char** argv) {
   IndexType idx(comm);
 
 #if (pMAP == DENSEHASH)
-  KmerType empty_key = ::bliss::kmer::hash::sparsehash::empty_key<KmerType>::generate();
-  KmerType deleted_key = ::bliss::kmer::hash::sparsehash::deleted_key<KmerType>::generate();
-
-  	idx.get_map().reserve_keys(empty_key, deleted_key);
-
-  	// upper key is negation of lower keys
-  	KmerType upper_empty_key = empty_key;
-  	KmerType upper_deleted_key = deleted_key;
-  	for (size_t i = 0; i < KmerType::nWords; ++i) {
-  		upper_empty_key.getDataRef()[i] = ~(upper_empty_key.getDataRef()[i]);
-  		upper_deleted_key.getDataRef()[i] = ~(upper_deleted_key.getDataRef()[i]);
-  	}
-
-  	idx.get_map().reserve_upper_keys(upper_empty_key, upper_deleted_key, Splitter());
-
+//  KmerType empty_key = ::bliss::kmer::hash::sparsehash::empty_key<KmerType>::generate();
+//  KmerType deleted_key = ::bliss::kmer::hash::sparsehash::deleted_key<KmerType>::generate();
+//
+//  	idx.get_map().reserve_keys(empty_key, deleted_key);
+//
+//  	// upper key is negation of lower keys
+//  	KmerType upper_empty_key = empty_key;
+//  	KmerType upper_deleted_key = deleted_key;
+//  	for (size_t i = 0; i < KmerType::nWords; ++i) {
+//  		upper_empty_key.getDataRef()[i] = ~(upper_empty_key.getDataRef()[i]);
+//  		upper_deleted_key.getDataRef()[i] = ~(upper_deleted_key.getDataRef()[i]);
+//  	}
+//
+//  	idx.get_map().reserve_upper_keys(upper_empty_key, upper_deleted_key, Splitter());
+//
 
 #endif
 
@@ -1419,10 +1421,10 @@ int main(int argc, char** argv) {
 
       // =========== update the parameters
 #if (pMAP == SORTED) || (pMAP == RADIXSORT)
-    buckets = idx.get_map().get_local_container().capacity();
+    buckets = idx.get_map().local_capacity();
       max_load = buckets;
 #else
-	    buckets = idx.get_map().get_local_container().capacity();
+	    buckets = idx.get_map().local_capacity();
 	    orig_buckets = buckets;
       max_load = idx.get_map().get_local_container().get_max_load_factor() * buckets;
 #endif
@@ -1537,19 +1539,19 @@ int main(int argc, char** argv) {
     if (comm.rank() == 0) std::cout << (delta_distinct + avg_distinct_count);
 
 #if (pMAP == SORTED)
-	    idx.get_map().get_local_container().reserve(idx.local_size() + kmer_est);
-	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
+	    idx.get_map().local_reserve(idx.local_size() + kmer_est);
+	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().local_capacity() << std::endl;
 #elif (pMAP == RADIXSORT)
-//	    if (idx.get_map().get_local_container().capacity() < (avg_distinct_count + delta_distinct))
-//	    	idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
+//	    if (idx.get_map().local_capacity() < (avg_distinct_count + delta_distinct))
+//	    	idx.get_map().local_reserve(avg_distinct_count + delta_distinct);
 	    // do nothing, since on insertion we reserve.
-	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
+	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().local_capacity() << std::endl;
 #elif (pMAP == BROBINHOOD)
 
 #else
-	    if ((idx.get_map().get_local_container().capacity() * idx.get_map().get_local_container().get_max_load_factor()) < (avg_distinct_count + delta_distinct))
-	    	idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
-	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
+	    if ((idx.get_map().local_capacity() * idx.get_map().get_local_container().get_max_load_factor()) < (avg_distinct_count + delta_distinct))
+	    	idx.get_map().local_reserve(avg_distinct_count + delta_distinct);
+	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().local_capacity() << std::endl;
 #endif
     BL_BENCH_LOOP_PAUSE(test, 3);
 
@@ -1688,11 +1690,11 @@ int main(int argc, char** argv) {
             " distinct " << avg_distinct_count <<
             " max load before " << max_load << " after " <<
 #if (pMAP == SORTED) || (pMAP == RADIXSORT)
-            static_cast<size_t>(idx.get_map().get_local_container().capacity()) <<
-            " buckets " << buckets << " after " << idx.get_map().get_local_container().capacity() <<
+            static_cast<size_t>(idx.get_map().local_capacity()) <<
+            " buckets " << buckets << " after " << idx.get_map().local_capacity() <<
 #else
-            static_cast<size_t>(idx.get_map().get_local_container().capacity() * idx.get_map().get_local_container().get_max_load_factor()) <<
-            " buckets " << buckets << " after " << idx.get_map().get_local_container().capacity() <<
+            static_cast<size_t>(idx.get_map().local_capacity() * idx.get_map().get_local_container().get_max_load_factor()) <<
+            " buckets " << buckets << " after " << idx.get_map().local_capacity() <<
 #endif
             std::endl;
       }
@@ -1711,8 +1713,8 @@ int main(int argc, char** argv) {
   BL_BENCH_LOOP_END(test, 0, "estimate", total_file_size);
   BL_BENCH_LOOP_END(test, 1, "reserve", iters );
   BL_BENCH_LOOP_END(test, 2, "read", kmer_total);
-  BL_BENCH_LOOP_END(test, 3, "resize", idx.get_map().get_local_container().capacity() );
-  BL_BENCH_LOOP_END(test, 4, "insert", idx.local_size() );
+  BL_BENCH_LOOP_END(test, 3, "resize", idx.get_map().local_capacity() );
+  BL_BENCH_LOOP_END(test, 4, "insert", idx.get_map().local_size() );
   BL_BENCH_LOOP_END(test, 5, "measure", chars_per_kmer);
 
 

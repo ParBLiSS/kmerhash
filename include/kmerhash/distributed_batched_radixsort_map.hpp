@@ -751,7 +751,9 @@ namespace dsc  // distributed std container
       virtual size_t local_size() const {
         return this->c.size();
       }
-
+      virtual size_t local_capacity() const {
+    	  return this->c.capacity();
+      }
       /// get number of entries in local container
       virtual size_t local_unique_size() const {
         return this->local_size();
@@ -2693,7 +2695,7 @@ if (estimate) {
 
       size_t est = this->c.get_hll().estimate();
       if (this->comm.rank() == 0)
-      std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
+      std::cout << "rank " << this->comm.rank() << " estimated size " << est << " capacity " << this->c.capacity() << std::endl;
 
       BL_BENCH_END(insert, "estimate", est);
 

@@ -650,19 +650,19 @@ public:
 	/**
 	 * @brief get the load factors.
 	 */
-	inline double get_load_factor() {
+	inline double get_load_factor() const {
 		return static_cast<double>(lsize) / static_cast<double>(buckets);
 	}
 
-	inline double get_min_load_factor() {
+	inline double get_min_load_factor() const {
 		return min_load_factor;
 	}
 
-	inline double get_max_load_factor() {
+	inline double get_max_load_factor() const {
 		return max_load_factor;
 	}
 
-	size_t capacity() {
+	size_t capacity() const {
 		return buckets;
 	}
 
