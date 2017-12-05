@@ -491,7 +491,9 @@ public:
 	// return fail or success
 	bool resize(uint32_t _newNumBuckets )
 	{
+#ifndef NDEBUG
         int64_t preStart = __rdtsc();
+#endif
 		if(coherence == INSERT)
 		{
 //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
@@ -500,8 +502,10 @@ public:
 //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
 		  finalize_erase();
 		}
+#ifndef NDEBUG
         int64_t preTicks = __rdtsc() - preStart;
         int64_t initStart = __rdtsc();
+#endif
 
 //		::std::cout << "RESIZING:  size=" << totalKeyCount
 //				<< " prev capacity=" << capacity()
@@ -528,24 +532,28 @@ public:
                 keyArray[elemCount++] = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].key;
             }
 		}
-        int64_t initTicks = __rdtsc() - initStart;
 #ifndef NDEBUG
+        int64_t initTicks = __rdtsc() - initStart;
 		printf("elemCount = %d\n", elemCount);
-#endif
 
         int64_t allocStart = __rdtsc();
+#endif
 		while (elemCount > _newNumBuckets)  _newNumBuckets <<= 1;
 		//ssstd::cout << "before " << numBuckets << std::endl;
 		resize_alloc(_newNumBuckets, binSize);
+#ifndef NDEBUG
         int64_t allocTicks = __rdtsc() - allocStart;
         int64_t insertStart = __rdtsc();
+#endif
 		//std::cout << "allocated " << _newNumBuckets << std::endl;
 		int resize_result = resize_insert(keyArray, elemCount);
 		//std::cout << "inserted " << std::endl;
+#ifndef NDEBUG
         int64_t insertTicks = __rdtsc() - insertStart;
 
         
         int64_t whileStart = __rdtsc();
+#endif
 		int tries = 2;
 		while ( (resize_result > 0) && (tries > 0)) {
 			std::cout << "resizing again and reinserting " << std::endl;
@@ -563,14 +571,18 @@ public:
 			resize_result = resize_insert(keyArray, elemCount);  // double binSize, which returns to old number of bin.
 		}
         _mm_free(keyArray);
+#ifndef NDEBUG
         int64_t whileTicks = __rdtsc() - whileStart;
 
         int64_t finalizeStart = __rdtsc();
-		if (resize_result == 0) resize_finalize_insert();
+#endif
+
+    if (resize_result == 0) resize_finalize_insert();
 		else throw std::logic_error("ERROR: failed to resize, binSize doubled and still failed.");
-        int64_t finalizeTicks = __rdtsc() - finalizeStart;
 
 #ifndef NDEBUG
+        int64_t finalizeTicks = __rdtsc() - finalizeStart;
+
         int myrank = 0;
         MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
         printf("%d] %ld, %ld, %ld, %ld, %ld, %ld\n", myrank, preTicks, initTicks, allocTicks, insertTicks, whileTicks, finalizeTicks);
