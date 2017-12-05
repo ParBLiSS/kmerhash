@@ -2467,6 +2467,112 @@ namespace khmxx
   } // local namespace
 
 
+  /// calculate rank traversal order based on grouping of ranks by node.
+  void group_ranks_by_node(::std::vector<int> & forward_ranks,
+                                ::std::vector<int> & reverse_ranks,
+                                 mxx::comm const & comm) {
+
+    int comm_size = comm.size();
+    int comm_rank = comm.rank();
+
+    // split by node.
+    mxx::comm node_comm = comm.split_shared();
+
+    // assert to check that all nodes are the same size.
+    int core_count = node_comm.size();
+    int core_rank = node_comm.rank();
+    assert(mxx::all_same(core_count, comm) && "Different size nodes");
+
+    // split by rank
+    mxx::comm core_comm = comm.split(core_rank);
+    int node_count = core_comm.size();
+    assert(mxx::all_same(node_count, comm) && "Different size nodes");
+
+    bool is_pow2 = (node_count & (node_count - 1)) == 0;
+
+    // calculate the node ids.
+//    // for procs in each node, use the minimum rank as node id.
+//    int node_rank = comm_rank;
+//    // note that the split assigns rank within node_comm, subcomm rank 0 has the lowest global rank.
+//    // so a broadcast within the node_comm is enough.
+//    mxx::bcast(node_rank, 0, node_comm);
+
+    // use exscan to get seq node id, then bcast to send to all ranks in a node.
+    int node_rank = (core_rank == 0) ? 1 : 0;
+    node_rank = mxx::exscan(node_rank, core_comm);
+    mxx::bcast(node_rank, 0, node_comm);
+
+
+    // get all the rank's node ids.  this will be used to order the global rank for traversal.
+    std::tuple<int, int, int> node_coord = std::make_tuple(node_rank, core_rank, comm_rank);
+    // gathered results are in rank order.
+    std::vector<std::tuple<int, int, int> > node_coords = mxx::allgather(node_coord, comm);
+    // all ranks will have the array in the same order.
+
+    // now shift by the current node_rank and node rank, so that
+    //     on each node, the array has the current node first.
+    //     and within each node, the array has the targets ordered s.t. the current proc is first and relativel orders are preserved.
+    ::std::for_each(node_coords.begin(), node_coords.end(),
+        [&is_pow2, &node_count, &node_rank, &core_count, &core_rank](std::tuple<int, int, int> & x){
+      // circular shift around the global comm, shift by node_rank
+      std::get<0>(x) = is_pow2 ? (std::get<0>(x) ^ node_rank) :     // okay for value to be an invalid node id -  for sorting.
+          (std::get<0>(x) + node_count - node_rank) % node_count;
+      // circular shift within a node comm, shift by core_rank
+      std::get<1>(x) = (std::get<1>(x) + core_count - core_rank) % core_count;
+    });
+
+    // generate the forward order (for receive)
+    // now sort, first by node then by rank.  no need for stable sort.
+    // this is needed because rank may be scattered when mapped to nodes, so interleaved.
+    // the second field should already be increasing order for each node.  so no sorting on
+    //   by second field necessary, as long as stable sorting is used.
+    ::std::sort(node_coords.begin(), node_coords.end(),
+                       [](std::tuple<int, int, int> const & x, std::tuple<int, int, int> const & y){
+      return (std::get<0>(x) == std::get<0>(y)) ? (std::get<1>(x) < std::get<1>(y)) : (std::get<0>(x) < std::get<0>(y));
+    });
+    // all ranks will have the array in the same order.  grouped by node id, and shifted by total size and node size
+
+    // copy over the the forward ranks
+    forward_ranks.clear();
+    forward_ranks.reserve(comm_size);
+
+    // so now all we have to do is traverse the reordered ranks in sequence
+//      if ((comm_rank == 1) ) std::cout << "rank " << comm_rank << ", forward: ";
+    for (int i = 0; i < comm_size; ++i) {
+      forward_ranks.emplace_back(std::get<2>(node_coords[i]));
+//        if ((comm_rank == 1) ) std::cout << std::get<2>(node_coords[i]) << ",";
+    }
+//      if ((comm_rank == 1) ) std::cout << std::endl;
+
+
+    // now generate the reverse order (for send).  first negate the node_rank and core_rank
+    ::std::for_each(node_coords.begin(), node_coords.end(),
+        [&is_pow2, &node_count, &core_count](std::tuple<int, int, int> & x){
+      // circular shift around the global comm, shift by node_rank
+      std::get<0>(x) = is_pow2 ? std::get<0>(x) :     // xor already done.
+          (node_count - std::get<0>(x)) % node_count; // reverse the ring.  0 remains 0.
+      // circular shift within a node comm, shift by core_rank
+      std::get<1>(x) = (core_count - std::get<1>(x)) % core_count;   // 0 remains 0.
+    });
+    ::std::sort(node_coords.begin(), node_coords.end(),
+            [](std::tuple<int, int, int> const & x, std::tuple<int, int, int> const & y){
+      return (std::get<0>(x) == std::get<0>(y)) ? (std::get<1>(x) < std::get<1>(y)) : (std::get<0>(x) < std::get<0>(y));
+    });
+
+    // copy over the the forward ranks
+    reverse_ranks.clear();
+    reverse_ranks.reserve(comm_size);
+
+    // so now all we have to do is traverse the reordered ranks in sequence
+//      if ((comm_rank == 1)) std::cout << "rank " << comm_rank << ", reverse: ";
+    for (int i = 0; i < comm_size; ++i) {
+      reverse_ranks.emplace_back(std::get<2>(node_coords[i]));
+//        if ( (comm_rank == 1)) std::cout << std::get<2>(node_coords[i]) << ",";
+    }
+//      if ( (comm_rank == 1)) std::cout << std::endl;
+  }
+
+
   //== get bucket assignment. - complete grouping by processors (for a2av), or grouping by processors in communication blocks (for a2a, followed by 1 a2av)
   // parameter: in block per bucket send count (each block is for an all2all operation.  max block size is capped by max int.
   // 2 sets of send counts
