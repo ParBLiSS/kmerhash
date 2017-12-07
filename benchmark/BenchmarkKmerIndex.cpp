@@ -85,6 +85,8 @@ static int measure_mode = MEASURE_DISABLED;
 #include "kmerhash/distributed_batched_robinhood_map.hpp"
 #include "kmerhash/distributed_batched_radixsort_map.hpp"
 
+#include "kmerhash/experimental/hybrid_batched_robinhood_map.hpp"
+
 
 #include "index/kmer_index.hpp"
 
@@ -132,6 +134,7 @@ static int measure_mode = MEASURE_DISABLED;
 #define ROBINHOOD 48
 #define BROBINHOOD 49
 #define RADIXSORT 50
+#define TROBINHOOD 52
 
 #define SINGLE 61
 #define CANONICAL 62
@@ -378,6 +381,9 @@ using CountType = uint32_t;
     #elif (pMAP == BROBINHOOD)
       using MapType = ::dsc::counting_batched_robinhood_map<
           KmerType, ValType, MapParams>;
+    #elif (pMAP == TROBINHOOD)  // hybrid version
+      using MapType = ::hsc::counting_batched_robinhood_map<
+          KmerType, ValType, MapParams>;
 	#elif (pMAP == RADIXSORT)
       using MapType = ::dsc::counting_batched_radixsort_map<
     		  KmerType, ValType, MapParams>;
@@ -571,7 +577,7 @@ int main(int argc, char** argv) {
                                  false, 7, "int", cmd);
 
     TCLAP::ValueArg<int> sampleArg("q",
-                                 "query-sample", "sampling ratio for the query kmers. default=100",
+                                 "query-sample", "sampling ratio for the query kmers. default=2 (half)",
                                  false, sample_ratio, "int", cmd);
 
 	  TCLAP::ValueArg<double> maxLoadArg("","max_load","maximum load factor", false, max_load, "double", cmd);
@@ -687,6 +693,11 @@ int main(int argc, char** argv) {
     idx.get_map().get_local_container().set_min_load_factor(min_load);
     idx.get_map().get_local_container().set_insert_lookahead(insert_prefetch);
     idx.get_map().get_local_container().set_query_lookahead(query_prefetch);
+  #elif (pMAP == TROBINHOOD)
+    idx.get_map().set_max_load_factor(max_load);
+    idx.get_map().set_min_load_factor(min_load);
+    idx.get_map().set_insert_lookahead(insert_prefetch);
+    idx.get_map().set_query_lookahead(query_prefetch);
 
   #endif
 #endif

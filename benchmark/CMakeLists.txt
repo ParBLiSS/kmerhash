@@ -232,8 +232,17 @@ if (BUILD_BENCHMARKS)
 			add_dist_hashmap_target(overlapBatch-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM_BATCH ENABLE_PREFETCH overlap_benchmarks)
 	
 	
-		endforeach(hash)	
+		endforeach(hash)
 	endforeach(map)
+
+	# no overlap
+	add_dist_hashmap_target(testKmerIndex TROBINHOOD MURMUR64avx MURMUR64avx KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(testKmerIndex TROBINHOOD MURMUR64avx CRC32C KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
+	
+	#overlap comm 1 rank-pair at a time.
+	add_dist_hashmap_target(overlap-KmerIndex TROBINHOOD MURMUR64avx MURMUR64avx OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(overlap-KmerIndex TROBINHOOD MURMUR64avx CRC32C OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
+
 
 	foreach(map BROBINHOOD RADIXSORT) #  // just Batched Robinhood should get the point across.
 		# lz4 distributed benchmarks.
