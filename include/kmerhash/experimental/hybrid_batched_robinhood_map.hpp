@@ -983,7 +983,7 @@ namespace hsc  // distributed std container
     // get some common variables
     size_t in_size = input.size();
     size_t nthreads_global = omp_get_max_threads();
-    size_t comm_size = 1;
+    int comm_size = 1;
 
     // set up per thread storage
     std::vector< std::vector<size_t> > thread_bucket_sizes(omp_get_max_threads());
@@ -1156,6 +1156,7 @@ namespace hsc  // distributed std container
 
     // get some common variables
     int comm_size = this->comm.size();
+    int comm_rank = this->comm.rank();
     size_t in_size = input.size();
     size_t nthreads_global = comm_size * omp_get_max_threads();
 
@@ -1279,36 +1280,36 @@ namespace hsc  // distributed std container
             }   // when finished, has per bucket offsets for each thread, and total 
             // when finished, has per bucket offsets for each thread, and total 
             thread_total[tid] = offset;   // save the total element count, for prefix scan next and update.
-            // wait for all to be done with the scan.
-            #pragma omp barrier
-
-            #pragma omp critical
-            {
-                printf("rank %d of %d, thread %d of %d bucket offsets: ", 0, 1, tid, tcnt);
-                for (size_t i = 0; i < nthreads_global; ++i) {
-                    printf("%ld ", thread_bucket_offsets[tid][i]);
-                }
-                printf("\n");
-            }
-            #pragma omp barrier
-            #pragma omp single
-            {
-                printf("rank %d of %d, thread %d of %d node bucket sizes: ", 0, 1, tid, tcnt);
-                for (size_t i = 0; i < nthreads_global; ++i) {
-                    printf("%ld ", node_bucket_sizes[i]);
-                }
-                printf("\n");
-                printf("rank %d of %d, thread %d of %d node bucket offsets: ", 0, 1, tid, tcnt);
-                for (size_t i = 0; i < nthreads_global; ++i) {
-                    printf("%ld ", node_bucket_offsets[i]);
-                }
-                printf("\n");
-                printf("rank %d of %d, thread %d of %d thread_totals: ", 0, 1, tid, tcnt);
-                for (int i = 0; i < tcnt; ++i) {
-                    printf("%ld ", thread_total[i]);
-                }
-                printf("\n");
-            }
+            // // wait for all to be done with the scan.
+            // #pragma omp barrier
+// 
+            // #pragma omp critical
+            // {
+            //     printf("rank %d of %d, thread %d of %d bucket offsets: ", comm_rank, comm_size, tid, tcnt);
+            //     for (size_t i = 0; i < nthreads_global; ++i) {
+            //         printf("%ld ", thread_bucket_offsets[tid][i]);
+            //     }
+            //     printf("\n");
+            // }
+            // #pragma omp barrier
+            // #pragma omp single
+            // {
+            //     printf("rank %d of %d, thread %d of %d node bucket sizes: ", comm_rank, comm_size, tid, tcnt);
+            //     for (size_t i = 0; i < nthreads_global; ++i) {
+            //         printf("%ld ", node_bucket_sizes[i]);
+            //     }
+            //     printf("\n");
+            //     printf("rank %d of %d, thread %d of %d node bucket offsets: ", comm_rank, comm_size, tid, tcnt);
+            //     for (size_t i = 0; i < nthreads_global; ++i) {
+            //         printf("%ld ", node_bucket_offsets[i]);
+            //     }
+            //     printf("\n");
+            //     printf("rank %d of %d, thread %d of %d thread_totals: ", comm_rank, comm_size, tid, tcnt);
+            //     for (int i = 0; i < tcnt; ++i) {
+            //         printf("%ld ", thread_total[i]);
+            //     }
+            //     printf("\n");
+            // }
 
             if (tcnt > 1) {  // update offsets if more than 1 thread.
                 // wait for all to be done with the scan.
@@ -1326,16 +1327,16 @@ namespace hsc  // distributed std container
                     thread_total[tcnt - 1] = sum;
                 }
 
-                #pragma omp barrier
-                #pragma omp single
-                {
+                // #pragma omp barrier
+                // #pragma omp single
+                // {
 
-                    printf("rank %d of %d, thread %d of %d exscan thread_totals: ", 0, 1, tid, tcnt);
-                    for (int i = 0; i < tcnt; ++i) {
-                        printf("%ld ", thread_total[i]);
-                    }
-                    printf("\n");
-                }
+                //     printf("rank %d of %d, thread %d of %d exscan thread_totals: ", comm_rank, comm_size, tid, tcnt);
+                //     for (int i = 0; i < tcnt; ++i) {
+                //         printf("%ld ", thread_total[i]);
+                //     }
+                //     printf("\n");
+                // }
 
                 // wait for all to finish
                 #pragma omp barrier
@@ -1349,24 +1350,24 @@ namespace hsc  // distributed std container
                         thread_bucket_offsets[t][j] += offset;
                     }
                 }
-                #pragma omp barrier
-                #pragma omp critical
-                {
-                    printf("rank %d of %d, thread %d of %d exscan bucket offsets: ", 0, 1, tid, tcnt);
-                    for (size_t i = 0; i < nthreads_global; ++i) {
-                        printf("%ld ", thread_bucket_offsets[tid][i]);
-                    }
-                    printf("\n");
-                }
-                #pragma omp barrier
-                #pragma omp single
-                {
-                    printf("rank %d of %d, thread %d of %d post exscan node bucket offsets: ", 0, 1, tid, tcnt);
-                    for (size_t i = 0; i < nthreads_global; ++i) {
-                        printf("%ld ", node_bucket_offsets[i]);
-                    }
-                    printf("\n");
-                }
+                // #pragma omp barrier
+                // #pragma omp critical
+                // {
+                //     printf("rank %d of %d, thread %d of %d exscan bucket offsets: ", comm_rank, comm_size, tid, tcnt);
+                //     for (size_t i = 0; i < nthreads_global; ++i) {
+                //         printf("%ld ", thread_bucket_offsets[tid][i]);
+                //     }
+                //     printf("\n");
+                // }
+                // #pragma omp barrier
+                // #pragma omp single
+                // {
+                //     printf("rank %d of %d, thread %d of %d post exscan node bucket offsets: ", comm_rank, comm_size, tid, tcnt);
+                //     for (size_t i = 0; i < nthreads_global; ++i) {
+                //         printf("%ld ", node_bucket_offsets[i]);
+                //     }
+                //     printf("\n");
+                // }
             }            
 
         //===============  now the offsets are ready.  we can permute.
@@ -1535,9 +1536,11 @@ namespace hsc  // distributed std container
 
         after = this->c[tid].size();
 
-        printf("rank %d of %d, thread %d of %d before %ld after count %ld\n", this->comm.rank(), this->comm.size(), tid, tcnt, before, after);
+        printf("rank %d of %d, thread %d of %d before %ld after count %ld\n", comm_rank, comm_size, tid, tcnt, before, after);
 
-        ::utils::mem::aligned_free(shuffled);
+        if (tcnt > 1) {
+            ::utils::mem::aligned_free(shuffled);
+        }
 
     } // parallel modify.
     BL_BENCH_END(modify, "modify", after);
