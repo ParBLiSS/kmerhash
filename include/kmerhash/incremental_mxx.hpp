@@ -3462,7 +3462,7 @@ namespace khmxx
       // if there is comm size is 1.
       if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
-        compute(permuted, permuted_end);
+        compute(0, permuted, permuted_end);
         BL_BENCH_END(idist, "compute_1", input_size);
 
         BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -3526,7 +3526,7 @@ namespace khmxx
       std::vector<MPI_Request> reqs(comm_size - 1);
 
       // process self data
-      compute(&(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
+      compute(comm_rank, &(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
 
       bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
       int step;
@@ -3604,7 +3604,7 @@ namespace khmxx
 //        BL_BENCH_START(idist_loop);
         // process previously received. note: delayed by 1 cycle.
         if (step2 > 0) {
-        	compute(computing, computing + recv_counts[prev_peer]);
+        	compute(prev_peer, computing, computing + recv_counts[prev_peer]);
   		    total += recv_counts[prev_peer];
         }
 
@@ -3677,7 +3677,7 @@ namespace khmxx
       // if there is comm size is 1.
       if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
-        compute(permuted, permuted_end);
+        compute(0, permuted, permuted_end);
         BL_BENCH_END(idist, "compute_1", input_size);
 
         BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -3787,7 +3787,7 @@ namespace khmxx
 
       // process self data
       BL_BENCH_LOOP_RESUME(idist, 1);
-      compute(&(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
+      compute(comm_rank, &(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
       BL_BENCH_LOOP_PAUSE(idist, 1);
 
 
@@ -3830,14 +3830,14 @@ namespace khmxx
 	    	  if (is_pow2) {
 	    		  for (step = 0; step < stepMax; ++step) {
 	    			  prev_peer = comm_rank ^ (step + i - BATCH);
-	  				compute(computing[step], computing[step] + recv_counts[prev_peer]);
+	  				compute(prev_peer, computing[step], computing[step] + recv_counts[prev_peer]);
 	  				total += recv_counts[prev_peer];
 	    		  }
 	    	  } else {
 				  // receive peer.  note that this is diff than send peer.
 	    		  for (step = 0; step < stepMax; ++step) {
 	    			  prev_peer = (comm_rank + step + i - BATCH) % comm_size;
-		  				compute(computing[step], computing[step] + recv_counts[prev_peer]);
+		  				compute(prev_peer, computing[step], computing[step] + recv_counts[prev_peer]);
 		  				total += recv_counts[prev_peer];
 	    		  }
 	    	  }
@@ -3866,14 +3866,14 @@ namespace khmxx
 		  if (is_pow2) {
 			  for (step = 0; step < stepMax; ++step) {
 				  prev_peer = comm_rank ^ (step + i - BATCH);
-				compute(computing[step], computing[step] + recv_counts[prev_peer]);
+				compute(prev_peer, computing[step], computing[step] + recv_counts[prev_peer]);
 				total += recv_counts[prev_peer];
 			  }
 		  } else {
 			  // receive peer.  note that this is diff than send peer.
 			  for (step = 0; step < stepMax; ++step) {
 				  prev_peer = (comm_rank + step + i - BATCH) % comm_size;
-					compute(computing[step], computing[step] + recv_counts[prev_peer]);
+					compute(prev_peer, computing[step], computing[step] + recv_counts[prev_peer]);
 					total += recv_counts[prev_peer];
 			  }
 		  }
@@ -3928,7 +3928,7 @@ namespace khmxx
       // if there is comm size is 1.
       if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
-        compute(permuted, permuted_end);
+        compute(0, permuted, permuted_end);
         BL_BENCH_END(idist, "compute_1", input_size);
 
         BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -3994,7 +3994,7 @@ namespace khmxx
       std::vector<MPI_Request> recv_reqs(comm_size - 1);
 
       // process self data
-      compute(&(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
+      compute(comm_rank, &(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
 
       bool is_pow2 = ( comm_size & (comm_size-1)) == 0;
       int step;
@@ -4063,7 +4063,7 @@ namespace khmxx
 			  // then we know the data and can compute
 
 		//	 std::cout << "step " << index << " peer " << curr_peer << " disp " << recv_displs[curr_peer] << " count " << recv_counts[curr_peer] << std::endl;
-			  compute(buffers + recv_displs[curr_peer], buffers + recv_displs[curr_peer] + recv_counts[curr_peer]);
+			  compute(curr_peer, buffers + recv_displs[curr_peer], buffers + recv_displs[curr_peer] + recv_counts[curr_peer]);
 
 			  total += recv_counts[curr_peer];
 			  BL_BENCH_LOOP_PAUSE(idist, 1);
@@ -4087,7 +4087,7 @@ namespace khmxx
 	    	  // then we know the data and can compute
 
 		//	  std::cout << "step " << index << " peer " << curr_peer << " disp " << recv_displs[curr_peer] << " count " << recv_counts[curr_peer] << std::endl;
-			  compute(buffers + recv_displs[curr_peer], buffers + recv_displs[curr_peer] + recv_counts[curr_peer]);
+			  compute(curr_peer, buffers + recv_displs[curr_peer], buffers + recv_displs[curr_peer] + recv_counts[curr_peer]);
 
 			  total += recv_counts[curr_peer];
 			  BL_BENCH_LOOP_PAUSE(idist, 1);
@@ -4147,7 +4147,7 @@ namespace khmxx
       // if there is comm size is 1.
       if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
-        compute(permuted, permuted_end);
+        compute(0, permuted, permuted_end);
         BL_BENCH_END(idist, "compute_1", input_size);
 
         BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -4300,13 +4300,14 @@ namespace khmxx
 
      // process self data
      BL_BENCH_LOOP_RESUME(idist, 1);
-     compute(&(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
+     compute(comm_rank, &(*(permuted + send_displs[comm_rank])), &(*(permuted + send_displs[comm_rank] + send_counts[comm_rank])));
      BL_BENCH_LOOP_PAUSE(idist, 1);
 
 
       MPI_Request req;
       int step2;
       size_t total = 0;
+      int prev_peer = comm_rank;
 
       for (step = 1, step2 = 0; step2 < comm_size; ++step, ++step2) {
         //====  first setup send and recv.
@@ -4336,7 +4337,7 @@ namespace khmxx
 //        BL_BENCH_START(idist_loop);
         // process previously received.
         if (step2 > 0)  {
-        	compute(computing, computing + buffer_min);
+        	compute(prev_peer, computing, computing + buffer_min);
         	total += buffer_min;
         }
 
@@ -4356,7 +4357,7 @@ namespace khmxx
         ::std::swap(recving, computing);
 
         // then swap pointer
-
+        prev_peer = curr_peer;
 //        BL_BENCH_REPORT_NAMED(idist_loop, "khmxx:exch_permute_mod local");
 
       }
@@ -4379,7 +4380,7 @@ namespace khmxx
       // and process
 
       BL_BENCH_START(idist);
-      compute(buffers, buffers + p2_max);
+      compute(0, buffers, buffers + p2_max);   // dummy rank.
       BL_BENCH_END(idist, "compute_p2", p2_max);
 
       BL_BENCH_START(idist);
@@ -4428,7 +4429,7 @@ namespace khmxx
       // if there is comm size is 1.
       if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
-        compute(permuted, permuted_end, result);
+        compute(0, permuted, permuted_end, result);
         BL_BENCH_END(idist, "compute_1", input_size);
 
         BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -4548,7 +4549,7 @@ namespace khmxx
       // compute for self rank.
         BL_BENCH_LOOP_RESUME(idist, 1);
 
-      compute(&(*(permuted + send_displs[comm_rank])),
+      compute(comm_rank, &(*(permuted + send_displs[comm_rank])),
               &(*(permuted + send_displs[comm_rank ] + send_counts[comm_rank])),
               &(*(result + send_displs[comm_rank])));
         BL_BENCH_LOOP_PAUSE(idist, 1);
@@ -4599,7 +4600,7 @@ namespace khmxx
 
         // process previously received.
         if ((step2 > 0) && (step2 < comm_size)) {
-			compute(computing, computing + recv_counts[prev_peer], storing);
+			compute(prev_peer, computing, computing + recv_counts[prev_peer], storing);
 			// if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " compute for " << prev_peer << std::endl;
 			total += recv_counts[prev_peer];
         }
@@ -4693,7 +4694,7 @@ namespace khmxx
       // if there is comm size is 1.
       if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
-        compute(permuted, permuted_end, result);
+        compute(0, permuted, permuted_end, result);
         BL_BENCH_END(idist, "compute_1", input_size);
 
         BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -4842,7 +4843,7 @@ namespace khmxx
 
       // compute for self rank.
       BL_BENCH_LOOP_RESUME(idist, 1);
-      compute(&(*(permuted + send_displs[comm_rank])),
+      compute(comm_rank, &(*(permuted + send_displs[comm_rank])),
               &(*(permuted + send_displs[comm_rank ] + send_counts[comm_rank])),
               &(*(result + send_displs[comm_rank])));
 
@@ -4866,7 +4867,7 @@ namespace khmxx
 	          total += recv_counts[curr_peer];
 
 			  // then we know the data and can compute
-			  compute(buffers + recv_displs[curr_peer],
+			  compute(curr_peer, buffers + recv_displs[curr_peer],
 					  buffers + recv_displs[curr_peer] + recv_counts[curr_peer],
 					  out_buffers + recv_displs[curr_peer]);
 		      // loop over remaining requests.
@@ -4904,7 +4905,7 @@ namespace khmxx
 	          total += recv_counts[curr_peer];
 
 			  // then we know the data and can compute
-			  compute(buffers + recv_displs[curr_peer],
+			  compute(curr_peer, buffers + recv_displs[curr_peer],
 					  buffers + recv_displs[curr_peer] + recv_counts[curr_peer],
 					  out_buffers + recv_displs[curr_peer]);
 		      BL_BENCH_LOOP_PAUSE(idist, 1);
@@ -4988,7 +4989,7 @@ namespace khmxx
       // if there is comm size is 1.
       if (comm_size == 1) {
         BL_BENCH_COLLECTIVE_START(idist, "compute_1", _comm);
-        compute(permuted, permuted_end, result);
+        compute(0, permuted, permuted_end, result);
         BL_BENCH_END(idist, "compute_1", input_size);
 
         BL_BENCH_REPORT_MPI_NAMED(idist, "khmxx:exch_permute_mod", _comm);
@@ -5120,7 +5121,7 @@ namespace khmxx
       // also note, computing for own rank occurs locally at the beginning.
 
       // COMPUTE SELF.  note that this is one to one, so dealing with send_displs on both permuted and result.
-      compute(&(*(permuted + send_displs[comm_rank])),
+      compute(comm_rank, &(*(permuted + send_displs[comm_rank])),
               &(*(permuted + send_displs[comm_rank ] + send_counts[comm_rank])),
               &(*(result + send_displs[comm_rank])));
 
@@ -5201,7 +5202,7 @@ namespace khmxx
 
         // process previously received.
         if ((step2 > 0) && (step2 < comm_size)) {
-			compute(computing, computing + buffer_min, storing);
+			compute(prev_peer, computing, computing + buffer_min, storing);
 			// if (comm_rank == 0) std::cout << "step " << step << " rank " << comm_rank << " compute for " << prev_peer << std::endl;
 	          total += buffer_min;
         }
@@ -5254,7 +5255,7 @@ namespace khmxx
       BL_BENCH_END(idist, "a2av_q_p2", p2_max);
       // and process
       BL_BENCH_COLLECTIVE_START(idist, "compute_p2", _comm);
-      compute(buffers, buffers + p2_max, out_buffers);
+      compute(0, buffers, buffers + p2_max, out_buffers);
       BL_BENCH_END(idist, "compute_p2", p2_max);
       // then send back
       BL_BENCH_START(idist);

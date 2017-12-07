@@ -159,32 +159,34 @@ namespace dsc  // distributed std container
 
     	DistHash<trans_val_type> hash;
 
-  	template <typename S>
+  	template <typename IN, typename OUT>
   	struct modulus {
-  		static constexpr size_t batch_size = (sizeof(S) == 4 ? 8 : 4);
+  		static constexpr size_t batch_size = 1; // (sizeof(S) == 4 ? 8 : 4);
   		mutable bool is_pow2;
-  		mutable S count;
+  		mutable OUT count;
 
-  		modulus(S const & _count) : is_pow2((_count & (_count - 1)) == 0), count(_count - (is_pow2 ? 1 : 0)) {}
+  		modulus(OUT const & _count) : is_pow2((_count & (_count - 1)) == 0), count(_count - (is_pow2 ? 1 : 0)) {}
 
-  		template <typename IN>
-  		inline IN operator()(IN const & x) const { return is_pow2 ? (x & count) : (x % count); }
+  		inline OUT operator()(IN const & x) const { return is_pow2 ? (x & count) : (x % count); }
 
-  		template <typename IN, typename OUT>
-  		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
-  			// TODO: [ ] do SSE version here
-  			for (size_t i = 0; i < _count; ++i)  y[i] = is_pow2 ? (x[i] & count) : (x[i] % count);
-  		}
+  		// template <typename IN, typename OUT>
+  		// inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
+  		// 	// TODO: [ ] do SSE version here
+  		// 	for (size_t i = 0; i < _count; ++i)  y[i] = is_pow2 ? (x[i] & count) : (x[i] % count);
+  		// }
   	};
-  	modulus<hash_val_type> mod_p;
 
   	using InternalHash = ::fsc::hash::TransformedHash<Key, DistHash, DistTrans, ::bliss::transform::identity>;
     using transhash_val_type = typename InternalHash::result_type;
     InternalHash key_to_hash;
 
-  	using InternalHashMod = ::fsc::hash::TransformedHash<Key, DistHash, DistTrans, modulus>;
-    using transhashmod_val_type = typename InternalHashMod::result_type;
-    InternalHashMod key_to_rank2;
+    template <typename IN>
+    using mod_byte = modulus<IN, uint8_t>;
+    template <typename IN>
+    using mod_short = modulus<IN, uint16_t>;
+    template <typename IN>
+    using mod_int = modulus<IN, uint32_t>;
+    
 
     // don't use these - they produce only 64 bit hash values, which may not be correct
 //      template <typename K>
@@ -451,6 +453,7 @@ namespace dsc  // distributed std container
           return;
         }
 
+        bool is_pow2 = (num_buckets & (num_buckets  - 1)) == 0;
 
 //        BL_BENCH_START(permute_est);
 
@@ -475,12 +478,12 @@ namespace dsc  // distributed std container
 
         	  size_t max = (input_size / block_size) * block_size;
 
-        	  if (this->mod_p.is_pow2) {
+        	  if (is_pow2) {
 				  for (; i < max; i += block_size, it += block_size) {
 					  this->key_to_hash(&(*it), block_size, hashvals);
 
 //					  if ((i == 0) && (this->comm.rank() == 0)) {
-//						  std::cout << "modp counts " << this->mod_p.count << std::endl;
+//						  std::cout << "modp counts " << num_buckets << std::endl;
 //						  for (j = 0; j < block_size; ++j) {
 //							  std::cout << hashvals[j] << ", ";
 //						  }
@@ -489,7 +492,7 @@ namespace dsc  // distributed std container
 					  for (j = 0; j < block_size; ++j) {
 						  hll.update_via_hashval(hashvals[j]);
 
-						  rank = hashvals[j] & this->mod_p.count; // really (p-1)
+						  rank = hashvals[j] & num_buckets; // really (p-1)
 						  *i2o_it = rank;
 						  ++i2o_it;
 
@@ -504,7 +507,7 @@ namespace dsc  // distributed std container
 				  for (j = 0; j < rem; ++j) {
 					  hll.update_via_hashval(hashvals[j]);
 
-					  rank = hashvals[j] & this->mod_p.count;  // really (p-1)
+					  rank = hashvals[j] & num_buckets;  // really (p-1)
 					  *i2o_it = rank;
 					  ++i2o_it;
 
@@ -518,7 +521,7 @@ namespace dsc  // distributed std container
 					  for (j = 0; j < block_size; ++j) {
 						  hll.update_via_hashval(hashvals[j]);
 
-						  rank = hashvals[j] % this->mod_p.count;
+						  rank = hashvals[j] % num_buckets;
 						  *i2o_it = rank;
 						  ++i2o_it;
 
@@ -533,7 +536,7 @@ namespace dsc  // distributed std container
 				  for (j = 0; j < rem; ++j) {
 					  hll.update_via_hashval(hashvals[j]);
 
-					  rank = hashvals[j] % this->mod_p.count;
+					  rank = hashvals[j] % num_buckets;
 					  *i2o_it = rank;
 					  ++i2o_it;
 
@@ -544,12 +547,12 @@ namespace dsc  // distributed std container
           } else {  // batch size of 1.
         	  transhash_val_type h;
 
-        	  if (this->mod_p.is_pow2) {
+        	  if (is_pow2) {
 				  for (; it != _end; ++it, ++i2o_it) {
 					  h = this->key_to_hash(*it);
 					  hll.update_via_hashval(h);
 
-					  rank = h & this->mod_p.count;
+					  rank = h & num_buckets;
 					  *i2o_it = rank;
 
 					  ++bucket_sizes[rank];
@@ -559,7 +562,7 @@ namespace dsc  // distributed std container
 					  h = this->key_to_hash(*it);
 					  hll.update_via_hashval(h);
 
-					  rank = h % this->mod_p.count;
+					  rank = h % num_buckets;
 					  *i2o_it = rank;
 
 					  ++bucket_sizes[rank];
@@ -578,7 +581,7 @@ namespace dsc  // distributed std container
 //          BL_BENCH_END(permute_est, "permute", input_size);
 
 //          BL_BENCH_START(permute_est);
-          free(bucketIds);
+          ::utils::mem::aligned_free(bucketIds);
 //          BL_BENCH_END(permute_est, "free", input_size);
 
 //          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
@@ -589,10 +592,10 @@ namespace dsc  // distributed std container
 
       /// hash, count and return assignment array and bucket counts.
       /// same as first pass of permute.
-      template <typename IT, typename OT>
+      template <typename IT, typename ASSIGN_TYPE, typename OT>
       void
       assign_count_permute(IT _begin, IT _end,
-    		  transhashmod_val_type const num_buckets,
+    		  ASSIGN_TYPE const num_buckets,
                              std::vector<size_t> & bucket_sizes,
 							 OT output) const {
 
@@ -606,11 +609,19 @@ namespace dsc  // distributed std container
 
 //        BL_BENCH_INIT(permute_est);
 
-        constexpr size_t batch_size = InternalHash::batch_size;
+        using InternalHashMod = 
+            typename ::std::conditional<::std::is_same<uint8_t, ASSIGN_TYPE>::value,
+                ::fsc::hash::TransformedHash<Key, DistHash, DistTrans, mod_byte>,
+                typename ::std::conditional<::std::is_same<uint16_t, ASSIGN_TYPE>::value,
+                ::fsc::hash::TransformedHash<Key, DistHash, DistTrans, mod_short>,
+                ::fsc::hash::TransformedHash<Key, DistHash, DistTrans, mod_int> >::type>::type;
+        InternalHashMod key_to_rank2(DistHash<trans_val_type>(9876543), DistTrans<Key>(), modulus<transhash_val_type, ASSIGN_TYPE>(num_buckets));
+
+        constexpr size_t batch_size = InternalHashMod::batch_size;
 //        		decltype(declval<decltype(declval<KeyToRank>().proc_trans_hash)>().h)::batch_size;
         // do a few cachelines at a time.  probably a good compromise is to do batch_size number of cachelines
         // 64 / sizeof(ASSIGN_TYPE)...
-        constexpr size_t block_size = (64 / sizeof(transhashmod_val_type)) * batch_size;
+        constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) * batch_size;
 
 //        BL_BENCH_START(permute_est);
         // initialize number of elements per bucket
@@ -636,7 +647,7 @@ namespace dsc  // distributed std container
 
 //        BL_BENCH_START(permute_est);
 
-        transhashmod_val_type* bucketIds = ::utils::mem::aligned_alloc<transhashmod_val_type>(input_size);
+        ASSIGN_TYPE* bucketIds = ::utils::mem::aligned_alloc<ASSIGN_TYPE>(input_size);
 //        BL_BENCH_END(permute_est, "alloc", input_size);
 
 
@@ -645,18 +656,18 @@ namespace dsc  // distributed std container
 //        BL_BENCH_START(permute_est);
           // [1st pass]: compute bucket counts and input2bucket assignment.
           // store input2bucket assignment in bucketIds temporarily.
-          transhashmod_val_type* i2o_it = bucketIds;
+          ASSIGN_TYPE* i2o_it = bucketIds;
           IT it = _begin;
           size_t i = 0, rem;
-          transhashmod_val_type rank;
-    	  transhashmod_val_type* i2o_eit;
+          ASSIGN_TYPE rank;
+    	  ASSIGN_TYPE* i2o_eit;
 
           // and compute the hll.
           if (batch_size > 1) {
         	  size_t max = (input_size / block_size) * block_size;
 
 			  for (; i < max; i += block_size, it += block_size) {
-				  this->key_to_rank2(&(*it), block_size, i2o_it);
+				  key_to_rank2(&(*it), block_size, i2o_it);
 
 
 				  for (i2o_eit = i2o_it + block_size; i2o_it != i2o_eit; ++i2o_it) {
@@ -666,7 +677,7 @@ namespace dsc  // distributed std container
 			  // finish remainder.
 			  rem = input_size - i;
 
-			  this->key_to_rank2(&(*it), rem, i2o_it);
+			  key_to_rank2(&(*it), rem, i2o_it);
 
 			  for (i2o_eit = i2o_it + rem; i2o_it != i2o_eit; ++i2o_it) {
 				  ++bucket_sizes[*i2o_it];
@@ -674,7 +685,7 @@ namespace dsc  // distributed std container
 
           } else {
 			  for (; it != _end; ++it, ++i2o_it) {
-				  rank = this->key_to_rank2(*it);
+				  rank = key_to_rank2(*it);
 				  *i2o_it = rank;
 
 				  ++bucket_sizes[rank];
@@ -687,7 +698,7 @@ namespace dsc  // distributed std container
 //          BL_BENCH_END(permute_est, "permiute", input_size);
 
 //          BL_BENCH_START(permute_est);
-          free(bucketIds);
+          ::utils::mem::aligned_free(bucketIds);
 //          BL_BENCH_END(permute_est, "free", input_size);
 
 //          BL_BENCH_REPORT_NAMED(permute_est, "count_permute");
@@ -701,10 +712,7 @@ namespace dsc  // distributed std container
     public:
 
       batched_radixsort_map_base(const mxx::comm& _comm) : Base(_comm),
-          //key_to_rank(_comm.size()),
-		  mod_p(_comm.size()),
-		  key_to_hash(DistHash<trans_val_type>(9876543), DistTrans<Key>(), ::bliss::transform::identity<hash_val_type>()),
-		  key_to_rank2(DistHash<trans_val_type>(9876543), DistTrans<Key>(), mod_p)
+		  key_to_hash(DistHash<trans_val_type>(9876543), DistTrans<Key>(), ::bliss::transform::identity<hash_val_type>())
 		  //hll(ceilLog2(_comm.size()))  // top level hll. no need to ignore bits.
     //	don't bother initializing c.
     {
@@ -934,7 +942,7 @@ namespace dsc  // distributed std container
     if (measure_mode == MEASURE_TRANSFORM)
         __itt_pause();
 #endif
-    	free(buffer);
+    	::utils::mem::aligned_free(buffer);
 
         BL_BENCH_END(insert, "permute_estimate", input.size());
 
@@ -969,7 +977,7 @@ namespace dsc  // distributed std container
   	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert", this->comm);
 
   	      ::khmxx::incremental::ialltoallv_and_modify(input.data(), input.data() + input.size(), send_counts,
-  	                                                  [this](::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
+  	                                                  [this](int rank, ::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
   	                                                     this->c.insert_no_estimate(b, e);
   	                                                  },
   	                                                  this->comm);
@@ -981,7 +989,7 @@ namespace dsc  // distributed std container
           BL_BENCH_COLLECTIVE_START(insert, "a2av_insert", this->comm);
 
           ::khmxx::incremental::ialltoallv_and_modify_batch(input.data(), input.data() + input.size(), send_counts,
-                                                      [this](::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
+                                                      [this](int rank, ::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
                                                          this->c.insert_no_estimate(b, e);
                                                       },
                                                       this->comm);
@@ -994,7 +1002,7 @@ namespace dsc  // distributed std container
   	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_fullbuf", this->comm);
 
   	      ::khmxx::incremental::ialltoallv_and_modify_fullbuffer(input.data(), input.data() + input.size(), send_counts,
-  	                                                  [this](::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
+  	                                                  [this](int rank, ::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
   	                                                     this->c.insert_no_estimate(b, e);
   	                                                  },
   	                                                  this->comm);
@@ -1006,7 +1014,7 @@ namespace dsc  // distributed std container
   	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_2p", this->comm);
 
   	      ::khmxx::incremental::ialltoallv_and_modify_2phase(input.data(), input.data() + input.size(), send_counts,
-  	                                                  [this](::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
+  	                                                  [this](int rank, ::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
   	                                                     this->c.insert_no_estimate(b, e);
   	                                                  },
   	                                                  this->comm);
@@ -1083,7 +1091,7 @@ namespace dsc  // distributed std container
 
 
     BL_BENCH_START(insert);
-    	free(distributed);
+    	::utils::mem::aligned_free(distributed);
         BL_BENCH_END(insert, "clean up", recv_total);
 
 #endif // non overlap
@@ -1270,7 +1278,7 @@ if (measure_mode == MEASURE_RESERVE)
     if (measure_mode == MEASURE_TRANSFORM)
         __itt_pause();
 #endif
-      free(buffer);
+      ::utils::mem::aligned_free(buffer);
 
         BL_BENCH_END(count, "permute", input.size());
 
@@ -1321,7 +1329,7 @@ if (measure_mode == MEASURE_RESERVE)
 
           ::khmxx::incremental::ialltoallv_and_query_one_to_one(
               input.data(), input.data() + input.size(), send_counts,
-                                                      [this, &pred](Key* b, Key* e, count_result_type * out){
+                                                      [this, &pred](int rank, Key* b, Key* e, count_result_type * out){
                                                          this->c.count(b, std::distance(b, e), out);
                                                       },
                             results.data(),
@@ -1354,7 +1362,7 @@ if (measure_mode == MEASURE_RESERVE)
 
       ::khmxx::incremental::ialltoallv_and_query_one_to_one_fullbuffer(
           input.data(), input.data() + input.size(), send_counts,
-                                                  [this, &pred](Key* b, Key* e, count_result_type * out){
+                                                  [this, &pred](int rank, Key* b, Key* e, count_result_type * out){
                                                      this->c.count(b, std::distance(b, e), out);
                                                   },
                         results.data(),
@@ -1388,7 +1396,7 @@ __itt_pause();
 
   ::khmxx::incremental::ialltoallv_and_query_one_to_one_2phase(
       input.data(), input.data() + input.size(), send_counts,
-                                              [this, &pred](Key* b, Key* e, count_result_type * out){
+                                              [this, &pred](int rank, Key* b, Key* e, count_result_type * out){
                                                  this->c.count(b, std::distance(b, e), out);
                                               },
                     results.data(),
@@ -1699,7 +1707,7 @@ if (measure_mode == MEASURE_RESERVE)
     if (measure_mode == MEASURE_TRANSFORM)
         __itt_pause();
 #endif
-    	free(buffer);
+    	::utils::mem::aligned_free(buffer);
 
         BL_BENCH_END(find, "permute", input.size());
 
@@ -1749,7 +1757,7 @@ if (measure_mode == MEASURE_RESERVE)
 
   	      ::khmxx::incremental::ialltoallv_and_query_one_to_one(
   	    		  input.data(), input.data() + input.size(), send_counts,
-  	                                                  [this, &pred, &nonexistent](Key* b, Key* e, mapped_type * out){
+  	                                                  [this, &pred, &nonexistent](int rank, Key* b, Key* e, mapped_type * out){
   	                                                     this->c.find(b, std::distance(b, e), out);
   	                                                  },
 													  results.data(),
@@ -1782,7 +1790,7 @@ if (measure_mode == MEASURE_RESERVE)
 
 	      ::khmxx::incremental::ialltoallv_and_query_one_to_one_fullbuffer(
 	    		  input.data(), input.data() + input.size(), send_counts,
-	                                                  [this, &pred, &nonexistent](Key* b, Key* e, mapped_type * out){
+	                                                  [this, &pred, &nonexistent](int rank, Key* b, Key* e, mapped_type * out){
 	                                                     this->c.find(b, std::distance(b, e), out);
 	                                                  },
 												  results.data(),
@@ -1816,7 +1824,7 @@ if (measure_mode == MEASURE_RESERVE)
 
 	      ::khmxx::incremental::ialltoallv_and_query_one_to_one_2phase(
 	    		  input.data(), input.data() + input.size(), send_counts,
-	                                                  [this, &pred, &nonexistent](Key* b, Key* e, mapped_type * out){
+	                                                  [this, &pred, &nonexistent](int rank, Key* b, Key* e, mapped_type * out){
 	                                                     this->c.find(b, std::distance(b, e), out);
 	                                                  },
 												  results.data(),
@@ -2029,9 +2037,9 @@ if (measure_mode == MEASURE_A2A)
 #endif
 
 #ifdef ENABLE_LZ4_COMM
-  ::khmxx::lz4::distribute(keys, this->key_to_rank2, recv_counts, buffer, this->comm);
+  ::khmxx::lz4::distribute(keys, key_to_rank2, recv_counts, buffer, this->comm);
 #else
-  ::khmxx::distribute(keys, this->key_to_rank2, recv_counts, buffer, this->comm);
+  ::khmxx::distribute(keys, key_to_rank2, recv_counts, buffer, this->comm);
 #endif
   keys.swap(buffer);
       //            ::dsc::distribute_unique(keys, this->key_to_rank, sorted_input, this->comm,
@@ -2291,7 +2299,7 @@ if (measure_mode == MEASURE_A2A)
     if (measure_mode == MEASURE_TRANSFORM)
         __itt_pause();
 #endif
-    	free(buffer);
+    	::utils::mem::aligned_free(buffer);
 
         BL_BENCH_END(erase, "permute", input.size());
 
@@ -2323,7 +2331,7 @@ if (measure_mode == MEASURE_A2A)
 
   	      ::khmxx::incremental::ialltoallv_and_modify(
   	    		  input.data(), input.data() + input.size(), send_counts,
-  	                                                  [this, &pred](Key* b, Key* e){
+  	                                                  [this, &pred](int rank, Key* b, Key* e){
   	                                                     this->c.erase(b, ::std::distance(b, e));
   	                                                  },
   	                                                  this->comm);
@@ -2337,7 +2345,7 @@ if (measure_mode == MEASURE_A2A)
 
           ::khmxx::incremental::ialltoallv_and_modify_batch(
               input.data(), input.data() + input.size(), send_counts,
-                                                      [this, &pred](Key* b, Key* e){
+                                                      [this, &pred](int rank, Key* b, Key* e){
                                                          this->c.erase(b, ::std::distance(b, e));
                                                       },
                                                       this->comm);
@@ -2352,7 +2360,7 @@ if (measure_mode == MEASURE_A2A)
 
   	      	      ::khmxx::incremental::ialltoallv_and_modify_fullbuffer(
   	      	    		  input.data(), input.data() + input.size(), send_counts,
-  	      	                                                  [this, &pred](Key* b, Key* e){
+  	      	                                                  [this, &pred](int rank, Key* b, Key* e){
   	      	                                                     this->c.erase(b, ::std::distance(b, e));
   	      	                                                  },
   	      	                                                  this->comm);
@@ -2366,7 +2374,7 @@ if (measure_mode == MEASURE_A2A)
 
   	    	      ::khmxx::incremental::ialltoallv_and_modify_2phase(
   	    	    		  input.data(), input.data() + input.size(), send_counts,
-  	    	                                                  [this, &pred](Key* b, Key* e){
+  	    	                                                  [this, &pred](int rank, Key* b, Key* e){
   	    	                                                     this->c.erase(b, ::std::distance(b, e));
   	    	                                                  },
   	    	                                                  this->comm);
@@ -2730,7 +2738,7 @@ if (measure_mode == MEASURE_INSERT)
       BL_BENCH_END(insert, "insert", this->c.size());
 
     BL_BENCH_REPORT_MPI_NAMED(insert, "hashmap:insert_1", this->comm);
-    if (estimate) free(hvals);
+    if (estimate) ::utils::mem::aligned_free(hvals);
 
     return this->c.size() - before;
   }
@@ -2883,7 +2891,7 @@ if (measure_mode == MEASURE_A2A)
 	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert", this->comm);
 
 	      ::khmxx::incremental::ialltoallv_and_modify(input.data(), input.data() + input.size(), send_counts,
-	                                                  [this](Key* b, Key* e){
+	                                                  [this](int rank, Key* b, Key* e){
 	                                                     this->c.insert(b, std::distance(b, e));
 	                                                  },
 	                                                  this->comm);
@@ -2894,7 +2902,7 @@ if (measure_mode == MEASURE_A2A)
         BL_BENCH_COLLECTIVE_START(insert, "a2av_insert", this->comm);
 
         ::khmxx::incremental::ialltoallv_and_modify_batch(input.data(), input.data() + input.size(), send_counts,
-                                                    [this](Key* b, Key* e){
+                                                    [this](int rank, Key* b, Key* e){
                                                        this->c.insert(b, std::distance(b, e));
                                                     },
                                                     this->comm);
@@ -2906,7 +2914,7 @@ if (measure_mode == MEASURE_A2A)
 	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_fullbuf", this->comm);
 
 	      ::khmxx::incremental::ialltoallv_and_modify_fullbuffer(input.data(), input.data() + input.size(), send_counts,
-	                                                  [this](Key* b, Key* e){
+	                                                  [this](int rank, Key* b, Key* e){
 	                                                     this->c.insert(b, std::distance(b, e));
 	                                                  },
 	                                                  this->comm);
@@ -2918,7 +2926,7 @@ if (measure_mode == MEASURE_A2A)
 	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_2p", this->comm);
 
 	      ::khmxx::incremental::ialltoallv_and_modify_2phase(input.data(), input.data() + input.size(), send_counts,
-	                                                  [this](Key* b, Key* e){
+	                                                  [this](int rank, Key* b, Key* e){
 	                                                     this->c.insert(b, std::distance(b, e));
 	                                                  },
 	                                                  this->comm);
@@ -3023,8 +3031,8 @@ BL_BENCH_END(insert, "insert", this->c.size());
 
 
 BL_BENCH_START(insert);
-if (estimate) free(hvals);
-	free(distributed);
+if (estimate) ::utils::mem::aligned_free(hvals);
+	::utils::mem::aligned_free(distributed);
     BL_BENCH_END(insert, "clean up", recv_total);
 
 #endif // non overlap

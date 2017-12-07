@@ -73,7 +73,7 @@ struct sim_work2 {
     sim_work2(size_t const & c = 20) : cycles(c) {}
 
     template <typename T>
-    void operator()(T const * start, T const * end) {
+    void operator()(int rank, T const * start, T const * end) {
       for (T const * it = start; it != end; ++it) {
         T x = *it;
         for (size_t i = 0; i < cycles; ++i) {
