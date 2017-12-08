@@ -1236,11 +1236,12 @@ namespace hsc  // distributed std container
             if (tcnt > 1) {  // merge if more than 1 thread.
                 int mask = 0;
                 for (int i = 1; i < tcnt; i <<= 1) {
-                    mask = (mask << 1) & 1; 
+                    mask = (mask << 1) | 1; 
                     if (((tid & mask) == 0) &  // select only power of 2 to merge into.
                         ((tid ^ i) < tcnt)) {  // flip the bit to get the current peer.
                             this->hlls[tid].merge(this->hlls[tid ^ i]);
                         }
+                        #pragma omp barrier
                 }
             }
 
@@ -1453,10 +1454,10 @@ namespace hsc  // distributed std container
 
 
             // further divide by number of threads.
-            est = (est + tcnt - 1) / tcnt;
-            if (est > (this->c[tid].get_max_load_factor() * this->c[tid].capacity()))
+            size_t lest = (est + tcnt - 1) / tcnt;
+            if (lest > (this->c[tid].get_max_load_factor() * this->c[tid].capacity()))
             // add 10% just to be safe.
-                this->c[tid].reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hlls[tid].est_error_rate + 0.1)));
+                this->c[tid].reserve(static_cast<size_t>(static_cast<double>(lest) * (1.0 + this->hlls[tid].est_error_rate + 0.1)));
         }
         BL_BENCH_END(modify, "alloc_hashtable", est);
     }  // allocation threads.
