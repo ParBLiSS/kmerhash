@@ -15,10 +15,10 @@
  */
 
 /**
- * @file    distributed_batched_robinhood_map.hpp
+ * @file    hybrid_batched_robinhood_map.hpp
  * @ingroup index
  * @author  Tony Pan <tpan7@gatech.edu>
- * @brief   Implements the distributed_multimap, distributed map, and distributed_reduction_map
+ * @brief   Implements the hybrid_multimap, hybrid map, and hybrid_reduction_map
  *          data structures.
  *
  *          implementation is hash-base (O(1) lookup). later will support sort-based (load balanced).
@@ -81,7 +81,7 @@
 
 #include "omp.h"
 
-namespace hsc  // distributed std container
+namespace hsc  // hybrid std container
 {
 
 
@@ -91,19 +91,19 @@ namespace hsc  // distributed std container
 
 
   /**
-   * @brief  distributed robinhood map following std robinhood map's interface.
-   * @details   This class is modeled after the hashmap_batched_robinhood_doubling_offsets.
-   *         it has as much of the same methods of hashmap_batched_robinhood_doubling_offsets as possible.  however, all methods consider the fact
+   * @brief  hybrid robinhood map following some of std unordered map's interface.
+   * @details
+   *         it has as much of the same methods of distributed_batched_robinhood_map as possible.  however, all methods consider the fact
    *         that the data are in distributed memory space, so to access the data, "communication" is needed.  Also since we
    *         are working with 'distributed' data, batched operations are preferred.
    *
    *         Note that "communication" is a weak concept here meaning that we are accessing a different local container.
    *         as such, communicator may be defined for MPI, UPC, OpenMP, etc.
    *
-   *         This allows the possibility of using distributed robinhood map as local storage for coarser grain distributed container.
+   *         This allows the possibility of using hybrid robinhood map as local storage for coarser grain distributed container.
    *
    *         Note that communicator requires a mapping strategy between a key and the target processor/thread/partition.  The mapping
-   *         may be done using a hash, similar to the local distributed robinhood map, or it may be done via sorting/lookup or other mapping
+   *         may be done using a hash, similar to the local hybrid robinhood map, or it may be done via sorting/lookup or other mapping
    *         mechanisms.  The choice may be constrained by the communication approach, e.g. global sorting  does not work well with
    *         incremental async communication
    *
@@ -963,7 +963,7 @@ namespace hsc  // distributed std container
 
 
   /**
-   * @brief insert new elements in the distributed batched_robinhood_multimap.
+   * @brief insert new elements in the hybrid batched_robinhood_multimap.
    * @param input  vector.  will be permuted.
    */
   template <bool estimate, typename V, typename OP, typename Predicate = ::bliss::filter::TruePredicate>
@@ -1564,7 +1564,7 @@ namespace hsc  // distributed std container
 
     public:
       /**
-       * @brief insert new elements in the distributed batched_robinhood_multimap.
+       * @brief insert new elements in the hybrid batched_robinhood_multimap.
        * @param input  vector.  will be permuted.
        */
       template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>
@@ -1593,7 +1593,7 @@ namespace hsc  // distributed std container
 
 
       /**
-       * @brief query new elements in the distributed batched_robinhood_multimap.
+       * @brief query new elements in the hybrid batched_robinhood_multimap.
        * @param input  vector.  will be permuted.
        */
       template <typename V, typename OP>
@@ -1762,7 +1762,7 @@ namespace hsc  // distributed std container
 
 
       /**
-       * @brief query new elements in the distributed batched_robinhood_multimap.
+       * @brief query new elements in the hybrid batched_robinhood_multimap.
        * @param input  vector.  will be permuted.
        */
       template <typename V, typename OP>
@@ -2135,7 +2135,7 @@ namespace hsc  // distributed std container
 
 #if 0  // TODO: temporarily retired.
       /**
-       * @brief find elements with the specified keys in the distributed batched_robinhood_multimap.
+       * @brief find elements with the specified keys in the hybrid batched_robinhood_multimap.
        * @param keys  content will be changed and reordered
        * @param last
        */
@@ -2324,7 +2324,7 @@ namespace hsc  // distributed std container
 
 
       /**
-       * @brief erase elements with the specified keys in the distributed batched_robinhood_multimap.
+       * @brief erase elements with the specified keys in the hybrid batched_robinhood_multimap.
        * @param first
        * @param last
        */
@@ -2353,7 +2353,7 @@ namespace hsc  // distributed std container
 
 
   /**
-   * @brief  distributed robinhood map following std robinhood map's interface.
+   * @brief  hybrid robinhood map following std robinhood map's interface.
    * @details   This class is modeled after the hashmap_batched_robinhood_doubling_offsets.
    *         it has as much of the same methods of hashmap_batched_robinhood_doubling_offsets as possible.  however, all methods consider the fact
    *         that the data are in distributed memory space, so to access the data, "communication" is needed.
@@ -2361,10 +2361,10 @@ namespace hsc  // distributed std container
    *         Note that "communication" is a weak concept here meaning that we are accessing a different local container.
    *         as such, communicator may be defined for MPI, UPC, OpenMP, etc.
    *
-   *         This allows the possibility of using distributed robinhood map as local storage for coarser grain distributed container.
+   *         This allows the possibility of using hybrid robinhood map as local storage for coarser grain distributed container.
    *
    *         Note that communicator requires a mapping strategy between a key and the target processor/thread/partition.  The mapping
-   *         may be done using a hash, similar to the local distributed robinhood map, or it may be done via sorting/lookup or other mapping
+   *         may be done using a hash, similar to the local hybrid robinhood map, or it may be done via sorting/lookup or other mapping
    *         mechanisms.  The choice may be constrained by the communication approach, e.g. global sorting  does not work well with
    *         incremental async communication
    *
@@ -2384,7 +2384,7 @@ namespace hsc  // distributed std container
 
 
   /**
-   * @brief  distributed robinhood reduction map following std robinhood map's interface.  Insertion applies the binary reduction operator between the existing and inserted element (in that order).
+   * @brief  hybrid robinhood reduction map following std robinhood map's interface.  Insertion applies the binary reduction operator between the existing and inserted element (in that order).
    * @details   This class is modeled after the hashmap_batched_robinhood_doubling_offsets, but allows a binary reduction operator to be used during insertion.
    *
    *         the reduction operator is not assumed to be associative.  The operator is called with parameters existing element, then new element to insert.
@@ -2395,10 +2395,10 @@ namespace hsc  // distributed std container
    *         Note that "communication" is a weak concept here meaning that we are accessing a different local container.
    *         as such, communicator may be defined for MPI, UPC, OpenMP, etc.
    *
-   *         This allows the possibility of using distributed robinhood map as local storage for coarser grain distributed container.
+   *         This allows the possibility of using hybrid robinhood map as local storage for coarser grain distributed container.
    *
    *         Note that communicator requires a mapping strategy between a key and the target processor/thread/partition.  The mapping
-   *         may be done using a hash, similar to the local distributed robinhood map, or it may be done via sorting/lookup or other mapping
+   *         may be done using a hash, similar to the local hybrid robinhood map, or it may be done via sorting/lookup or other mapping
    *         mechanisms.  The choice may be constrained by the communication approach, e.g. global sorting  does not work well with
    *         incremental async communication
    *
@@ -2422,7 +2422,7 @@ namespace hsc  // distributed std container
 
 
   /**
-   * @brief  distributed robinhood counting map following std robinhood map's interface.  Insertion applies the binary reduction operator between the existing and inserted element (in that order).
+   * @brief  hybrid robinhood counting map following std robinhood map's interface.  Insertion applies the binary reduction operator between the existing and inserted element (in that order).
    * @details   This class is modeled after the hashmap_batched_robinhood_doubling_offsets, but allows a binary reduction operator to be used during insertion.
    *
    *         the reduction operator is not assumed to be associative.  The operator is called with parameters existing element, then new element to insert.
@@ -2433,10 +2433,10 @@ namespace hsc  // distributed std container
    *         Note that "communication" is a weak concept here meaning that we are accessing a different local container.
    *         as such, communicator may be defined for MPI, UPC, OpenMP, etc.
    *
-   *         This allows the possibility of using distributed robinhood map as local storage for coarser grain distributed container.
+   *         This allows the possibility of using hybrid robinhood map as local storage for coarser grain hybrid container.
    *
    *         Note that communicator requires a mapping strategy between a key and the target processor/thread/partition.  The mapping
-   *         may be done using a hash, similar to the local distributed robinhood map, or it may be done via sorting/lookup or other mapping
+   *         may be done using a hash, similar to the local hybrid robinhood map, or it may be done via sorting/lookup or other mapping
    *         mechanisms.  The choice may be constrained by the communication approach, e.g. global sorting  does not work well with
    *         incremental async communication
    *
@@ -2501,7 +2501,7 @@ protected:
 public:
 
       /**
-       * @brief insert new elements in the distributed batched_robinhood_multimap.
+       * @brief insert new elements in the hybrid batched_robinhood_multimap.
        * @param input  vector.  will be permuted.
        */
       template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>

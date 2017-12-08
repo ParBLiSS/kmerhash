@@ -157,7 +157,7 @@ namespace dsc  // distributed std container
     	using trans_val_type = decltype(::std::declval<DistTrans<Key>>()(::std::declval<Key>()));
     	using hash_val_type = decltype(::std::declval<DistHash<Key>>()(::std::declval<trans_val_type>()));
 
-    	DistHash<trans_val_type> hash;
+//    	DistHash<trans_val_type> hash;
 
   	template <typename IN, typename OUT>
   	struct modulus {
@@ -225,7 +225,7 @@ namespace dsc  // distributed std container
       using size_type             = typename local_container_type::size_type;
       using difference_type       = typename local_container_type::difference_type;
 
-      // TODO: should get from the local_container_type...
+      // TODO: should get from the local_container_type...  radixsort does not have a single element count function yet.
       using count_result_type     = uint8_t;
 
     protected:
@@ -964,10 +964,11 @@ namespace dsc  // distributed std container
   	  	  	  BL_BENCH_END(insert, "a2a_count", recv_counts.size());
 
   	        BL_BENCH_COLLECTIVE_START(insert, "alloc_hashtable", this->comm);
-  	        if (this->comm.rank() == 0) std::cout << "local estimated size " << this->hll.estimate() << std::endl;
   			size_t est = this->hll.estimate_average_per_rank(this->comm);
-  	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate)));
-  	        if (this->comm.rank() == 0) std::cout << " estimated size " << est << std::endl;
+  			if (est > this->c.capacity()) // no max load factor...
+  				// add 10% just to be safe.
+  	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
+  	        if (this->comm.rank() == 0) std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
   	        BL_BENCH_END(insert, "alloc_hashtable", est);
 
   	        size_t before = this->c.size();
@@ -1011,7 +1012,7 @@ namespace dsc  // distributed std container
 
 #elif defined(OVERLAPPED_COMM_2P)
 
-  	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_2p", this->comm);
+  	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_2pass", this->comm);
 
   	      ::khmxx::incremental::ialltoallv_and_modify_2phase(input.data(), input.data() + input.size(), send_counts,
   	                                                  [this](int rank, ::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
@@ -1019,7 +1020,7 @@ namespace dsc  // distributed std container
   	                                                  },
   	                                                  this->comm);
 
-  	      BL_BENCH_END(insert, "a2av_insert_2p", this->c.size());
+  	      BL_BENCH_END(insert, "a2av_insert_2pass", this->c.size());
 
 
 #else
@@ -2367,10 +2368,10 @@ if (measure_mode == MEASURE_A2A)
 
   	      	      BL_BENCH_END(erase, "a2av_erase_fullbuf", this->c.size());
 
-#elif defined(OVERLAPPED_COMM_2p)
+#elif defined(OVERLAPPED_COMM_2P)
 
 
-  	    	      BL_BENCH_COLLECTIVE_START(erase, "a2av_erase_2p", this->comm);
+  	      BL_BENCH_COLLECTIVE_START(erase, "a2av_erase_2phase", this->comm);
 
   	    	      ::khmxx::incremental::ialltoallv_and_modify_2phase(
   	    	    		  input.data(), input.data() + input.size(), send_counts,
@@ -2379,7 +2380,7 @@ if (measure_mode == MEASURE_A2A)
   	    	                                                  },
   	    	                                                  this->comm);
 
-  	    	      BL_BENCH_END(erase, "a2av_erase_2p", this->c.size());
+  	      BL_BENCH_END(erase, "a2av_erase_2phase", this->c.size());
 
 
 
@@ -2666,7 +2667,7 @@ protected:
     // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
     BL_BENCH_INIT(insert);
 
-    if (input.size() == 0) {
+    if (::dsc::empty(input, this->comm)) {
       BL_BENCH_REPORT_MPI_NAMED(insert, "hashmap:insert", this->comm);
       return 0;
     }
@@ -2923,7 +2924,7 @@ if (measure_mode == MEASURE_A2A)
 
 #elif defined(OVERLAPPED_COMM_2P)
 
-	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_2p", this->comm);
+	      BL_BENCH_COLLECTIVE_START(insert, "a2av_insert_2phase", this->comm);
 
 	      ::khmxx::incremental::ialltoallv_and_modify_2phase(input.data(), input.data() + input.size(), send_counts,
 	                                                  [this](int rank, Key* b, Key* e){
@@ -2931,7 +2932,8 @@ if (measure_mode == MEASURE_A2A)
 	                                                  },
 	                                                  this->comm);
 
-	      BL_BENCH_END(insert, "a2av_insert_2p", this->c.size());
+	      BL_BENCH_END(insert, "a2av_insert_2phase", this->c.size());
+
 
 
 #else

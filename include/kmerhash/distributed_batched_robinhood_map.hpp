@@ -1037,7 +1037,7 @@ namespace dsc  // distributed std container
   			if (est > (this->c.get_max_load_factor() * this->c.capacity()))
   				// add 10% just to be safe.
   	        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
-  	        //std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
+  	        if (this->comm.rank() == 0) std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
   	        BL_BENCH_END(insert, "alloc_hashtable", est);
   	  	  	  }
 #endif
@@ -1177,245 +1177,6 @@ namespace dsc  // distributed std container
 
         return this->c.size() - before;
       }
-
-
-//
-//      /**
-//       * @brief insert new elements in the distributed batched_robinhood_multimap.
-//       * @param input  vector.  will be permuted.
-//       */
-//      template <typename Predicate = ::bliss::filter::TruePredicate>
-//      size_t insert_p_overlapped(std::vector<::std::pair<Key, T> >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
-//        // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
-//        BL_BENCH_INIT(insert);
-//
-//        if (::dsc::empty(input, this->comm)) {
-//          BL_BENCH_REPORT_MPI_NAMED(insert, "hashmap:insert", this->comm);
-//          return 0;
-//        }
-//
-//        // curr:exact est per rank,so need permuted hash.
-//
-//        // alloc buffer
-//        // transform buffer
-//        // hash, count, est, permute -> hll, i2o, count.  input linear read, i2o linear r/w, rand r/w hll, count
-//        //   permute with input, i2o, count.  linear read input, i2o.  rand access count and out
-//        // free buffer
-//        // reduce/a2a count and hll - linear
-//        // estimate total and received each
-//        // alloc buffer = max(input, recv)
-//        // a2a
-//        // insert.  linear read
-//
-//
-//            BL_BENCH_COLLECTIVE_START(insert, "alloc", this->comm);
-//          // get mapping to proc
-//          // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
-////          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
-////          BLISS_UNUSED(recv_counts);
-//#ifdef VTUNE_ANALYSIS
-//  if (measure_mode == MEASURE_RESERVE)
-//      __itt_resume();
-//#endif
-//
-//            ::std::pair<Key, T>* permuted = nullptr;
-//            int ret = posix_memalign(reinterpret_cast<void **>(&permuted), 64, input.size() * sizeof(::std::pair<Key, T>));
-//            if (ret) {
-//              ::utils::mem::aligned_free(permuted);
-//              throw std::length_error("failed to allocate aligned memory");
-//            }
-//
-//#ifdef VTUNE_ANALYSIS
-//  if (measure_mode == MEASURE_RESERVE)
-//      __itt_pause();
-//#endif
-//  	  	  	  BL_BENCH_END(insert, "alloc", input.size());
-//
-//
-//	  	// transform first.
-//	          BL_BENCH_COLLECTIVE_START(insert, "transform_input", this->comm);
-//	  #ifdef VTUNE_ANALYSIS
-//	    if (measure_mode == MEASURE_TRANSFORM)
-//	        __itt_resume();
-//	  #endif
-//	          this->transform_input(input);
-//	  #ifdef VTUNE_ANALYSIS
-//	    if (measure_mode == MEASURE_TRANSFORM)
-//	        __itt_pause();
-//	  #endif
-//	          BL_BENCH_END(insert, "transform_input", input.size());
-//
-//
-//	  	// estimate and reserve
-//        BL_BENCH_COLLECTIVE_START(insert, "estimate_and_alloc", this->comm);
-//
-//		// compute hash value array, and estimate the number of unique entries in current.  then merge with current and get the after count.
-//		//std::vector<size_t> hash_vals;
-//		//hash_vals.reserve(input.size());
-//		size_t* hash_vals = nullptr;
-//		ret = posix_memalign(reinterpret_cast<void **>(&hash_vals), 64, sizeof(size_t) * input.size());
-//		if (ret) {
-//			::utils::mem::aligned_free(hash_vals);
-//			throw std::length_error("failed to allocate aligned memory");
-//		}
-//
-//		// compute hash val array
-//		for (size_t i = 0; i < input.size(); ++i) {
-//			hash_vals[i] = this->key_to_rank.proc_trans_hash( input[i].first );
-//		}
-//    BL_BENCH_END(insert, "hash", input.size());
-//
-//
-//
-//
-//
-//        // bucket
-//#ifdef VTUNE_ANALYSIS
-//if (measure_mode == MEASURE_BUCKET)
-//    __itt_resume();
-//#endif
-//    size_t* permuted_hash = nullptr;
-//    std::vector<size_t> send_counts;
-//    size_t comm_size = this->comm.size();
-//    size_t est = 0;
-//
-////    if (this->empty()) {
-////      BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
-////      // empty. can compute avg estimate, and then during insert update the estimate.
-////      if (comm_size <= std::numeric_limits<uint8_t>::max()) {
-////        ::khmxx::local::hashed_permute(input.begin(), input.end(), hash_vals, static_cast<uint8_t>(comm_size),
-////                                           send_counts, permuted);
-////      } else if (comm_size <= std::numeric_limits<uint16_t>::max()) {
-////        ::khmxx::local::hashed_permute(input.begin(), input.end(), hash_vals, static_cast<uint16_t>(comm_size),
-////                                           send_counts, permuted);
-////      } else if (comm_size <= std::numeric_limits<uint32_t>::max()) {
-////        ::khmxx::local::hashed_permute(input.begin(), input.end(), hash_vals, static_cast<uint32_t>(comm_size),
-////                                           send_counts, permuted);
-////      } else {
-////        ::khmxx::local::hashed_permute(input.begin(), input.end(), hash_vals, static_cast<uint64_t>(comm_size),
-////                                           send_counts, permuted);
-////      }
-////
-////      BL_BENCH_END(insert, "permute", input.size());
-////
-////      BL_BENCH_COLLECTIVE_START(insert, "estimate", this->comm);
-////      auto lhll = this->hll.make_empty_copy();
-////
-////      est = lhll.estimate_average_per_rank_by_hashval(hash_vals, hash_vals + input.size(), send_counts, this->comm);
-////      BL_BENCH_END(insert, "estimate", est);
-////
-////      BL_BENCH_COLLECTIVE_START(insert, "alloc", this->comm);
-//    //      ::utils::mem::aligned_free(hash_vals);
-////      this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + lhll.est_error_rate)));
-////      // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
-////      BL_BENCH_END(insert, "alloc", this->c.capacity());
-////
-////    } else {
-//      // not empty, so need to permute hash too, and perform exact estimate.
-//      BL_BENCH_COLLECTIVE_START(insert, "permute", this->comm);
-//
-//        ret = posix_memalign(reinterpret_cast<void **>(&permuted_hash), 64, sizeof(size_t) * input.size());
-//        if (ret) {
-//          ::utils::mem::aligned_free(permuted_hash);
-//          throw std::length_error("failed to allocate aligned memory");
-//        }
-//
-//
-//            if (comm_size <= std::numeric_limits<uint8_t>::max()) {
-//              ::khmxx::local::hashed_permute(input.begin(), input.end(), hash_vals, static_cast<uint8_t>(comm_size),
-//                                                 send_counts, permuted, permuted_hash);
-//            } else if (comm_size <= std::numeric_limits<uint16_t>::max()) {
-//              ::khmxx::local::hashed_permute(input.begin(), input.end(), hash_vals, static_cast<uint16_t>(comm_size),
-//                                                 send_counts, permuted, permuted_hash);
-//            } else if (comm_size <= std::numeric_limits<uint32_t>::max()) {
-//              ::khmxx::local::hashed_permute(input.begin(), input.end(), hash_vals, static_cast<uint32_t>(comm_size),
-//                                                 send_counts, permuted, permuted_hash);
-//            } else {
-//              ::khmxx::local::hashed_permute(input.begin(), input.end(), hash_vals, static_cast<uint64_t>(comm_size),
-//                                                 send_counts, permuted, permuted_hash);
-//            }
-//
-//       ::utils::mem::aligned_free(hash_vals);
-//       BL_BENCH_END(insert, "permute", input.size());
-//
-//       BL_BENCH_COLLECTIVE_START(insert, "estimate", this->comm);
-//          // distributed update, merge with existing, since this is accurate.
-//       this->hll.update_per_rank_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
-//          // merge with existing
-//       est = this->hll.estimate();
-//       BL_BENCH_END(insert, "estimate", est);
-//
-//
-//       BL_BENCH_COLLECTIVE_START(insert, "alloc", this->comm);
-//       ::utils::mem::aligned_free(permuted_hash);
-//
-//        this->c.reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate)));
-//        // this updates the bucket counts also.  overestimate by 10 percent just to be sure.
-//        BL_BENCH_END(insert, "alloc", this->c.capacity());
-//
-////    }
-//#ifdef VTUNE_ANALYSIS
-//if (measure_mode == MEASURE_BUCKET)
-//    __itt_pause();
-//#endif
-//
-//
-//
-//
-//
-//	      {
-//// TESTING ONLY.
-////	        auto lhll = this->hll.make_empty_copy();
-//	//        std::cout << " ignored msb " << static_cast<size_t>(lhll.get_ignored_msb());
-//
-////          SOME EVAL CODE.  local estimate is over.  Experimental version overestimates too.
-//	        // average is pretty good.  exact is needed when there is already data in table.
-////	        // compute average
-////	        BL_BENCH_COLLECTIVE_START(insert, "estimate_avg", this->comm);
-////	        est = lhll.estimate_average_per_rank_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
-////	//        std::cout << ", avg est = " << est << std::flush;
-////	        BL_BENCH_END(insert, "estimate_avg", est);
-////
-////	        // TODO: [X] hash_vals need to be permuted....
-////	        // compute exact
-////	        BL_BENCH_COLLECTIVE_START(insert, "estimate_per_rank", this->comm);
-////	        est = lhll.estimate_per_rank_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
-////	//        std::cout << ", per_rank est = " << est << std::flush;
-////	        BL_BENCH_END(insert, "estimate_per_rank", est);
-////
-////	        // TODO: [X] hash_vals need to be permuted....
-////	        // experimental
-////	        BL_BENCH_COLLECTIVE_START(insert, "estimate_experimental", this->comm);
-////	        est = lhll.estimate_per_rank_experimental_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
-////	//        std::cout << ", per_rank experimental est = " << est << std::flush;
-////	        BL_BENCH_END(insert, "estimate_experimental", est);
-////
-////	        // compute locally
-////	        BL_BENCH_COLLECTIVE_START(insert, "estimate_local", this->comm);
-////	        est = lhll.estimate_local_by_hashval(permuted_hash, permuted_hash + input.size(), send_counts, this->comm);
-////	//        std::cout << ", local est = " << est << std::flush;
-////	        BL_BENCH_END(insert, "estimate_local", est);
-//
-//	      }
-//
-//
-//        size_t before = this->c.size();
-//
-//        BL_BENCH_COLLECTIVE_START(insert, "a2av_insert", this->comm);
-//
-//        ::khmxx::incremental::ialltoallv_and_modify(input.data(), input.data() + input.size(), send_counts,
-//                                                    [this](int rank, ::std::pair<Key, T>* b, ::std::pair<Key, T>* e){
-//                                                       this->c.insert_no_estimate(b, e);
-//                                                    },
-//                                                    this->comm);
-//
-//        BL_BENCH_END(insert, "a2av_insert", this->c.size());
-//
-//        BL_BENCH_REPORT_MPI_NAMED(insert, "hashmap:insert_p", this->comm);
-//
-//        return this->c.size() - before;
-//      }
-
 
     public:
       /**
@@ -1737,7 +1498,7 @@ if (measure_mode == MEASURE_RESERVE)
 
 
 
-  	  	  	  BL_BENCH_COLLECTIVE_START(count, "a2a", this->comm);
+              BL_BENCH_COLLECTIVE_START(count, "a2av", this->comm);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_A2A)
       __itt_resume();
@@ -1835,157 +1596,6 @@ if (measure_mode == MEASURE_A2A)
         return results;
       }
 
-
-//      /**
-//       * @brief count elements with the specified keys in the distributed batched_robinhood_multimap.
-//       * @param first
-//       * @param last
-//       */
-//      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
-//      ::std::vector<::std::pair<Key, size_type> > count(::std::vector<Key>& keys, bool sorted_input = false,
-//                                                        Predicate const& pred = Predicate() ) const {
-//          BL_BENCH_INIT(count);
-//          ::std::vector<::std::pair<Key, size_type> > results;
-//
-//          if (::dsc::empty(keys, this->comm)) {
-//            BL_BENCH_REPORT_MPI_NAMED(count, "base_batched_robinhood_map:count", this->comm);
-//            return results;
-//          }
-////
-////          if (this->empty()) {
-////            BL_BENCH_REPORT_MPI_NAMED(count, "base_batched_robinhood_map:count", this->comm);
-////            return results;
-////          }
-//
-//          BL_BENCH_COLLECTIVE_START(count, "transform_input", this->comm);
-//          ::fsc::back_emplace_iterator<::std::vector<::std::pair<Key, size_type> > > emplace_iter(results);
-//          // even if count is 0, still need to participate in mpi calls.  if (keys.size() == 0) return results;
-//#ifdef VTUNE_ANALYSIS
-//    if (measure_mode == MEASURE_TRANSFORM)
-//        __itt_resume();
-//#endif
-//          this->transform_input(keys);
-//#ifdef VTUNE_ANALYSIS
-//    if (measure_mode == MEASURE_TRANSFORM)
-//        __itt_pause();
-//#endif
-//          BL_BENCH_END(count, "transform_input", keys.size());
-//
-//
-//          BL_BENCH_COLLECTIVE_START(count, "unique", this->comm);
-//#ifdef VTUNE_ANALYSIS
-//  if (measure_mode == MEASURE_UNIQUE)
-//      __itt_resume();
-//#endif
-//            if (remove_duplicate)
-//            	::fsc::unique(keys, sorted_input,
-//                    typename Base::StoreTransformedFunc(),
-//                    typename Base::StoreTransformedEqual());
-//#ifdef VTUNE_ANALYSIS
-//  if (measure_mode == MEASURE_UNIQUE)
-//      __itt_pause();
-//#endif
-//            BL_BENCH_END(count, "unique", keys.size());
-//
-//#ifdef VTUNE_ANALYSIS
-//  if (measure_mode == MEASURE_RESERVE)
-//      __itt_resume();
-//#endif
-//              std::vector<size_t> recv_counts;
-//#ifdef VTUNE_ANALYSIS
-//  if (measure_mode == MEASURE_RESERVE)
-//      __itt_pause();
-//#endif
-//
-//          if (this->comm.size() > 1) {
-//
-//              BL_BENCH_COLLECTIVE_START(count, "dist_query", this->comm);
-//              // distribute (communication part)
-//
-//              {
-//#ifdef VTUNE_ANALYSIS
-//  if (measure_mode == MEASURE_RESERVE)
-//      __itt_resume();
-//#endif
-//                std::vector<Key > buffer;
-//#ifdef VTUNE_ANALYSIS
-//  if (measure_mode == MEASURE_RESERVE)
-//      __itt_pause();
-//#endif
-//
-//
-//
-//
-//#ifdef ENABLE_LZ4_COMM
-//  	  	  	  ::khmxx::lz4::distribute(keys, this->key_to_rank, recv_counts, buffer, this->comm);
-//#else
-//              ::khmxx::distribute_2part(keys, this->key_to_rank, recv_counts, buffer, this->comm);
-//#endif
-//                keys.swap(buffer);
-//	  //            ::dsc::distribute_unique(keys, this->key_to_rank, sorted_input, this->comm,
-//	  //            				typename Base::StoreTransformedFunc(),
-//	  //            				typename Base::StoreTransformedEqual()).swap(recv_counts);
-//              }
-//              BL_BENCH_END(count, "dist_query", keys.size());
-//          }
-//
-//            // local count. memory utilization a potential problem.
-//            // do for each src proc one at a time.
-//          BL_BENCH_COLLECTIVE_START(count, "reserve", this->comm);
-//#ifdef VTUNE_ANALYSIS
-//  if (measure_mode == MEASURE_RESERVE)
-//      __itt_resume();
-//#endif
-//            results.reserve(keys.size() );                   // TODO:  should estimate coverage.
-//#ifdef VTUNE_ANALYSIS
-//  if (measure_mode == MEASURE_RESERVE)
-//      __itt_pause();
-//#endif
-//            BL_BENCH_END(count, "reserve", results.capacity());
-//
-//            BL_BENCH_COLLECTIVE_START(count, "local_count", this->comm);
-//            {
-//#ifdef VTUNE_ANALYSIS
-//    if (measure_mode == MEASURE_COUNT)
-//        __itt_resume();
-//#endif
-//            	this->c.count(emplace_iter, keys.begin(), keys.end(), pred, pred);
-//#ifdef VTUNE_ANALYSIS
-//    if (measure_mode == MEASURE_COUNT)
-//        __itt_pause();
-//#endif
-//            }
-//            BL_BENCH_END(count, "local_count", results.size());
-//
-//            if (this->comm.size() > 1) {
-//
-//            // send back using the constructed recv count
-//            BL_BENCH_COLLECTIVE_START(count, "a2a2", this->comm);
-//#ifdef VTUNE_ANALYSIS
-//    if (measure_mode == MEASURE_A2A)
-//        __itt_resume();
-//#endif
-//
-//#ifdef ENABLE_LZ4_COMM
-//    auto temp = mxx::all2allv(results, recv_counts, this->comm);
-//    results.swap(temp);
-//#else
-//    khmxx::undistribute_2part(results, recv_counts, this->comm, false);
-//
-//#endif
-//#ifdef VTUNE_ANALYSIS
-//    if (measure_mode == MEASURE_A2A)
-//        __itt_pause();
-//#endif
-//            BL_BENCH_END(count, "a2a2", results.size());
-//          }
-//
-//
-//          BL_BENCH_REPORT_MPI_NAMED(count, "base_hashmap:count", this->comm);
-//
-//          return results;
-//
-//      }
 
     public:
       template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
@@ -2286,7 +1896,7 @@ if (measure_mode == MEASURE_RESERVE)
 	  	  	  BL_BENCH_END(find, "alloc out", input.size());
 
 
-	      BL_BENCH_COLLECTIVE_START(find, "a2av_find", this->comm);
+	      BL_BENCH_COLLECTIVE_START(find, "a2av_find_2p", this->comm);
 
 	      ::khmxx::incremental::ialltoallv_and_query_one_to_one_2phase(
 	    		  input.data(), input.data() + input.size(), send_counts,
@@ -2296,7 +1906,7 @@ if (measure_mode == MEASURE_RESERVE)
 												  results.data(),
 	                                                  this->comm);
 
-	      BL_BENCH_END(find, "a2av_find", this->c.size());
+	      BL_BENCH_END(find, "a2av_find_2p", this->c.size());
 
 
 #else
@@ -2828,7 +2438,7 @@ if (measure_mode == MEASURE_A2A)
 #elif defined(OVERLAPPED_COMM_FULLBUFFER)
 
 
-  	      BL_BENCH_COLLECTIVE_START(erase, "a2av_erase_fullbuff", this->comm);
+  	      	      BL_BENCH_COLLECTIVE_START(erase, "a2av_erase_fullbuf", this->comm);
 
   	      ::khmxx::incremental::ialltoallv_and_modify_fullbuffer(
   	    		  input.data(), input.data() + input.size(), send_counts,
@@ -3233,8 +2843,8 @@ if (measure_mode == MEASURE_TRANSFORM)
         // allocate an HLL
         // allocate the bucket sizes array
     std::vector<size_t> send_counts(comm_size, 0);
+    
 #if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_BATCH) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
-
     if (estimate) {
 	  if (comm_size <= std::numeric_limits<uint8_t>::max())
 		  this->assign_count_estimate_permute(buffer, buffer + input.size(), static_cast<uint8_t>(comm_size), send_counts,
@@ -3453,6 +3063,18 @@ public:
       }
 
   };
+
+
+
+
+
+
+
+} /* namespace dsc */
+
+
+#endif // DISTRIBUTED_BATCHED_ROBINHOOD_MAP_HPP
+
 
 //
 //  /**
@@ -3760,7 +3382,7 @@ public:
 //
 //  }
 
-  //
+//
 //      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
 //      ::std::vector<::std::pair<Key, T> > find(::std::vector<Key>& keys, bool sorted_input = false,
 //                                               Predicate const& pred = Predicate()) const {
@@ -3950,10 +3572,3 @@ public:
 //        return local_unique_count;
 //      }
 //  };
-
-
-
-} /* namespace dsc */
-
-
-#endif // DISTRIBUTED_BATCHED_ROBINHOOD_MAP_HPP
