@@ -1119,7 +1119,7 @@ namespace hsc  // distributed std container
         
 
         compute(tid, it, et, estimate);
-        printf("rank %d of %d, thread %d of %d before %ld after count %ld\n", 0, 1, tid, tcnt, before, this->c[tid].size());
+        //printf("rank %d of %d, thread %d of %d before %ld after count %ld\n", 0, 1, tid, tcnt, before, this->c[tid].size());
 
         cnt = static_cast<int64_t>(this->c[tid].size()) - static_cast<int64_t>(before);
     } // end parallel section
@@ -1169,6 +1169,8 @@ namespace hsc  // distributed std container
 
     BL_BENCH_END(modify, "alloc", nthreads_global);
 
+
+    if (comm_rank == 0) printf("estimating ? %s\n", (estimate ? "y" : "n"));
 
     BL_BENCH_COLLECTIVE_START(modify, "permute_estimate", this->comm);
     
@@ -1260,7 +1262,7 @@ namespace hsc  // distributed std container
         // do some calc with thread_bucket_sizes to get offsets for each bucket for each thread in node-wide permuted input array.
         thread_bucket_offsets[tid].resize(nthreads_global);
         
-        // make sure all threads have reached here
+        // make sure all threads have reached hererehashing
         #pragma omp barrier
 
         // exclusive scan of everyhing.  proceed in 3 step
@@ -1536,7 +1538,7 @@ namespace hsc  // distributed std container
 
         after = this->c[tid].size();
 
-        printf("rank %d of %d, thread %d of %d before %ld after count %ld\n", comm_rank, comm_size, tid, tcnt, before, after);
+        //printf("rank %d of %d, thread %d of %d before %ld after count %ld\n", comm_rank, comm_size, tid, tcnt, before, after);
 
         if (tcnt > 1) {
             ::utils::mem::aligned_free(shuffled);
