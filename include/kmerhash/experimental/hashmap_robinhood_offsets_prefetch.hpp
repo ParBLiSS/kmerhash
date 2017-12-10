@@ -471,23 +471,23 @@ public:
 
 	void swap(hashmap_robinhood_doubling_offsets && other) {
 		std::swap(hll, std::move(other.hll));
-		std::swap(lsize, std::move(other.lsize));
-    	std::swap(buckets, std::move(other.buckets));
-    	std::swap(mask, std::move(other.mask));
-		std::swap(min_load, std::move(other.min_load));
-		std::swap(max_load, std::move(other.max_load));
-		std::swap(min_load_factor, std::move(other.min_load_factor));
-		std::swap(max_load_factor, std::move(other.max_load_factor));
+		std::swap(lsize, other.lsize);
+    	std::swap(buckets, other.buckets);
+    	std::swap(mask, other.mask);
+		std::swap(min_load, other.min_load);
+		std::swap(max_load, other.max_load);
+		std::swap(min_load_factor, other.min_load_factor);
+		std::swap(max_load_factor, other.max_load_factor);
 #if defined(REPROBE_STAT)
     // some stats.
-    std::swap(upsize_count, std::move(other.upsize_count));
-    std::swap(downsize_count, std::move(other.downsize_count));
-    std::swap(reprobes, std::move(other.reprobes));
-    std::swap(max_reprobes, std::move(other.max_reprobes));
-    std::swap(moves, std::move(other.moves));
-    std::swap(max_moves, std::move(other.max_moves));
-    std::swap(shifts, std::move(other.shifts));
-    std::swap(max_shifts, std::move(other.max_shifts));
+    std::swap(upsize_count, other.upsize_count);
+    std::swap(downsize_count, other.downsize_count);
+    std::swap(reprobes, other.reprobes);
+    std::swap(max_reprobes, other.max_reprobes);
+    std::swap(moves, other.moves);
+    std::swap(max_moves, other.max_moves);
+    std::swap(shifts, other.shifts);
+    std::swap(max_shifts, other.max_shifts);
 #endif
     std::swap(filter, std::move(other.filter));
     std::swap(hash, std::move(other.hash));

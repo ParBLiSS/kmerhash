@@ -1552,7 +1552,7 @@ public:
 
 protected:
   ::fsc::hash::sse::Murmur64AVX<T> hasher;
-  mutable uint64_t temp[batch_size] __attribute__ ((aligned (32)));
+//   mutable uint64_t temp[batch_size] __attribute__ ((aligned (32)));
 
 public:
     using result_type = uint64_t;

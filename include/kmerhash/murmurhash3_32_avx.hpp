@@ -1261,7 +1261,9 @@ public:
     using result_type = uint32_t;
   using argument_type = T;
 
-  murmur3avx32(uint32_t const & _seed = 43U) : hasher(_seed) {};
+  murmur3avx32(uint32_t const & _seed = 43U) : hasher(_seed) {
+    memset(temp, 0, batch_size * sizeof(uint32_t));
+  };
 
   inline uint32_t operator()(const T &key) const
   {

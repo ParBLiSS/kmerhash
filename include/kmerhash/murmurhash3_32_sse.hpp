@@ -1474,7 +1474,9 @@ public:
   using result_type = uint32_t;
   using argument_type = T;
 
-  murmur3sse32(uint32_t const &_seed = 43) : hasher(_seed){};
+  murmur3sse32(uint32_t const &_seed = 43) : hasher(_seed) {
+    memset(temp, 0, batch_size * sizeof(uint32_t));
+  };
 
   inline uint32_t operator()(const T &key) const
   {

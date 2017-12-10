@@ -577,28 +577,28 @@ public:
 	}
 
 	void swap(hashmap_robinhood_offsets_reduction && other) {
-		std::swap(INSERT_LOOKAHEAD, std::move(other.INSERT_LOOKAHEAD));
-		std::swap(QUERY_LOOKAHEAD, std::move(other.QUERY_LOOKAHEAD));
-		std::swap(INSERT_LOOKAHEAD_MASK, std::move(other.INSERT_LOOKAHEAD_MASK));
-		std::swap(QUERY_LOOKAHEAD_MASK, std::move(other.QUERY_LOOKAHEAD_MASK));
+		std::swap(INSERT_LOOKAHEAD, other.INSERT_LOOKAHEAD);
+		std::swap(QUERY_LOOKAHEAD, other.QUERY_LOOKAHEAD);
+		std::swap(INSERT_LOOKAHEAD_MASK, other.INSERT_LOOKAHEAD_MASK);
+		std::swap(QUERY_LOOKAHEAD_MASK, other.QUERY_LOOKAHEAD_MASK);
 		std::swap(hll, std::move(other.hll));
-		std::swap(lsize, std::move(other.lsize));
-		std::swap(buckets, std::move(other.buckets));
-		std::swap(mask, std::move(other.mask));
-		std::swap(min_load, std::move(other.min_load));
-		std::swap(max_load, std::move(other.max_load));
-		std::swap(min_load_factor, std::move(other.min_load_factor));
-		std::swap(max_load_factor, std::move(other.max_load_factor));
+		std::swap(lsize, other.lsize);
+		std::swap(buckets, other.buckets);
+		std::swap(mask, other.mask);
+		std::swap(min_load, other.min_load);
+		std::swap(max_load, other.max_load);
+		std::swap(min_load_factor, other.min_load_factor);
+		std::swap(max_load_factor, other.max_load_factor);
 #if defined(REPROBE_STAT)
 		// some stats.
-		std::swap(upsize_count, std::move(other.upsize_count));
-		std::swap(downsize_count, std::move(other.downsize_count));
-		std::swap(reprobes, std::move(other.reprobes));
-		std::swap(max_reprobes, std::move(other.max_reprobes));
-		std::swap(moves, std::move(other.moves));
-		std::swap(max_moves, std::move(other.max_moves));
-		std::swap(shifts, std::move(other.shifts));
-		std::swap(max_shifts, std::move(other.max_shifts));
+		std::swap(upsize_count, other.upsize_count);
+		std::swap(downsize_count, other.downsize_count);
+		std::swap(reprobes, other.reprobes);
+		std::swap(max_reprobes, other.max_reprobes);
+		std::swap(moves, other.moves);
+		std::swap(max_moves, other.max_moves);
+		std::swap(shifts, other.shifts);
+		std::swap(max_shifts, other.max_shifts);
 #endif
 		std::swap(filter, std::move(other.filter));
 		std::swap(hash, std::move(other.hash));
@@ -1657,7 +1657,7 @@ protected:
 #endif
 		if (input_size == 0) return 0;
 
-		bucket_id_type id, bid1, bid;
+		bucket_id_type bid1, bid;
 
 		size_t ii;
 
@@ -1681,9 +1681,9 @@ protected:
 
 		for (ii = 0; ii < max_prefetch; ++ii) {
 
-			id = *(hashes + ii) & mask;
+			bid = *(hashes + ii) & mask;
 			// prefetch the info_container entry for ii.
-			KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + id), _MM_HINT_T0);
+			KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + bid), _MM_HINT_T0);
 
 			//			KH_PREFETCH(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(info_container.data() + id) & cache_align_mask), _MM_HINT_T0);
 			//			KH_PREFETCH(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(info_container.data() + id + 1) & cache_align_mask), _MM_HINT_T0);
@@ -1691,7 +1691,7 @@ protected:
 			//			  KH_PREFETCH((const char *)(info_container.data() + id + 1), _MM_HINT_T1);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			KH_PREFETCH((const char *)(container + id), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
 
 		}
 

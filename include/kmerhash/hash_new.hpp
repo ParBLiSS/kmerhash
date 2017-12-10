@@ -676,7 +676,9 @@ public:
                   PRETRANS_T const &pre_trans = PRETRANS_T(),
                   POSTTRANS_T const &post_trans = POSTTRANS_T()) : //batch_size(lcm(lcm(pretrans_batch_size, hash_batch_size), postrans_batch_size)),
                                                                    trans(pre_trans),
-                                                                   h(_hash), posttrans(post_trans){};
+                                                                   h(_hash), posttrans(post_trans){
+                                                                     memset(hash_buf, 0, batch_size*sizeof(HASH_VAL_TYPE));
+                                                                   };
 
   ~TransformedHash()
   {
