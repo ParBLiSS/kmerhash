@@ -488,7 +488,7 @@ namespace dsc  // distributed std container
 
 
           bool is_pow2 = (num_buckets & (num_buckets - 1)) == 0;
-
+        
 //        BL_BENCH_START(permute_est);
 
         ASSIGN_TYPE* bucketIds = ::utils::mem::aligned_alloc<ASSIGN_TYPE>(input_size);
@@ -513,6 +513,8 @@ namespace dsc  // distributed std container
         	  size_t max = (input_size / block_size) * block_size;
 
         	  if (is_pow2) {
+                  ASSIGN_TYPE bucket_mask = num_buckets - 1;
+
 				  for (; i < max; i += block_size, it += block_size) {
 					  this->key_to_hash(&(*it), block_size, hashvals);
 
@@ -526,7 +528,7 @@ namespace dsc  // distributed std container
 					  for (j = 0; j < block_size; ++j) {
 						  hll.update_via_hashval(hashvals[j]);
 
-						  rank = hashvals[j] & num_buckets; // really (p-1)
+						  rank = hashvals[j] & bucket_mask; // really (p-1)
 						  *i2o_it = rank;
 						  ++i2o_it;
 
@@ -541,7 +543,7 @@ namespace dsc  // distributed std container
 				  for (j = 0; j < rem; ++j) {
 					  hll.update_via_hashval(hashvals[j]);
 
-					  rank = hashvals[j] & num_buckets;  // really (p-1)
+					  rank = hashvals[j] & bucket_mask;  // really (p-1)
 					  *i2o_it = rank;
 					  ++i2o_it;
 
@@ -582,11 +584,12 @@ namespace dsc  // distributed std container
         	  transhash_val_type h;
 
         	  if (is_pow2) {
+                  ASSIGN_TYPE bucket_mask = num_buckets - 1;
 				  for (; it != _end; ++it, ++i2o_it) {
 					  h = this->key_to_hash(*it);
 					  hll.update_via_hashval(h);
 
-					  rank = h & num_buckets;
+					  rank = h & bucket_mask;
 					  *i2o_it = rank;
 
 					  ++bucket_sizes[rank];
