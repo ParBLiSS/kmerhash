@@ -236,12 +236,20 @@ if (BUILD_BENCHMARKS)
 	endforeach(map)
 
 	# no overlap
-	add_dist_hashmap_target(testKmerIndex TROBINHOOD MURMUR64avx MURMUR64avx KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
-	add_dist_hashmap_target(testKmerIndex TROBINHOOD MURMUR64avx CRC32C KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(testKmerIndex MTROBINHOOD MURMUR64avx MURMUR64avx KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(testKmerIndex MTROBINHOOD MURMUR64avx CRC32C KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
 	
 	#overlap comm 1 rank-pair at a time.
-	add_dist_hashmap_target(overlap-KmerIndex TROBINHOOD MURMUR64avx MURMUR64avx OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
-	add_dist_hashmap_target(overlap-KmerIndex TROBINHOOD MURMUR64avx CRC32C OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(overlap-KmerIndex MTROBINHOOD MURMUR64avx MURMUR64avx OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(overlap-KmerIndex MTROBINHOOD MURMUR64avx CRC32C OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
+
+	# no overlap
+	add_dist_hashmap_target(testKmerIndex MTRADIXSORT MURMUR64avx MURMUR64avx KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(testKmerIndex MTRADIXSORT MURMUR64avx CRC32C KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
+	
+	#overlap comm 1 rank-pair at a time.
+	add_dist_hashmap_target(overlap-KmerIndex MTRADIXSORT MURMUR64avx MURMUR64avx OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(overlap-KmerIndex MTRADIXSORT MURMUR64avx CRC32C OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
 
 
 	foreach(map BROBINHOOD RADIXSORT) #  // just Batched Robinhood should get the point across.
@@ -297,7 +305,7 @@ endif(ENABLE_VTUNE_PROFILING)
 
 
 # kmer counter builds for shmem benchmark
-foreach(map BROBINHOOD RADIXSORT)
+foreach(map BROBINHOOD RADIXSORT MTROBINHOOD MTRADIXSORT)
 	foreach(hash MURMUR32avx MURMUR64avx) # MURMUR CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
 		add_dist_counter_target(testKmerCounter FASTA 31 ${map} ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
 		add_dist_counter_target(testKmerCounter FASTA 31 ${map} ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
