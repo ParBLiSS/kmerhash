@@ -45,18 +45,193 @@ public:
         int32_t bucketId;
     } HashElement;
 
-    struct HashElementTransform {
-    	::std::pair<const Key, V> operator()(HashElement const & x) const {
-    		return std::make_pair(x.key, x.val);
-    	}
+    template <typename KV>
+    class IndexedRangesIterator :
+        public std::iterator<
+            std::random_access_iterator_tag,
+            KV, std::ptrdiff_t>
+    {
+        protected:
+            using Distance = std::ptrdiff_t;
+
+            HashElement const * table;
+            uint16_t const * counts;
+
+            int32_t numBins;
+            int32_t binSize;
+
+            int32_t binId;
+            int32_t idx;
+
+        public:
+
+            // contructor.  construct end iterator.
+            IndexedRangesIterator(HashElement const * _table, uint16_t const * _counts,
+                int32_t num_bins, int32_t bin_size, int32_t bin_id = 0, uint16_t _idx = 0) :
+                table(_table), counts(_counts), numBins(num_bins), binSize(bin_size), binId(bin_id), idx(static_cast<int32_t>(_idx)) {}
+
+            IndexedRangesIterator(IndexedRangesIterator const & other) : 
+                IndexedRangesIterator(other.table, other.counts, other.numBins, other.binSize, other.binId, other.idx) {}
+            IndexedRangesIterator(IndexedRangesIterator && other) : 
+                IndexedRangesIterator(other.table, other.counts, other.numBins, other.binSize, other.binId, other.idx) {}
+            // assignement operators
+            IndexedRangesIterator& operator=(IndexedRangesIterator const & other) {
+                table = other.table;
+                counts = other.counts;
+                numBins = other.numBins;
+                binSize = other.binSize;
+                binId = other.binId;
+                idx = other.idx;
+            }
+            IndexedRangesIterator& operator=(IndexedRangesIterator && other) {
+                table = other.table;
+                counts = other.counts;
+                numBins = other.numBins;
+                binSize = other.binSize;
+                binId = other.binId;
+                idx = other.idx;
+            }
+
+            virtual ~IndexedRangesIterator() {}
+
+            // increment and decrement operators
+            IndexedRangesIterator& operator++() {
+                if (binId >= numBins) return *this;
+                // should always be dereferenceable, before incremented.
+                ++idx;
+                while (idx == counts[binId]) {
+                    ++binId;
+                    if (binId >= numBins) return *this;
+                    idx = 0;
+                }
+                return *this;
+            }
+
+            IndexedRangesIterator operator++(int) const {
+                IndexedRangesIterator it = *this;
+                it.operator++();
+                return it;
+            }
+            IndexedRangesIterator& operator--() {
+                if (binId < 0) return *this;
+                --idx;
+                while (idx < 0) {
+                    --binId;
+                    if (binId < 0) return *this;
+                    idx = counts[binId] - 1;
+                }
+                return *this;
+            }
+
+            IndexedRangesIterator operator--(int) const {
+                IndexedRangesIterator it = *this;
+                it.operator--();
+                return it;
+            }
+
+            IndexedRangesIterator& operator+=(Distance const & n) {
+                if (n < 0) return this->operator-=(n);
+
+                int32_t dist;
+                Distance nn = n;
+                while (nn > 0) {
+                    if (binId >= numBins) return *this;
+
+                    dist = std::min(nn, static_cast<Distance>(counts[binId] - idx));
+                    nn -= dist;
+                    idx += dist;
+                    if (idx == counts[binId]) {
+                        ++binId;
+                        idx = 0;
+                    }
+                }
+            }
+
+            IndexedRangesIterator operator+(Distance const & n) const {
+                IndexedRangesIterator it = *this;
+                it += n;
+                return it;
+            }
+
+            IndexedRangesIterator& operator-=(Distance const & n) {
+                if (n < 0) return this->operator+=(n);
+
+                int32_t dist;
+                Distance nn = n;
+                while (nn > 0) {
+                    if (binId < 0) return *this;
+
+                    dist = std::min(nn, static_cast<Distance>(idx + 1));
+                    nn -= dist;
+                    idx -= dist;
+                    if (idx < 0) {
+                        --binId;
+                        idx = counts[binId] - 1;
+                    }
+                }
+            }
+
+            IndexedRangesIterator operator-(Distance const & n) const {
+                IndexedRangesIterator it = *this;
+                it -= n;
+                return it;
+            }
+
+            Distance operator-(IndexedRangesIterator const & other) const {
+                if (binId == other.binId) return idx - other.idx;
+                else if (binId > other.binId) return other.operator-(*this);
+                else { // binId < other.binId
+                    Distance dist = other.idx;
+                    int32_t j = idx;
+                    for (int32_t i = binId; i < other.binId; ++i) {
+                        dist += counts[binId] - j;
+                        j = 0;
+                    }
+                    return -dist;
+                }
+            }
+
+            // comparison operators
+            bool operator==(IndexedRangesIterator const & other) const {
+                return (binId == other.binId) && (idx == other.idx);
+            }
+            bool operator!=(IndexedRangesIterator const & other) const {
+                return (binId != other.binId) || (idx != other.idx);
+            }
+
+            bool operator<(IndexedRangesIterator const & other) const {
+                return (binId == other.binId) ? (idx < other.idx) : (binId < other.binId);
+            }
+            bool operator>(IndexedRangesIterator const & other) const {
+                return (binId == other.binId) ? (idx > other.idx) : (binId > other.binId);
+            }
+            bool operator>=(IndexedRangesIterator const & other) const {
+                return !(binId < other.binId);
+            }
+            bool operator<=(IndexedRangesIterator const & other) const {
+                return !(binId > other.binId);
+            }
+
+            // dereference operator
+            KV operator[](Distance const & i) const {
+                IndexedRangesIterator it(table, counts, 0, 0);
+                return *(it + i);
+            }
+
+            KV operator*() const {
+                HashElement const* it = table + binId * binSize + idx;
+                return std::make_pair((*it).key, (*it).val);
+            }
+        
+            friend IndexedRangesIterator operator+(std::ptrdiff_t n, IndexedRangesIterator const & right)
+            {
+                // reduced to + operator
+                return right + n;
+            }
     };
-    struct HashElementConstTransform {
-    	const ::std::pair<const Key, V> operator()(HashElement const & x) const {
-    		return std::make_pair(x.key, x.val);
-    	}
-    };
-	using iterator              = ::bliss::iterator::transform_iterator<HashElement*, HashElementTransform>;
-	using const_iterator        = ::bliss::iterator::transform_iterator<HashElement const *, HashElementConstTransform>;
+
+	using iterator              = IndexedRangesIterator<value_type>;
+	using const_iterator        = IndexedRangesIterator<const value_type>;
 
 
 #define COHERENT 0
@@ -91,29 +266,11 @@ public:
 
 	template <typename S>
 	struct modulus2 {
-//#if defined(__AVX2__)
-//		static constexpr size_t batch_size = (sizeof(S) == 4 ? 8 : 4);
-//#elif defined(__SSE2__)
-//		static constexpr size_t batch_size = (sizeof(S) == 4 ? 4 : 2);
-//#else
-		static constexpr size_t batch_size = (sizeof(S) == 4 ? 8 : 4);
-//#endif
+		static constexpr size_t batch_size = 1;
 
-//#if defined(__AVX2__)
-//		__m256i vmask;
-//#elif defined(__SSE2__)
-//		__m128i vmask;
-//#endif
 		S mask;
 
-		modulus2(S const & _mask) :
-//#if defined(__AVX2__)
-//				vmask(sizeof(S) == 4 ?  _mm256_set1_epi32(_mask) : _mm256_set1_epi64x(_mask)),
-//#elif defined(__SSE2__)
-//				vmask(sizeof(S) == 4 ?  _mm_set1_epi32(_mask) : _mm_set1_epi64x(_mask)),
-//#endif
-						mask(_mask)
-				{}
+		modulus2(S const & _mask) :	mask(_mask) {}
 
 		template <typename IN>
 		inline IN operator()(IN const & x) const { return (x & mask); }
@@ -123,41 +280,6 @@ public:
 			// TODO: [ ] do SSE version here
 			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
 		}
-
-//#if defined(__AVX2__)
-//		// when input nad output are the same types
-//		template <typename IN>
-//		inline void operator()(IN const * x, size_t const & _count, IN * y) const {
-//			// 32 bytes at a time.  input should be
-//			int i = 0;
-//			int imax;
-//
-//			__m256i xx;
-//			for (i = 0, imax = _count - batch_size; i < imax; i += batch_size)  {
-//				xx = _mm256_and_si256(*(reinterpret_cast<__m256i const *>(x + i)), vmask);
-//				_mm256_storeu_si256(reinterpret_cast<__m256i *>(y + i), xx);
-//			}
-//			for (imax = _count; i < imax; ++i)
-//				y[i] = x[i] & mask;
-//		}
-//#elif defined(__SSE2__)
-//		// when input nad output are the same types
-//		template <typename IN>
-//		inline void operator()(IN const * x, size_t const & _count, IN * y) const {
-//			// 32 bytes at a time.  input should be
-//			int i = 0;
-//			int imax;
-//
-//			__m128i xx;
-//			for (i = 0, imax = _count - batch_size; i < imax; i += batch_size)  {
-//				xx = _mm_and_si128(*(reinterpret_cast<__m128i const *>(x + i)), vmask);
-//				_mm_storeu_si128(reinterpret_cast<__m128i *>(y + i), xx);
-//			}
-//			for (imax = _count; i < imax; ++i)
-//				y[i] = x[i] & mask;
-//		}
-//
-//#endif
 	};
 
 	// mod 2 okay since hashtable size is always power of 2.
@@ -465,24 +587,13 @@ public:
 	void set_novalue(V _noValue) const { noValue = _noValue; }
 
 	const_iterator cbegin() const {
-		std::cerr << "WARNING: NOT FILTERING OUT EMPTY ENTRIES" << std::endl;
-		return const_iterator(hashTable, HashElementConstTransform());
+		return const_iterator(hashTable, countArray, numBins, binSize, 0, 0);
 	}
 
 	const_iterator cend() const {
-		std::cerr << "WARNING: NOT FILTERING OUT EMPTY ENTRIES" << std::endl;
-		return const_iterator(hashTable + numBins * binSize, HashElementConstTransform());
+		return const_iterator(hashTable, countArray, numBins, binSize, numBins, 0);
 	}
 
-	::std::vector<::std::pair<Key, V> > to_vector() const {
-		std::cerr << "WARNING: NOT IMPLEMENTED" << std::endl;
-		return ::std::vector<::std::pair<Key, V> >();
-	}
-
-	::std::vector<Key> keys() const {
-		std::cerr << "WARNING: NOT IMPLEMENTED" << std::endl;
-		return ::std::vector<Key>();
-	}
 
 	void reserve(uint32_t _newElementCount) {
 		resize(next_power_of_2(_newElementCount));
@@ -903,6 +1014,26 @@ public:
       }
 
       return inserted;
+    }
+
+
+    int32_t estimate_and_insert(Key *keyArray, int32_t numKeys) {
+
+      // local hash computation and hll update.
+        hash_val_type* hvals = ::utils::mem::aligned_alloc<hash_val_type>(numKeys + PFD);  // 64 byte alignment.
+        this->hll.update(keyArray, numKeys, hvals);
+
+        size_t est = this->hll.estimate();
+    
+        if (est > this->capacity())
+          // add 10% just to be safe.
+          this->reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
+
+        int32_t inserted = insert(keyArray, hvals, numKeys);
+
+        ::utils::mem::aligned_free(hvals);
+
+        return inserted;
     }
 
      // return number of successful inserts.
@@ -1490,12 +1621,20 @@ public:
 
 	::std::pair<Key, V> *getData(int32_t *resultCount) const
 	{
-        if((coherence != COHERENT))
-        {
-//            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
-            return NULL;
-        }
-		::std::pair<Key, V> *result = (::std::pair<Key, V> *)_mm_malloc(totalKeyCount * sizeof(::std::pair<Key, V>), 64);
+// 		if(coherence == INSERT)
+// 		{
+// //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+// 			finalize_insert();
+// 		} else if (coherence == ERASE) {
+// //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+// 		  finalize_erase();
+// 		}
+        if(coherence != COHERENT)
+		{
+			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+			throw std::logic_error("size() called on incoherent hash table");
+		}
+        ::std::pair<Key, V> *result = (::std::pair<Key, V> *)_mm_malloc(totalKeyCount * sizeof(::std::pair<Key, V>), 64);
 
 	    int32_t i, j;
 		int32_t elemCount = 0;
@@ -1525,12 +1664,19 @@ public:
     /// Fill data into an array.  array should be preallocated to be big enough.
 	int32_t getData(::std::pair<Key, V> *result) const
 	{
-        if((coherence != COHERENT))
-        {
-//            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
-            return 0;
-        }
-
+// 		if(coherence == INSERT)
+// 		{
+// //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+// 			finalize_insert();
+// 		} else if (coherence == ERASE) {
+// //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+// 		  finalize_erase();
+// 		}
+        if(coherence != COHERENT)
+		{
+			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+			throw std::logic_error("size() called on incoherent hash table");
+		}
 	    int32_t i, j;
 		int32_t elemCount = 0;
 		for(i = 0; i < numBins; i++)
@@ -1555,15 +1701,86 @@ public:
 		return elemCount;
 	}
 
+
+	::std::vector<::std::pair<Key, V> > to_vector() const {
+// 		if(coherence == INSERT)
+// 		{
+// //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+// 			finalize_insert();
+// 		} else if (coherence == ERASE) {
+// //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+// 		  finalize_erase();
+// 		}
+        if(coherence != COHERENT)
+		{
+			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+			throw std::logic_error("size() called on incoherent hash table");
+		}
+
+        ::std::vector<::std::pair<Key, V> > result(totalKeyCount);
+        getData(result.data());
+		return result;
+	}
+
+	::std::vector<Key> keys() const {
+// 		if(coherence == INSERT)
+// 		{
+// //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+// 			finalize_insert();
+// 		} else if (coherence == ERASE) {
+// //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+// 		  finalize_erase();
+// 		}
+        if(coherence != COHERENT)
+		{
+			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+			throw std::logic_error("size() called on incoherent hash table");
+		}
+
+        ::std::vector< Key > result(totalKeyCount);
+
+	    int32_t i, j;
+		int32_t elemCount = 0;
+		for(i = 0; i < numBins; i++)
+		{
+			int count = countArray[i];
+			int y = std::min(count, binSize - 1);
+			for(j = 0; j < y; j++)
+			{
+				HashElement he = hashTable[i * binSize + j];
+				result[elemCount] = he.key;
+				elemCount++;
+			}
+            int32_t overflowBufId;
+            overflowBufId = hashTable[i * binSize + binSize - 1].bucketId;
+            for(; j < count; j++)
+            {
+                HashElement he = overflowBuf[overflowBufId * binSize + j - (binSize - 1)];
+				result[elemCount] = he.key;
+				elemCount++;
+            }
+		}
+		return result;
+	}
+
+
     /// serialize to unsigned char array.  return byte count written.
     template <typename SERIALIZER>
 	size_t serialize(unsigned char *result, SERIALIZER const & ser) const
 	{
-        if((coherence != COHERENT))
-        {
-//            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
-            return 0;
-        }
+// 		if(coherence == INSERT)
+// 		{
+// //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+// 			finalize_insert();
+// 		} else if (coherence == ERASE) {
+// //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+// 		  finalize_erase();
+// 		}
+        if(coherence != COHERENT)
+		{
+			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+			throw std::logic_error("size() called on incoherent hash table");
+		}
 
 	    int32_t i, j;
         unsigned char * it = result;
