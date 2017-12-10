@@ -158,6 +158,11 @@ int main(int argc, char** argv) {
   int comm_size = comm.size();
   int comm_rank = comm.rank();
 
+  if (comm_size <= 1) {
+	std::cout << "ERROR: this benchmark is meant to be run with more than 1 MPI processes." << std::endl;
+	return 1;
+	}
+
   comm.barrier();
   mxx::datatype dt = mxx::get_datatype<size_t>();
   BL_BENCH_END(bm, "mpi_init", comm_size);

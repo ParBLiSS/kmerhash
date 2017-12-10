@@ -342,13 +342,13 @@ endforeach(hash)
 # EXECUTABLES
 include_directories("${EXT_PROJECTS_DIR}/martinus/src")
 include_directories("${EXT_PROJECTS_DIR}/martinus/src/3rdparty/google")
-add_executable(benchmark_hashtables_martinus martinus_test_robinhood.cpp)
-SET_TARGET_PROPERTIES(benchmark_hashtables_martinus
+add_executable(martinus_benchmark_hashtables martinus_test_robinhood.cpp)
+SET_TARGET_PROPERTIES(martinus_benchmark_hashtables
 	PROPERTIES COMPILE_FLAGS "-DENABLE_PREFETCH")
-target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
-#cotire(benchmark_hashtables_martinus)
+target_link_libraries(martinus_benchmark_hashtables ${EXTRA_LIBS})
+#cotire(martinus_benchmark_hashtables)
 
-add_dependencies(serial_benchmarks benchmark_hashtables_martinus)
+add_dependencies(serial_benchmarks martinus_benchmark_hashtables)
 
 
 
