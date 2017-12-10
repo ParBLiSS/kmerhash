@@ -86,6 +86,7 @@ static int measure_mode = MEASURE_DISABLED;
 #include "kmerhash/distributed_batched_radixsort_map.hpp"
 
 #include "kmerhash/experimental/hybrid_batched_robinhood_map.hpp"
+#include "kmerhash/experimental/hybrid_batched_radixsort_map.hpp"
 
 
 #include "index/kmer_index.hpp"
@@ -134,7 +135,8 @@ static int measure_mode = MEASURE_DISABLED;
 #define ROBINHOOD 48
 #define BROBINHOOD 49
 #define RADIXSORT 50
-#define TROBINHOOD 52
+#define MTROBINHOOD 51
+#define MTRADIXSORT 52
 
 #define SINGLE 61
 #define CANONICAL 62
@@ -381,8 +383,11 @@ using CountType = uint32_t;
     #elif (pMAP == BROBINHOOD)
       using MapType = ::dsc::counting_batched_robinhood_map<
           KmerType, ValType, MapParams>;
-    #elif (pMAP == TROBINHOOD)  // hybrid version
+    #elif (pMAP == MTROBINHOOD)  // hybrid version
       using MapType = ::hsc::counting_batched_robinhood_map<
+          KmerType, ValType, MapParams>;
+    #elif (pMAP == MTRADIXSORT)  // hybrid version
+      using MapType = ::hsc::counting_batched_radixsort_map<
           KmerType, ValType, MapParams>;
 	#elif (pMAP == RADIXSORT)
       using MapType = ::dsc::counting_batched_radixsort_map<

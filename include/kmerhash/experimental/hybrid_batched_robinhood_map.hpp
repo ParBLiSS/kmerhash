@@ -769,7 +769,10 @@ namespace hsc  // hybrid std container
 
       /// returns the local storage.  please use sparingly.
       local_container_type& get_local_container(int tid) { return c[tid]; }
+      local_container_type const & get_local_container(int tid) const { return c[tid]; }
+
       std::vector<local_container_type>& get_local_containers() { return c; }
+      std::vector<local_container_type> const & get_local_containers() const { return c; }
 
       // ================ local overrides
 
@@ -866,6 +869,12 @@ namespace hsc  // hybrid std container
       }
 
 
+      virtual double get_max_load_factor() {
+        return this->c[0].get_max_load_factor();
+      }
+      virtual double get_min_load_factor() {
+        return this->c[0].get_min_load_factor();
+      }
 
       virtual void set_max_load_factor(double const & max_load) {
         for (int i = 0; i < omp_get_max_threads(); ++i)
@@ -1435,7 +1444,6 @@ namespace hsc  // hybrid std container
         send_counts[i] = send_cnt;
         recv_counts[i] = recv_cnt;
     }
-    size_t recv_total = recv_offset;  // for overlap, this would be incorrect but that is okay.
     BL_BENCH_END(modify, "a2a_count", recv_counts.size());
 
     size_t after = 0;
@@ -1493,6 +1501,7 @@ namespace hsc  // hybrid std container
     BL_BENCH_END(modify, "a2av_modify", after);
 
 #else
+    size_t recv_total = recv_offset;  // for overlap, this would be incorrect but that is okay.
 
     BL_BENCH_START(modify);
     V* distributed = ::utils::mem::aligned_alloc<V>(recv_total);
@@ -1976,7 +1985,6 @@ namespace hsc  // hybrid std container
         send_counts[i] = send_cnt;
         recv_counts[i] = recv_cnt;
     }
-    size_t recv_total = recv_offset;  // for overlap, this would be incorrect but that is okay.
     BL_BENCH_END(query, "a2a_count", recv_counts.size());
 
 
@@ -2012,6 +2020,7 @@ namespace hsc  // hybrid std container
     BL_BENCH_END(query, "a2av_query", input.size());
 
 #else
+    size_t recv_total = recv_offset;  // for overlap, this would be incorrect but that is okay.
 
     BL_BENCH_START(query);
     Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
@@ -2349,6 +2358,50 @@ namespace hsc  // hybrid std container
 
       // ================  overrides
 
+
+      template <typename SERIALIZER>
+      size_t serialize(unsigned char * out, SERIALIZER const & kvs) const {
+        size_t bytes = 0;
+
+            size_t out_elem_size = sizeof(Key) + sizeof(T);
+            vector<size_t> offsets(omp_get_max_threads());
+
+            #pragma omp parallel reduction(+ : bytes)
+            {
+                int tid = omp_get_thread_num();
+                int tcnt = omp_get_num_threads();
+
+                // get the sizes
+                bytes = offsets[tid] = this->c[tid].size();
+                bytes *= out_elem_size;
+
+                // compute the offsets
+                #pragma omp barrier
+                #pragma omp single 
+                {
+                    size_t sum = 0;
+                    size_t curr = offsets[0];
+                    for (int i = 1; i < tcnt; ++i) {
+                        offsets[i-1] = sum;
+                        sum += curr;
+                        curr = offsets[i];
+                    }
+                    offsets[tcnt - 1] = sum;
+                }
+
+                // get the starting position of the output
+                unsigned char * data = out + bytes;
+
+                // now serialize
+                auto it_end = this->c[tid].cend();
+                for (auto it = this->c[tid].cbegin(); it != it_end; ++it) {
+				    data = kvs(*it, data);
+			    }
+
+            }  // end parallel section
+            return bytes;
+
+      }
   };
 
 

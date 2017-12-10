@@ -142,7 +142,7 @@ namespace hsc  // hybrid std container
    * @tparam Alloc  default to ::std::allocator< ::std::pair<const Key, T> >    allocator for local storage.
    */
   template<typename Key, typename T,
-  template <typename, typename, template <typename> class, template <typename> class, typename...> class Container,
+  template <typename, typename, template <typename> class, template <typename> class...> class Container,
   template <typename> class MapParams,
   class Alloc = ::std::allocator< ::std::pair<const Key, T> >,
 	typename Reducer = ::fsc::DiscardReducer
@@ -215,8 +215,7 @@ namespace hsc  // hybrid std container
     	// NOTE: if there is a hyperloglog estimator in local container, it is usign the transformed storage hash.
       using local_container_type = Container<Key, T,
     		  StoreTransHash,
-    		  StoreTransEqual,
-    		  Alloc, Reducer>;
+    		  StoreTransEqual>;
 
       // std::batched_radixsort_multimap public members.
       using key_type              = typename local_container_type::key_type;
@@ -224,45 +223,46 @@ namespace hsc  // hybrid std container
       using value_type            = typename local_container_type::value_type;
       using hasher                = typename local_container_type::hasher;
       using key_equal             = typename local_container_type::key_equal;
-      using allocator_type        = typename local_container_type::allocator_type;
+      //using allocator_type        = typename local_container_type::allocator_type;
       using iterator              = ::bliss::iterator::ConcatenatingIterator<typename local_container_type::iterator>;
       using const_iterator        = ::bliss::iterator::ConcatenatingIterator<typename local_container_type::const_iterator>;
       using size_type             = typename local_container_type::size_type;
       using difference_type       = typename local_container_type::difference_type;
 
-      using count_result_type     = decltype(::std::declval<local_container_type>().count(::std::declval<key_type>(),
-                                                                                          ::std::declval<::bliss::filter::TruePredicate>(),
-                                                                                           ::std::declval<::bliss::filter::TruePredicate>()));
+    //   using count_result_type     = decltype(::std::declval<local_container_type>().count(::std::declval<key_type>(),
+    //                                                                                       ::std::declval<::bliss::filter::TruePredicate>(),
+    //                                                                                        ::std::declval<::bliss::filter::TruePredicate>()));
+    using count_result_type = uint8_t;   // don't have single element count in radixsort, so use uint8_t directly.
 
     protected:
       std::vector<local_container_type> c;
 
 
-      /// local reduction via a copy of local container type (i.e. batched_radixsort_map).
-      /// this takes quite a bit of memory due to use of batched_radixsort_map, but is significantly faster than sorting.
-      virtual void local_reduction(::std::vector<::std::pair<Key, T> >& input, bool & sorted_input) {
+    //   /// local reduction via a copy of local container type (i.e. batched_radixsort_map).
+    //   /// this takes quite a bit of memory due to use of batched_radixsort_map, but is significantly faster than sorting.
+    //   virtual void local_reduction(::std::vector<::std::pair<Key, T> >& input, bool & sorted_input) {
 
-        if (input.size() == 0) return;
+    //     if (input.size() == 0) return;
 
-        // sort is slower.  use radixsort map.
-        BL_BENCH_INIT(reduce_tuple);
+    //     // sort is slower.  use radixsort map.
+    //     BL_BENCH_INIT(reduce_tuple);
 
-        BL_BENCH_START(reduce_tuple);
-        local_container_type temp;  // reserve with buckets.
-        BL_BENCH_END(reduce_tuple, "reserve", input.size());
+    //     BL_BENCH_START(reduce_tuple);
+    //     local_container_type temp;  // reserve with buckets.
+    //     BL_BENCH_END(reduce_tuple, "reserve", input.size());
 
-        BL_BENCH_START(reduce_tuple);
-        temp.insert(input);
-        BL_BENCH_END(reduce_tuple, "reduce", temp.size());
+    //     BL_BENCH_START(reduce_tuple);
+    //     temp.insert(input);
+    //     BL_BENCH_END(reduce_tuple, "reduce", temp.size());
 
-        BL_BENCH_START(reduce_tuple);
-        temp.to_vector().swap(input);
-        BL_BENCH_END(reduce_tuple, "copy", input.size());
+    //     BL_BENCH_START(reduce_tuple);
+    //     temp.to_vector().swap(input);
+    //     BL_BENCH_END(reduce_tuple, "copy", input.size());
 
-        //local_container_type().swap(temp);   // doing the swap to clear helps?
+    //     //local_container_type().swap(temp);   // doing the swap to clear helps?
 
-        BL_BENCH_REPORT_NAMED(reduce_tuple, "reduction_hashmap:local_reduce");
-      }
+    //     BL_BENCH_REPORT_NAMED(reduce_tuple, "reduction_hashmap:local_reduce");
+    //   }
 
       // CASES FOR PERMUTE:
       // appropriate when the input needs to be permuted (count, exists) to match results.
@@ -769,21 +769,26 @@ namespace hsc  // hybrid std container
 
       /// returns the local storage.  please use sparingly.
       local_container_type& get_local_container(int tid) { return c[tid]; }
+      local_container_type const & get_local_container(int tid) const { return c[tid]; }
+
       std::vector<local_container_type>& get_local_containers() { return c; }
+      std::vector<local_container_type> const & get_local_containers() const { return c; }
 
       // ================ local overrides
 
       /// clears the batched_radixsort_map
       virtual void local_reset() noexcept {
-        for (int i = 0; i < omp_get_max_threads(); ++i) {
-            this->c[i].clear();
-    	    this->c[i].rehash(128);
-          }
+        // for (int i = 0; i < omp_get_max_threads(); ++i) {
+        //     this->c[i].clear();
+    	//     this->c[i].rehash(128);
+        //   }
+    	  std::cout << "WARNING: this function is not implemented." << std::endl;
       }
 
       virtual void local_clear() noexcept {
-        for (int i = 0; i < omp_get_max_threads(); ++i)
-            this->c[i].clear();
+        // for (int i = 0; i < omp_get_max_threads(); ++i)
+        //     this->c[i].clear();
+    	  std::cout << "WARNING: this function is not implemented." << std::endl;
     
       }
 
@@ -798,7 +803,7 @@ namespace hsc  // hybrid std container
       virtual void local_rehash( size_t b ) {
         #pragma omp parallel
         {
-    	  this->c[omp_get_thread_num()].rehash(b);
+    	  this->c[omp_get_thread_num()].resize(b);
         }
       }
 
@@ -863,33 +868,6 @@ namespace hsc  // hybrid std container
       /// get number of entries in local container
       virtual std::vector<size_t> local_unique_sizes() const {
         return this->local_sizes();
-      }
-
-
-
-      virtual void set_max_load_factor(double const & max_load) {
-        for (int i = 0; i < omp_get_max_threads(); ++i)
-        {
-              this->c[i].set_max_load_factor(max_load);
-        }
-      }
-      virtual void set_min_load_factor(double const & min_load) {
-        for (int i = 0; i < omp_get_max_threads(); ++i)
-        {
-              this->c[i].set_min_load_factor(min_load);
-          }
-      }
-      virtual void set_insert_lookahead(uint8_t insert_prefetch) {
-        for (int i = 0; i < omp_get_max_threads(); ++i)
-        {
-              this->c[i].set_insert_lookahead(insert_prefetch);
-        }
-      }
-      virtual void set_query_lookahead(uint8_t query_prefetch) {
-        for (int i = 0; i < omp_get_max_threads(); ++i)
-        {
-              this->c[i].set_query_lookahead(query_prefetch);
-        }
       }
 
 
@@ -1435,7 +1413,6 @@ namespace hsc  // hybrid std container
         send_counts[i] = send_cnt;
         recv_counts[i] = recv_cnt;
     }
-    size_t recv_total = recv_offset;  // for overlap, this would be incorrect but that is okay.
     BL_BENCH_END(modify, "a2a_count", recv_counts.size());
 
     size_t after = 0;
@@ -1455,7 +1432,7 @@ namespace hsc  // hybrid std container
 
             // further divide by number of threads.
             size_t lest = (est + tcnt - 1) / tcnt;
-            if (lest > (this->c[tid].get_max_load_factor() * this->c[tid].capacity()))
+            if (lest > this->c[tid].capacity())
             // add 10% just to be safe.
                 this->c[tid].reserve(static_cast<size_t>(static_cast<double>(lest) * (1.0 + this->hlls[tid].est_error_rate + 0.1)));
         }
@@ -1493,6 +1470,7 @@ namespace hsc  // hybrid std container
     BL_BENCH_END(modify, "a2av_modify", after);
 
 #else
+    size_t recv_total = recv_offset;  // for overlap, this would be incorrect but that is okay.
 
     BL_BENCH_START(modify);
     V* distributed = ::utils::mem::aligned_alloc<V>(recv_total);
@@ -1976,7 +1954,6 @@ namespace hsc  // hybrid std container
         send_counts[i] = send_cnt;
         recv_counts[i] = recv_cnt;
     }
-    size_t recv_total = recv_offset;  // for overlap, this would be incorrect but that is okay.
     BL_BENCH_END(query, "a2a_count", recv_counts.size());
 
 
@@ -2012,6 +1989,7 @@ namespace hsc  // hybrid std container
     BL_BENCH_END(query, "a2av_query", input.size());
 
 #else
+    size_t recv_total = recv_offset;  // for overlap, this would be incorrect but that is okay.
 
     BL_BENCH_START(query);
     Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
@@ -2088,7 +2066,7 @@ namespace hsc  // hybrid std container
         
         auto count_functor =  
             [this, &pred](int tid, Key* b, Key* e, count_result_type * out) {
-  	            this->c[tid].count(out, b, e, pred, pred);
+  	            this->c[tid].count(b, std::distance(b, e), out);
             };
 
         if (this->comm.size() == 1) {
@@ -2119,9 +2097,14 @@ namespace hsc  // hybrid std container
         std::vector<mapped_type> results;
         results.reserve(keys.size());
         
+        #pragma omp parallel
+        {
+            this->c[omp_get_thread_num()].set_novalue(nonexistent);
+        }
+
         auto find_functor =  
             [this, &pred, &nonexistent](int tid, Key* b, Key* e, mapped_type * out) {
-  	            this->c[tid].find(out, b, e, nonexistent, pred, pred);
+  	            this->c[tid].find(b, std::distance(b, e), out);
             };
 
         if (this->comm.size() == 1) {
@@ -2322,6 +2305,32 @@ namespace hsc  // hybrid std container
 
 #endif
 
+      /**
+       * @brief erase elements with the specified keys in the distributed batched_radixsort_multimap.
+       * @param first
+       * @param last
+       */
+      template <typename Predicate = ::bliss::filter::TruePredicate>
+      size_t erase_no_finish(std::vector<Key>& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
+
+        auto erase_functor = [this, &pred](int tid, Key * it, Key * et, bool est = false){
+            this->c[tid].erase(it, std::distance(it, et));
+        };
+        auto erase_functor2 = [this, &pred](int tid, Key * it, Key * et){
+            this->c[tid].erase(it, std::distance(it, et));
+        };
+
+        // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
+        size_t res = 0;
+    	  if (this->comm.size() == 1) {
+              // single node, possibly multi-thread.
+    		  res = this->template modify_1<false>(input, erase_functor);
+    	  } else {
+    		  res = this->template modify_p<false>(input, erase_functor, erase_functor2);
+    	  }
+
+          return res;
+      }
 
       /**
        * @brief erase elements with the specified keys in the hybrid batched_radixsort_multimap.
@@ -2331,23 +2340,61 @@ namespace hsc  // hybrid std container
       template <typename Predicate = ::bliss::filter::TruePredicate>
       size_t erase(std::vector<Key>& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
 
-        auto erase_functor = [this, &pred](int tid, Key * it, Key * et, bool est = false){
-            this->c[tid].erase(it, et, pred, pred);
-        };
-        auto erase_functor2 = [this, &pred](int tid, Key * it, Key * et){
-            this->c[tid].erase(it, et, pred, pred);
-        };
-
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
-    	  if (this->comm.size() == 1) {
-              // single node, possibly multi-thread.
-    		  return this->template modify_1<false>(input, erase_functor);
-    	  } else {
-    		  return this->template modify_p<false>(input, erase_functor, erase_functor2);
-    	  }
+        size_t res = this->erase_no_finish(input, sorted_input, pred);
+
+          this->finalize_erase();
+          return res;
+      }
+
+      void finalize_erase() {
+        #pragma omp parallel
+        {
+            int tid = omp_get_thread_num();
+            this->c[tid].finalize_erase();
+        }
       }
 
       // ================  overrides
+
+
+      template < typename CONVERTER>
+      size_t serialize(unsigned char* out, CONVERTER const & kvs) const {
+            size_t out_elem_size = sizeof(Key) + sizeof(T);
+            size_t bytes = 0;
+            vector<size_t> offsets(omp_get_max_threads());
+
+            #pragma omp parallel reduction(+ : bytes)
+            {
+                int tid = omp_get_thread_num();
+                int tcnt = omp_get_num_threads();
+
+                // get the sizes
+                offsets[tid] = this->c[tid].size();
+
+                // compute the offsets
+                #pragma omp barrier
+                #pragma omp single
+                {
+                    size_t sum = 0;
+                    size_t curr = offsets[0];
+                    for (int i = 1; i < tcnt; ++i) {
+                        offsets[i-1] = sum;
+                        sum += curr;
+                        curr = offsets[i];
+                    }
+                    offsets[tcnt - 1] = sum;
+                }
+
+                // get the starting position of the output
+                unsigned char * data = out + offsets[tid] * out_elem_size;
+
+                // now serialize
+                bytes = this->c[tid].serialize(data, kvs);
+
+            }  // end parallel section
+            return bytes;
+      }
 
   };
 
@@ -2380,7 +2427,7 @@ namespace hsc  // hybrid std container
   	  template <typename> class MapParams,
   class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
-  using batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort_offsets_reduction, MapParams, Alloc, ::fsc::DiscardReducer>;
+  using batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort, MapParams, Alloc, ::fsc::DiscardReducer>;
 
 
   /**
@@ -2416,7 +2463,7 @@ namespace hsc  // hybrid std container
   class Alloc = ::std::allocator< ::std::pair<const Key, T> >,
   typename Reduc = ::std::plus<T>
   >
-  using reduction_batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort_offsets_reduction, MapParams, Alloc, Reduc>;
+  using reduction_batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort, MapParams, Alloc, Reduc>;
 
 
 
@@ -2505,50 +2552,16 @@ public:
        * @param input  vector.  will be permuted.
        */
       template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>
-      size_t insert(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
-
-        auto insert_key_functor = [this](int tid, Key * it, Key * et, bool est = true){
-            if (estimate)
-                this->c[tid].insert(it, et, T(1));
-            else
-                this->c[tid].insert_no_estimate(it, et, T(1));
-        };
-        auto insert_key_no_est_functor = [this](int tid, Key * it, Key * et){
-            this->c[tid].insert_no_estimate(it, et, T(1));
-        };
-        
-        size_t result;
-
-        // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
-    	  if (this->comm.size() == 1) {
-              // single node, possibly multi-thread.
-    	    result =  this->template modify_1<estimate>(input, insert_key_functor);
-    	  } else {
-    	    result =  this->template modify_p<estimate>(input, insert_key_functor, insert_key_no_est_functor);
-    	  }
-
-
-    	  this->finalize_insert();
-
-    	  return result;
-      }
-
-
-      /**
-       * @brief insert new elements in the hybrid batched_radixsort_multimap.
-       * @param input  vector.  will be permuted.
-       */
-      template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>
       size_t insert_no_finalize(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
 
         auto insert_key_functor = [this](int tid, Key * it, Key * et, bool est = true){
             if (estimate)
-                this->c[tid].insert(it, et, T(1));
+                this->c[tid].estimate_and_insert(it, std::distance(it, et));
             else
-                this->c[tid].insert_no_estimate(it, et, T(1));
+                this->c[tid].insert(it, std::distance(it, et));
         };
         auto insert_key_no_est_functor = [this](int tid, Key * it, Key * et){
-            this->c[tid].insert_no_estimate(it, et, T(1));
+            this->c[tid].insert(it, std::distance(it, et));
         };
 
 
@@ -2561,12 +2574,25 @@ public:
         }
       }
 
+      /**
+       * @brief insert new elements in the hybrid batched_radixsort_multimap.
+       * @param input  vector.  will be permuted.
+       */
+      template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>
+      size_t insert(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
+        
+        size_t result = insert_no_finalize(input, sorted_input, pred);
+
+    	  this->finalize_insert();
+
+    	  return result;
+      }
 
       void finalize_insert() {
 
-        #pragma omp parallle
+        #pragma omp parallel
         {
-          int tid = omp_thread_num();
+          int tid = omp_get_thread_num();
           this->c[tid].finalize_insert();
         }
       }
