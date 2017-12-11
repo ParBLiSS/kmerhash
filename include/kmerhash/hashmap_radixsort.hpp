@@ -322,7 +322,7 @@ public:
             HashElement he = A[i];
             int32_t id = he.bucketId & mask;
             int32_t pos = countBuf[id];
-            //printf("%d] bucketId = %d, id = %d, pos = %d\n", i, he.bucketId, id, pos);
+            // printf("%d] bucketId = %d, id = %d, pos = %d, sortBuf size = %d, numBuckets %d, numBins %d, binSize %d\n", i, he.bucketId, id, pos, bufSize, numBuckets, numBins, binSize);
             sortBuf[pos] = he;
             countBuf[id]++;
         }
@@ -550,6 +550,10 @@ public:
 				totalKeyCount(0),
 				hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(bucketMask))
     {
+	if (numBuckets >= (1 << 30)) 
+		throw std::invalid_argument("number of buckets cannot exceed 2^30");
+	// this would cause numBuckets * 2 to overflow, and numBins to become 0 here, and 1 in the resize_alloc function, and numBins * binSize to overflow as well.
+	
         binSize = next_power_of_2(_binSize);
         numBins = numBuckets * 2 / binSize;
         binMask = numBins - 1;
@@ -712,9 +716,14 @@ public:
 	  void resize_alloc(uint32_t _newNumBuckets, int32_t _binSize)
 	  {
 
+
         numBuckets = next_power_of_2(_newNumBuckets);
         bucketMask = numBuckets - 1;
 
+	if (numBuckets >= (1 << 30)) 
+		throw std::invalid_argument("next_power_of_2(_newNumBuckets) number of buckets cannot exceed 2^30");
+	// this would cause numBuckets * 2 to overflow, and numBins to become 0 here, and 1 in the resize_alloc function, and numBins * binSize to overflow as well.
+	
         if (_binSize > -1) binSize = _binSize;    // allow bin size resize.  this is for new one...
 
         numBins = std::max(1, (numBuckets << 1) / binSize);   // TCP: at least 1 bin
