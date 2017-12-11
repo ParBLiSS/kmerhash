@@ -2557,9 +2557,10 @@ public:
       size_t insert_no_finalize(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
 
         auto insert_key_functor = [this](int tid, Key * it, Key * et, bool est = true){
-            if (estimate)
+            if (est) {
+                printf("thread %d inserting %ld \n", tid, std::distance(it, et)); 
                 this->c[tid].estimate_and_insert(it, std::distance(it, et));
-            else
+            } else
                 this->c[tid].insert(it, std::distance(it, et));
         };
         auto insert_key_no_est_functor = [this](int tid, Key * it, Key * et){

@@ -29,7 +29,7 @@ class hashmap_radixsort {
 
 public:
 
-	static constexpr int32_t PFD = 16;
+	static constexpr size_t PFD = 16;
     using key_type              = Key;
     using mapped_type           = V;
     using value_type            = ::std::pair<const Key, V>;
@@ -618,6 +618,13 @@ public:
         int64_t initStart = __rdtsc();
 #endif
 
+       // shortcutting, if starting out with empty.
+       if (totalKeyCount == 0) {
+            resize_alloc(_newNumBuckets, binSize);
+            return true;
+       }
+
+
 //		::std::cout << "RESIZING:  size=" << totalKeyCount
 //				<< " prev capacity=" << capacity()
 //				<< " new capacity=" << _newNumBuckets << std::endl;
@@ -872,24 +879,24 @@ public:
     //    return y[0];
     //}
 	/// return number of successful inserts
-    int32_t insert_impl(Key *keyArray, int32_t numKeys)
+    size_t insert_impl(Key *keyArray, size_t numKeys)
     {
         if((coherence != COHERENT) && (coherence != INSERT))
         {
 //            printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
             return 0;
         }
-        int32_t i;
+        size_t i;
         coherence = INSERT;
-		int32_t hash_batch_size = 512;
+		size_t hash_batch_size = 512;
         hash_val_type bucketIdArray[2 * hash_batch_size];
 		memset(bucketIdArray, 0, 2 * hash_batch_size * sizeof(hash_val_type));
-		int32_t hash_mask = 2 * hash_batch_size - 1;
+		size_t hash_mask = 2 * hash_batch_size - 1;
         //int64_t hashTicks = 0;
         //int64_t startTick, endTick;
         //startTick = __rdtsc();
 
-		int32_t hash_count = std::min(numKeys, hash_batch_size);
+		size_t hash_count = std::min(numKeys, hash_batch_size);
         hash_mod2(keyArray, hash_count, bucketIdArray);
 //        for(i = 0; i < PFD; i++)
 //        {
@@ -901,17 +908,17 @@ public:
         for(i = 0; i < numKeys; i += hash_batch_size)
         {
             //startTick = __rdtsc();
-			int32_t hash_first = i + hash_batch_size;
+			size_t hash_first = i + hash_batch_size;
 			if(hash_first > numKeys) hash_first = numKeys;
-			int32_t hash_last = i + 2 * hash_batch_size;
+			size_t hash_last = i + 2 * hash_batch_size;
 			if(hash_last > numKeys) hash_last = numKeys;
-			int32_t hash_count = hash_last - hash_first;
+			size_t hash_count = hash_last - hash_first;
 			hash_mod2(keyArray + hash_first, hash_count, bucketIdArray + ((hash_first) & hash_mask));
             //endTick = __rdtsc();
             //hashTicks += (endTick - startTick);
-			int32_t last = i + hash_batch_size;
+			size_t last = i + hash_batch_size;
 			if(last > numKeys) last = numKeys;
-			int32_t j;
+			size_t j;
 			for(j = i; j < last; j++)
 			{
 				HashElement he;
@@ -988,13 +995,13 @@ public:
     }
 
 
-    int32_t insert(Key *keyArray, int32_t numKeys) {
-      int32_t inserted = 0;
+    size_t insert(Key *keyArray, size_t numKeys) {
+      size_t inserted = 0;
       bool resize_succeeded = true;
 
       //std::cout << "inserting " << numKeys << std::endl;
 
-      int32_t delta = insert_impl(keyArray + inserted, numKeys - inserted);
+      size_t delta = insert_impl(keyArray + inserted, numKeys - inserted);
       inserted += delta;
       while ((inserted < numKeys) && resize_succeeded) {
   		std::cout << "insert try to resize.  last iter inserted " << delta << std::endl;
@@ -1017,7 +1024,7 @@ public:
     }
 
 
-    int32_t estimate_and_insert(Key *keyArray, int32_t numKeys) {
+    size_t estimate_and_insert(Key *keyArray, size_t numKeys) {
 
       // local hash computation and hll update.
         hash_val_type* hvals = ::utils::mem::aligned_alloc<hash_val_type>(numKeys + PFD);  // 64 byte alignment.
@@ -1029,7 +1036,7 @@ public:
           // add 10% just to be safe.
           this->reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
 
-        int32_t inserted = insert(keyArray, hvals, numKeys);
+        size_t inserted = insert(keyArray, hvals, numKeys);
 
         ::utils::mem::aligned_free(hvals);
 
@@ -1038,14 +1045,14 @@ public:
 
      // return number of successful inserts.
 	template <class HashType>
-    int32_t insert_impl(Key *keyArray, HashType *hashArray, int32_t numKeys)
+    size_t insert_impl(Key *keyArray, HashType *hashArray, size_t numKeys)
     {
         if((coherence != COHERENT) && (coherence != INSERT))
         {
 //            printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
             return 0;
         }
-        int32_t i;
+        size_t i;
         coherence = INSERT;
         hash_val_type bucketIdArray[32];
         //int64_t hashTicks = 0;
@@ -1135,14 +1142,14 @@ public:
     }
 
   template <class HashType>
-    int32_t insert(Key *keyArray, HashType *hashArray, int32_t numKeys) {
-      int32_t inserted = 0;
+    size_t insert(Key *keyArray, HashType *hashArray, size_t numKeys) {
+      size_t inserted = 0;
       bool resize_succeeded = true;
 
       //std::cout << "inserting " << numKeys << std::endl;
 
 
-      int32_t delta = insert_impl(keyArray + inserted, hashArray + inserted, numKeys - inserted);
+      size_t delta = insert_impl(keyArray + inserted, hashArray + inserted, numKeys - inserted);
       inserted += delta;
       while ((inserted < numKeys) && resize_succeeded) {
   		std::cout << "insert try to resize.  last iter inserted " << delta << std::endl;
@@ -1225,7 +1232,7 @@ public:
         coherence = COHERENT;
     }
 
-    size_t find(Key *keyArray, int32_t numKeys, uint32_t *findResult) const
+    size_t find(Key *keyArray, size_t numKeys, uint32_t *findResult) const
     {
         if(coherence != COHERENT)
         {
@@ -1234,16 +1241,16 @@ public:
         }
         size_t foundCount = 0;
 #if ENABLE_PREFETCH
-        int32_t PFD_INFO = PFD;
-        int32_t PFD_HASH = PFD >> 1;
+        size_t PFD_INFO = PFD;
+        size_t PFD_HASH = PFD >> 1;
 #endif
-        int32_t i;
-		int32_t hash_batch_size = 1024;
+        size_t i;
+		size_t hash_batch_size = 1024;
         hash_val_type bucketIdArray[2 * hash_batch_size];
 		memset(bucketIdArray, 0, 2 * hash_batch_size * sizeof(hash_val_type));
-		int32_t hash_mask = 2 * hash_batch_size - 1;
+		size_t hash_mask = 2 * hash_batch_size - 1;
 
-		int32_t hash_count = std::min(numKeys, hash_batch_size);
+		size_t hash_count = std::min(numKeys, hash_batch_size);
         hash_mod2(keyArray, hash_count, bucketIdArray);
 
 //        for(i = 0; i < PFD_INFO; i++)
@@ -1253,17 +1260,17 @@ public:
         for(i = 0; i < numKeys; i += hash_batch_size)
         {
             //startTick = __rdtsc();
-			int32_t hash_first = i + hash_batch_size;
+			size_t hash_first = i + hash_batch_size;
 			if(hash_first > numKeys) hash_first = numKeys;
-			int32_t hash_last = i + 2 * hash_batch_size;
+			size_t hash_last = i + 2 * hash_batch_size;
 			if(hash_last > numKeys) hash_last = numKeys;
-			int32_t hash_count = hash_last - hash_first;
+			size_t hash_count = hash_last - hash_first;
 			hash_mod2(keyArray + hash_first, hash_count, bucketIdArray + ((hash_first) & hash_mask));
             //endTick = __rdtsc();
             //hashTicks += (endTick - startTick);
-			int32_t last = i + hash_batch_size;
+			size_t last = i + hash_batch_size;
 			if(last > numKeys) last = numKeys;
-			int32_t j;
+			size_t j;
 
 			for(j = i; j < last; j++)
 			{
@@ -1290,7 +1297,7 @@ public:
         return foundCount;
     }
 
-    size_t count(Key *keyArray, int32_t numKeys, uint8_t *countResult) const
+    size_t count(Key *keyArray, size_t numKeys, uint8_t *countResult) const
     {
         if(coherence != COHERENT)
         {
@@ -1299,16 +1306,16 @@ public:
         }
         size_t foundCount = 0;
 #if ENABLE_PREFETCH
-        int32_t PFD_INFO = PFD;
-        int32_t PFD_HASH = PFD >> 1;
+        size_t PFD_INFO = PFD;
+        size_t PFD_HASH = PFD >> 1;
 #endif
-        int32_t i;
-		int32_t hash_batch_size = 1024;
+        size_t i;
+		size_t hash_batch_size = 1024;
         hash_val_type bucketIdArray[2 * hash_batch_size];
 		memset(bucketIdArray, 0, 2 * hash_batch_size * sizeof(hash_val_type));
-		int32_t hash_mask = 2 * hash_batch_size - 1;
+		size_t hash_mask = 2 * hash_batch_size - 1;
 
-		int32_t hash_count = std::min(numKeys, hash_batch_size);
+		size_t hash_count = std::min(numKeys, hash_batch_size);
         hash_mod2(keyArray, hash_count, bucketIdArray);
 
 //        for(i = 0; i < PFD_INFO; i++)
@@ -1319,17 +1326,17 @@ public:
         for(i = 0; i < numKeys; i += hash_batch_size)
         {
             //startTick = __rdtsc();
-			int32_t hash_first = i + hash_batch_size;
+			size_t hash_first = i + hash_batch_size;
 			if(hash_first > numKeys) hash_first = numKeys;
-			int32_t hash_last = i + 2 * hash_batch_size;
+			size_t hash_last = i + 2 * hash_batch_size;
 			if(hash_last > numKeys) hash_last = numKeys;
-			int32_t hash_count = hash_last - hash_first;
+			size_t hash_count = hash_last - hash_first;
 			hash_mod2(keyArray + hash_first, hash_count, bucketIdArray + ((hash_first) & hash_mask));
             //endTick = __rdtsc();
             //hashTicks += (endTick - startTick);
-			int32_t last = i + hash_batch_size;
+			size_t last = i + hash_batch_size;
 			if(last > numKeys) last = numKeys;
-			int32_t j;
+			size_t j;
 
 
 			for(j = i; j < last; j++)
@@ -1356,7 +1363,7 @@ public:
         return foundCount;
     }
 
-    void erase(Key *keyArray, int32_t numKeys)
+    void erase(Key *keyArray, size_t numKeys)
     {
         if((coherence != COHERENT) && (coherence != ERASE))
         {
@@ -1365,16 +1372,16 @@ public:
         }
         coherence = ERASE;
 #if ENABLE_PREFETCH
-        int32_t PFD_INFO = PFD;
-        int32_t PFD_HASH = PFD >> 1;
+        size_t PFD_INFO = PFD;
+        size_t PFD_HASH = PFD >> 1;
 #endif
-        int32_t i;
-		int32_t hash_batch_size = 1024;
+        size_t i;
+		size_t hash_batch_size = 1024;
         hash_val_type bucketIdArray[2 * hash_batch_size];
 		memset(bucketIdArray, 0, 2 * hash_batch_size * sizeof(hash_val_type));
-		int32_t hash_mask = 2 * hash_batch_size - 1;
+		size_t hash_mask = 2 * hash_batch_size - 1;
 
-		int32_t hash_count = std::min(numKeys, hash_batch_size);
+		size_t hash_count = std::min(numKeys, hash_batch_size);
         hash_mod2(keyArray, hash_count, bucketIdArray);
 
 //        for(i = 0; i < PFD_INFO; i++)
@@ -1385,17 +1392,17 @@ public:
         for(i = 0; i < numKeys; i += hash_batch_size)
         {
             //startTick = __rdtsc();
-			int32_t hash_first = i + hash_batch_size;
+			size_t hash_first = i + hash_batch_size;
 			if(hash_first > numKeys) hash_first = numKeys;
-			int32_t hash_last = i + 2 * hash_batch_size;
+			size_t hash_last = i + 2 * hash_batch_size;
 			if(hash_last > numKeys) hash_last = numKeys;
-			int32_t hash_count = hash_last - hash_first;
+			size_t hash_count = hash_last - hash_first;
 			hash_mod2(keyArray + hash_first, hash_count, bucketIdArray + ((hash_first) & hash_mask));
             //endTick = __rdtsc();
             //hashTicks += (endTick - startTick);
-			int32_t last = i + hash_batch_size;
+			size_t last = i + hash_batch_size;
 			if(last > numKeys) last = numKeys;
-			int32_t j;
+			size_t j;
 
 
 			for(j = i; j < last; j++)
@@ -1806,7 +1813,7 @@ public:
 };
 template <class Key, class V, template <typename> class Hash,
           template <typename> class Equal>
-constexpr int32_t hashmap_radixsort<Key, V, Hash, Equal>::PFD;
+constexpr size_t hashmap_radixsort<Key, V, Hash, Equal>::PFD;
 
 
 }  // namespace fsc
