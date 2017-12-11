@@ -23,7 +23,7 @@ done
 for EXEC in bin/benchmark_a*
 do
 	echo "running ${EXEC}"
-	mpirun -np 64 --map-by ppr:16:socket --bind-to core ${EXEC} > ${EXEC/bin\//log\/}.p1.t1.log 2>&1
+	mpirun -np 64 --map-by ppr:16:socket --bind-to core ${EXEC} > ${EXEC/bin\//log\/}.p64.t1.log 2>&1
 done
 
 
