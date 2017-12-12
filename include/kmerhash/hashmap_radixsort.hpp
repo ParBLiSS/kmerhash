@@ -755,6 +755,9 @@ public:
         printf("numBuckets = %u, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
                 numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
 #endif
+
+        hash_mod2.posttrans.mask = bucketMask;
+
 	  }
 
         // return fail or success
@@ -764,7 +767,6 @@ public:
     // insert the elements again
         coherence = INSERT;
 
-        hash_mod2.posttrans.mask = bucketMask;
         
 		int32_t hash_batch_size = 512;
         hash_val_type bucketIdArray[2 * hash_batch_size];

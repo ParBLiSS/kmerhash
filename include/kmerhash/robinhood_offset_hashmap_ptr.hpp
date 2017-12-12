@@ -400,10 +400,8 @@ public:
 #endif
 			// hash(123457),   // not all hash functions have constructors that takes seeds.  e.g. std::hash.  goal of this hashmap is to be general.
 			hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(mask)),
-			container(nullptr), info_container(buckets + info_empty, info_empty)
+			container(::utils::mem::aligned_alloc<value_type>(buckets + info_empty)), info_container(buckets + info_empty, info_empty)
 	{
-		container = ::utils::mem::aligned_alloc<value_type>(buckets + info_empty);
-
 		// set the min load and max load thresholds.  there should be a good separation so that when resizing, we don't encounter a resize immediately.
 		set_min_load_factor(_min_load_factor);
 		set_max_load_factor(_max_load_factor);
@@ -426,7 +424,7 @@ public:
 	}
 
 	~hashmap_robinhood_offsets_reduction() {
-		free(container);
+		::utils::mem::aligned_free(container);
 
 #if defined(REPROBE_STAT)
 		::std::cout << "RESIZE SUMMARY:\tupsize\t= " << upsize_count << "\tdownsize\t= " << downsize_count << std::endl;
@@ -463,10 +461,9 @@ public:
 		hash_mod2(other.hash_mod2),
 		eq(other.eq),
 		reduc(other.reduc),
+		container(::utils::mem::aligned_alloc<value_type>(buckets + info_empty)),
 		info_container(other.info_container) {
 
-		if (container != nullptr) { free(container);  container = nullptr; }
-		container = ::utils::mem::aligned_alloc<value_type>(buckets + info_empty);
 		memcpy(container, other.container, (buckets + info_empty) * sizeof(value_type));
 	};
 
@@ -501,7 +498,7 @@ public:
 		reduc = other.reduc;
 		info_container = other.info_container;
 
-		if (container != nullptr) { free(container);  container = nullptr; }
+		if (container != nullptr) ::utils::mem::aligned_free(container);
 		container = ::utils::mem::aligned_alloc<value_type>(buckets + info_empty);
 		memcpy(container, other.container, (buckets + info_empty) * sizeof(value_type));
 	}
@@ -841,7 +838,7 @@ public:
 				}
 			}
 		}
-		free(tmp);
+		::utils::mem::aligned_free(tmp);
 	}
 
 	std::vector<std::pair<key_type, mapped_type> > to_vector() const {
@@ -960,7 +957,7 @@ public:
 			max_load = static_cast<size_t>(::std::ceil(static_cast<double>(n) * max_load_factor));
 
 			// swap in.
-			free(container);
+			::utils::mem::aligned_free(container);
 			container = tmp;
 			info_container.swap(tmp_info);
 		}
@@ -1150,7 +1147,7 @@ protected:
 //      if (hashes_orig[hh] == 2173)
 //        std::cout << "2173: " << hh << "\tORIG hash " << hashes_orig[hh] << " new hash " << hashes[hh] << " would have been " << (hashes[hh] & mask) << std::endl;
 //    }
-//    free(hashes_orig);
+//    ::utils::mem::aligned_free(hashes_orig);
 
 		// try to compute the offsets, so that we can figure out exactly where to store the higher block data.
 		// PROBLEM STATEMENT:  we want to find the index q_i of the last entry of a block i,
@@ -1302,7 +1299,7 @@ protected:
 		}
 
 
-    free(hashes);
+    ::utils::mem::aligned_free(hashes);
 
 //
 //    hash_val_type * hashes2 = ::utils::mem::aligned_alloc<hash_val_type>(target_buckets);
@@ -1313,7 +1310,7 @@ protected:
 //    for (size_t hh = 1; hh < target_buckets; ++hh)
 //      if ((hashes[hh] > 0) && (hashes[hh - 1] > hashes[hh]))
 //        std::cout << "FINAL hash " << hashes2[hh] << "id " << (hashes2[hh] & (target_buckets - 1))<< std::endl;
-//    free(hashes2);
+//    ::utils::mem::aligned_free(hashes2);
 	}
 
 
@@ -1935,7 +1932,7 @@ protected:
             insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
-            	free(hashes);
+            	::utils::mem::aligned_free(hashes);
 
 #if defined(DEBUG_HASH_MAPPING)
     	// DEBUG: printout the histogram and profile
@@ -2009,7 +2006,7 @@ protected:
             insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
-            	free(hashes);
+            	::utils::mem::aligned_free(hashes);
 
 #if defined(DEBUG_HASH_MAPPING)
     	// DEBUG: printout the histogram and profile
@@ -2065,7 +2062,7 @@ protected:
     		insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
-            	free(hashes);
+            	::utils::mem::aligned_free(hashes);
 
 #if defined(DEBUG_HASH_MAPPING)
     	// DEBUG: printout the histogram and profile
@@ -2099,7 +2096,7 @@ protected:
         // first check if we need to resize.  within 1% of
         if (static_cast<size_t>(static_cast<double>(lsize) * 1.01) >= max_load) {
         	// start over from current position
-        	free(hashes);
+        	::utils::mem::aligned_free(hashes);
 
 #if defined(DEBUG_HASH_MAPPING)
     	// DEBUG: printout the histogram and profile
@@ -2147,7 +2144,7 @@ protected:
             insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
-            	free(hashes);
+            	::utils::mem::aligned_free(hashes);
 
 #if defined(DEBUG_HASH_MAPPING)
     	// DEBUG: printout the histogram and profile
@@ -2215,7 +2212,7 @@ protected:
             insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
-            	free(hashes);
+            	::utils::mem::aligned_free(hashes);
 
 #if defined(DEBUG_HASH_MAPPING)
     	// DEBUG: printout the histogram and profile
@@ -2275,7 +2272,7 @@ protected:
             insert_bid = insert_with_hint(container, info_container, hashes[k], val);
             if (insert_bid == insert_failed) {
             	// start over from current position
-            	free(hashes);
+            	::utils::mem::aligned_free(hashes);
 
 #if defined(DEBUG_HASH_MAPPING)
     	// DEBUG: printout the histogram and profile
@@ -2306,7 +2303,7 @@ protected:
               ++lsize;
     	}
 
-    	free(hashes);
+    	::utils::mem::aligned_free(hashes);
 
 #if defined(DEBUG_HASH_MAPPING)
     	// DEBUG: printout the histogram and profile
@@ -2327,8 +2324,8 @@ protected:
 			std::cout << ss.str() << std::endl;
     	}
 
-    	free(histo);
-    	free(profile);
+    	::utils::mem::aligned_free(histo);
+    	::utils::mem::aligned_free(profile);
 #endif
     	return input_size;
     }
@@ -2480,7 +2477,7 @@ protected:
 				hash_vals[i] = hash((*it).first);
 			}
 		}
-		free(keys);
+		::utils::mem::aligned_free(keys);
 		// now try to insert.  hashing done already.  also, no need to hash vals again after rehash().
 		size_t finished = 0;
 		do {
@@ -2492,7 +2489,7 @@ protected:
 		} while (finished < input_size);
 
 		// finally, update the hyperloglog estimator.  just swap.
-		free(hash_vals);
+		::utils::mem::aligned_free(hash_vals);
 
 #if defined(REPROBE_STAT)
 		print_reprobe_stats("INSERT ITER B", input_size, (lsize - before));
@@ -2563,7 +2560,7 @@ protected:
 	      } while (finished < input_size);
 
 		// finally, update the hyperloglog estimator.  just swap.
-		free(hash_vals);
+		::utils::mem::aligned_free(hash_vals);
 
 #if defined(REPROBE_STAT)
 		print_reprobe_stats("INSERT ITER B", input_size, (lsize - before));
@@ -2631,7 +2628,7 @@ protected:
     } while (finished < input_size);
 
 		// finally, update the hyperloglog estimator.  just swap.
-		free(hash_vals);
+		::utils::mem::aligned_free(hash_vals);
 
 #if defined(REPROBE_STAT)
 		print_reprobe_stats("INSERT ITER", input_size, (lsize - before));
@@ -2706,7 +2703,7 @@ protected:
       } while (finished < input_size);
 
 		// finally, update the hyperloglog estimator.  just swap.
-		free(hash_vals);
+		::utils::mem::aligned_free(hash_vals);
 
 #if defined(REPROBE_STAT)
 		print_reprobe_stats("INSERT ITER", input_size, (lsize - before));
@@ -3146,7 +3143,7 @@ protected:
 			cnt += eval(out, *it, found);  // out is incremented here
 		}
 
-		free(bids);
+		::utils::mem::aligned_free(bids);
 
 #if defined(REPROBE_STAT)
 		print_reprobe_stats("INTERNAL_FIND ITER PAIR", std::distance(begin, end), total);
@@ -3653,7 +3650,7 @@ public:
 //		std::cout << "< " << std::distance(begin, it) << ", " << j << "> )"  << std::endl;
 
 
-		free(bids);
+		::utils::mem::aligned_free(bids);
 
 #if defined(REPROBE_STAT)
 		print_reprobe_stats("ERASE ITER PAIR", std::distance(begin, end), before - lsize);
