@@ -1076,7 +1076,8 @@ size_t writeToPOSIX(C const & map, std::string const & out_filename) {
 	// assume 32KB, 8 way set-associative cache.
 	// there are 64 sets of 8x64byte cachelines.
 	// use 1/4 of it. = 2x64x64 bytes = 8KB.
-	auto container = map.get_local_container();
+	typename MapType::local_container_type const & container = map.get_local_container();
+  //auto container = map.get_local_container();
 
 	// compute some step sizes.  then 8192 - (8192 % lcm)
 		// get lowest common multiple of 512 and tuple type size
@@ -1300,7 +1301,7 @@ int main(int argc, char** argv) {
 //		TCLAP::SwitchArg benchmarkArg("B", "benchmark", "on/off for benchmarking (no file output)", cmd, false);
 
 	    TCLAP::ValueArg<int> algoArg("A",
-	                                 "algo", "Reader Algorithm id. Fileloader w/o preload = 2, mmap = 5, posix=7, mpiio = 10. default is 7.",
+	                                 "algo", "Reader Algorithm id. mmap = 5, posix=7, mpiio = 10. default is 7.",
 	                                 false, 7, "int", cmd);
 
 	    // output algo 7 and 8 are not working.
