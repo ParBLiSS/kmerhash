@@ -1429,7 +1429,7 @@ public:
 				uint32_t bucketId = bucketIdArray[j & hash_mask];
 				HashElement *he = find_internal(keyArray[j], bucketId);
 				if(he != NULL)
-					he->value = noValue;
+					he->val = noValue;
 			}
         }
     }
