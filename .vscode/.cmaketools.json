@@ -6,5 +6,6 @@
     },
     "description": "Perform optimizations AND include debugging information"
   },
-  "activeEnvironments": []
+  "activeEnvironments": [],
+  "codeModel": null
 }
