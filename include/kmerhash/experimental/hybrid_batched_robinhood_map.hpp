@@ -197,7 +197,7 @@ namespace hsc  // hybrid std container
 //      using TransHash = typename MapParams<K>::template StoreTransFuncTemplate<K>;
 
     // own hyperloglog definition.  separate from the local container's.  this estimates using the transformed distribute hash.
-    std::vector<hyperloglog64<Key, InternalHash, 12> > hlls;
+    hyperloglog64<Key, InternalHash, 12> * hlls;
 
 
 	template <typename K>
@@ -235,7 +235,7 @@ namespace hsc  // hybrid std container
                                                                                            ::std::declval<::bliss::filter::TruePredicate>()));
 
     protected:
-      std::vector<local_container_type> c;
+      local_container_type * c;
 
 
       /// local reduction via a copy of local container type (i.e. batched_robinhood_map).
@@ -756,17 +756,23 @@ namespace hsc  // hybrid std container
     public:
 
       batched_robinhood_map_base(const mxx::comm& _comm) : Base(_comm),
-		  key_to_hash(DistHash<trans_val_type>(9876543), DistTrans<Key>(), ::bliss::transform::identity<hash_val_type>()),
-          hlls(omp_get_max_threads()),
-          c(omp_get_max_threads())
+		  key_to_hash(DistHash<trans_val_type>(9876543), DistTrans<Key>(), ::bliss::transform::identity<hash_val_type>())
 		  //hll(ceilLog2(_comm.size()))  // top level hll. no need to ignore bits.
         {
+
+		printf("initializing for %d threads\n", omp_get_max_threads());
+		c = new local_container_type[omp_get_max_threads()];
+		hlls = new hyperloglog64<Key, InternalHash, 12>[omp_get_max_threads()]; 
+
  //   	  this->c.set_ignored_msb(ceilLog2(_comm.size()));   // NOTE THAT THIS SHOULD MATCH KEY_TO_RANK use of bits in hash table.
       }
 
 
 
-      virtual ~batched_robinhood_map_base() {};
+      virtual ~batched_robinhood_map_base() {
+	delete [] c;
+	delete [] hlls;
+	};
 
 
 
@@ -774,8 +780,8 @@ namespace hsc  // hybrid std container
       local_container_type& get_local_container(int tid) { return c[tid]; }
       local_container_type const & get_local_container(int tid) const { return c[tid]; }
 
-      std::vector<local_container_type>& get_local_containers() { return c; }
-      std::vector<local_container_type> const & get_local_containers() const { return c; }
+      local_container_type * get_local_containers() { return c; }
+      local_container_type const * get_local_containers() const { return c; }
 
       // ================ local overrides
 

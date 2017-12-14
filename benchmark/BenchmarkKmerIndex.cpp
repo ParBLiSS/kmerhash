@@ -487,7 +487,7 @@ std::vector<KmerType> readForQuery_posix(const std::string & filename, MPI_Comm 
 
 template<typename KmerType>
 void sample(std::vector<KmerType> &query, size_t n, unsigned int seed, mxx::comm const & comm) {
-  std::shuffle(query.begin(), query.end(), std::default_random_engine(seed));
+  //std::shuffle(query.begin(), query.end(), std::default_random_engine(seed));
 
   size_t n_p = (n / comm.size());
   std::vector<size_t> send_counts(comm.size(), n_p);

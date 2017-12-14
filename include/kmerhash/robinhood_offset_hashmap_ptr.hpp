@@ -96,8 +96,25 @@ struct ReplaceReducer {
 	}
 };
 /// other reducer types include plus, max, etc.
+/*
+        template <typename S>
+        struct modulus2 {
+                static constexpr size_t batch_size = 1; //(sizeof(S) == 4 ? 8 : 4);
+                S mask;
+                modulus2(S const & _mask, int) : mask(_mask) {}
 
+                template <typename IN>
+                inline IN operator()(IN const & x) const { return (x & mask); }
 
+//              template <typename IN, typename OUT>
+//              //              inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
+//              //                      // TODO: [ ] do SSE version here
+//              //                      for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
+//              //              }
+         };
+	template <typename S>
+	constexpr size_t modulus2<S>::batch_size;
+*/
 /**
  * @brief Open Addressing hashmap that uses Robin Hood hashing, with doubling for resizing, circular internal array.  modified from standard robin hood hashmap to use bucket offsets, in attempt to improve speed.
  * @details  at the moment, nothing special for k-mers yet.
@@ -205,7 +222,7 @@ protected:
 	struct modulus2 {
 		static constexpr size_t batch_size = 1; //(sizeof(S) == 4 ? 8 : 4);
 		S mask;
-		modulus2(S const & _mask) : mask(_mask) {}
+		modulus2(S const & _mask, int) : mask(_mask) {}
 
 		template <typename IN>
 		inline IN operator()(IN const & x) const { return (x & mask); }
@@ -399,7 +416,7 @@ public:
 			upsize_count(0), downsize_count(0),
 #endif
 			// hash(123457),   // not all hash functions have constructors that takes seeds.  e.g. std::hash.  goal of this hashmap is to be general.
-			hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(mask)),
+			hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(mask, 0)),
 			container(::utils::mem::aligned_alloc<value_type>(buckets + info_empty)), info_container(buckets + info_empty, info_empty)
 	{
 		// set the min load and max load thresholds.  there should be a good separation so that when resizing, we don't encounter a resize immediately.
@@ -1130,7 +1147,7 @@ protected:
 		hash_val_type * hashes = ::utils::mem::aligned_alloc<hash_val_type>(info_container.size());
 
 		// compute and store all hashes,
-		InternalHash h2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(target_buckets - 1));
+		InternalHash h2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(target_buckets - 1, 0));
 		h2(container, info_container.size(), hashes);  // compute even for empty positions.
 		// load should be high so there should not be too much waste.  also, SSE and AVX.
 

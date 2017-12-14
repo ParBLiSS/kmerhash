@@ -20,6 +20,27 @@
 #include "iterators/transform_iterator.hpp"
 
 namespace fsc {
+/*
+	template <typename S>
+	struct modulus2 {
+		static constexpr size_t batch_size = 1;
+
+		S mask;
+
+		modulus2(S const & _mask, int) :	mask(_mask) {}  // dummy
+
+		template <typename IN>
+		inline IN operator()(IN const & x) const { return (x & mask); }
+
+//		template <typename IN, typename OUT>
+//		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
+//			// TODO: [ ] do SSE version here
+//			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
+//		}
+	};
+	template <typename S>
+	constexpr size_t modulus2<S>::batch_size;
+*/
 
 template <class Key, class V, template <typename> class Hash = ::std::hash,
           template <typename> class Equal = ::std::equal_to
@@ -270,16 +291,16 @@ public:
 
 		S mask;
 
-		modulus2(S const & _mask) :	mask(_mask) {}
+		modulus2(S const & _mask, int) :	mask(_mask) {}  // dummy
 
 		template <typename IN>
 		inline IN operator()(IN const & x) const { return (x & mask); }
 
-		template <typename IN, typename OUT>
-		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
-			// TODO: [ ] do SSE version here
-			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
-		}
+//		template <typename IN, typename OUT>
+//		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
+//			// TODO: [ ] do SSE version here
+//			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
+//		}
 	};
 
 	// mod 2 okay since hashtable size is always power of 2.
@@ -548,7 +569,7 @@ public:
             	numBuckets(next_power_of_2(_numBuckets)),
 				bucketMask(numBuckets - 1),
 				totalKeyCount(0),
-				hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(bucketMask))
+				hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(bucketMask, 0))
     {
 	if (numBuckets >= (1 << 30)) 
 		throw std::invalid_argument("number of buckets cannot exceed 2^30");
@@ -587,6 +608,139 @@ public:
 		_mm_free(countSortBuf);
 		_mm_free(info_container);
 	}
+
+    hashmap_radixsort(hashmap_radixsort const & other) : 
+        numBuckets(other.numBuckets),
+        bucketMask(other.bucketMask),
+        numBins(other.numBins),
+        binMask(other.binMask),
+        binShift(other.binShift),
+        binSize(other.binSize),
+        overflowBufSize(other.overflowBufSize),
+        curOverflowBufId(other.curOverflowBufId),
+        sortBufSize(other.sortBufSize),
+        noValue(other.noValue),
+        coherence(other.coherence),
+        seed(other.seed),
+        totalKeyCount(other.totalKeyCount),
+        eq(other.eq),
+        hash(other.hash),
+        hll(other.hll),
+        hash_mod2(other.hash_mod2)
+    {
+        countArray = (uint16_t *)_mm_malloc(numBins * sizeof(uint16_t), 64);
+        memcpy(countArray, other.countArray, numBins * sizeof(uint16_t));
+        hashTable = (HashElement *)_mm_malloc(numBins * binSize * sizeof(HashElement), 64);
+        memcpy(hashTable, other.hashTable, numBins * binSize * sizeof(HashElement));
+        overflowBuf = (HashElement *)_mm_malloc(overflowBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(overflowBuf, other.overflowBuf, overflowBufSize * binSize * sizeof(HashElement));
+        sortBuf = (HashElement *)_mm_malloc(sortBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(sortBuf, other.sortBuf, sortBufSize * binSize * sizeof(HashElement));
+        countSortBuf = (uint16_t *)_mm_malloc(sortBufSize * sizeof(uint16_t), 64);
+        memcpy(countSortBuf, other.countSortBuf, sortBufSize * sizeof(uint16_t));
+        info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
+        memcpy(info_container, other.info_container, numBuckets * sizeof(int16_t));
+    }
+    hashmap_radixsort(hashmap_radixsort && other) : 
+        numBuckets(other.numBuckets),
+        bucketMask(other.bucketMask),
+        numBins(other.numBins),
+        binMask(other.binMask),
+        binShift(other.binShift),
+        binSize(other.binSize),
+        overflowBufSize(other.overflowBufSize),
+        curOverflowBufId(other.curOverflowBufId),
+        sortBufSize(other.sortBufSize),
+        noValue(other.noValue),
+        coherence(other.coherence),
+        seed(other.seed),
+        totalKeyCount(other.totalKeyCount),
+        eq(std::move(other.eq)),
+        hash(std::move(other.hash)),
+        hash_mod2(std::move(other.hash_mod2))
+    {
+        hll.swap(other.hll),
+        std::swap(countArray, other.countArray);
+        std::swap(hashTable, other.hashTable);
+        std::swap(overflowBuf, other.overflowBuf);
+        std::swap(sortBuf, other.sortBuf);
+        std::swap(countSortBuf, other.countSortBuf);
+        std::swap(info_container, other.info_container);
+    }
+    hashmap_radixsort & operator=(hashmap_radixsort const & other) {
+        numBuckets = other.numBuckets;
+        bucketMask = other.bucketMask;
+        numBins = other.numBins;
+        binMask = other.binMask;
+        binShift = other.binShift;
+        binSize = other.binSize;
+        overflowBufSize = other.overflowBufSize;
+        curOverflowBufId = other.curOverflowBufId;
+        sortBufSize = other.sortBufSize;
+        noValue = other.noValue;
+        coherence = other.coherence;
+        seed = other.seed;
+        totalKeyCount = other.totalKeyCount;
+
+        eq = other.eq;
+        hash = other.hash;
+        hll = other.hll;
+        hash_mod2 = other.hash_mod2;
+
+        _mm_free(countArray);
+        countArray = (uint16_t *)_mm_malloc(numBins * sizeof(uint16_t), 64);
+        memcpy(countArray, other.countArray, numBins * sizeof(uint16_t));
+        _mm_free(hashTable);
+        hashTable = (HashElement *)_mm_malloc(numBins * binSize * sizeof(HashElement), 64);
+        memcpy(hashTable, other.hashTable, numBins * binSize * sizeof(HashElement));
+        _mm_free(overflowBuf);
+        overflowBuf = (HashElement *)_mm_malloc(overflowBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(overflowBuf, other.overflowBuf, overflowBufSize * binSize * sizeof(HashElement));
+        _mm_free(sortBuf);
+        sortBuf = (HashElement *)_mm_malloc(sortBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(sortBuf, other.sortBuf, sortBufSize * binSize * sizeof(HashElement));
+        _mm_free(countSortBuf);
+        countSortBuf = (uint16_t *)_mm_malloc(sortBufSize * sizeof(uint16_t), 64);
+        memcpy(countSortBuf, other.countSortBuf, sortBufSize * sizeof(uint16_t));
+        _mm_free(info_container);
+        info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
+        memcpy(info_container, other.info_container, numBuckets * sizeof(int16_t));
+
+        return *this;
+    }
+    hashmap_radixsort & operator=(hashmap_radixsort && other) {
+        numBuckets = other.numBuckets;
+        bucketMask = other.bucketMask;
+        numBins = other.numBins;
+        binMask = other.binMask;
+        binShift = other.binShift;
+        binSize = other.binSize;
+        overflowBufSize = other.overflowBufSize;
+        curOverflowBufId = other.curOverflowBufId;
+        sortBufSize = other.sortBufSize;
+        noValue = other.noValue;
+        coherence = other.coherence;
+        seed = other.seed;
+        totalKeyCount = other.totalKeyCount;
+
+        eq = std::move(other.eq);
+        hash = std::move(other.hash);
+        hll.swap(other.hll);
+        hash_mod2 = std::move(other.hash_mod2);
+
+        std::swap(countArray, other.countArray);
+        std::swap(hashTable, other.hashTable);
+        std::swap(overflowBuf, other.overflowBuf);
+        std::swap(sortBuf, other.sortBuf);
+        std::swap(countSortBuf, other.countSortBuf);
+        std::swap(info_container, other.info_container);
+
+        return *this;
+    }
+
+
+
+
 
 	void set_novalue(V _noValue) const { noValue = _noValue; }
 

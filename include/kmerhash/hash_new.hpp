@@ -662,9 +662,13 @@ protected:
   // use local static array instead of dynamic ones so when
   // default copy construction/assignment happens,
   // we are not copying pointers that later gets freed by multiple objects.
-  mutable Key key_buf[batch_size] __attribute__((aligned(64)));
-  mutable PRETRANS_VAL_TYPE trans_buf[batch_size] __attribute__((aligned(64)));
-  mutable HASH_VAL_TYPE hash_buf[batch_size] __attribute__((aligned(64)));
+//  mutable Key key_buf[batch_size] __attribute__((aligned(64)));
+//  mutable PRETRANS_VAL_TYPE trans_buf[batch_size] __attribute__((aligned(64)));
+//  mutable HASH_VAL_TYPE hash_buf[batch_size] __attribute__((aligned(64)));
+
+  mutable Key * key_buf;
+  mutable PRETRANS_VAL_TYPE * trans_buf;
+  mutable HASH_VAL_TYPE * hash_buf;
 
 public:
   // potentially runs into double free issue when the pointers are copied.
@@ -675,14 +679,57 @@ public:
   TransformedHash(HASH_T const &_hash = HASH_T(),
                   PRETRANS_T const &pre_trans = PRETRANS_T(),
                   POSTTRANS_T const &post_trans = POSTTRANS_T()) : //batch_size(lcm(lcm(pretrans_batch_size, hash_batch_size), postrans_batch_size)),
+			key_buf(nullptr),
+			trans_buf(nullptr),
+			hash_buf(nullptr),
                                                                    trans(pre_trans),
-                                                                   h(_hash), posttrans(post_trans){
-                                                                     memset(hash_buf, 0, batch_size*sizeof(HASH_VAL_TYPE));
+                                                                   h(_hash),
+								   posttrans(post_trans){
+
+									key_buf = ::utils::mem::aligned_alloc<Key>(batch_size, 64);
+   	                                                                  memset(key_buf, 0, batch_size*sizeof(Key));
+									trans_buf = ::utils::mem::aligned_alloc<PRETRANS_VAL_TYPE>(batch_size, 64);
+   	                                                                  memset(trans_buf, 0, batch_size*sizeof(PRETRANS_VAL_TYPE));
+									hash_buf = ::utils::mem::aligned_alloc<HASH_VAL_TYPE>(batch_size, 64);
+   	                                                                  memset(hash_buf, 0, batch_size*sizeof(HASH_VAL_TYPE));
                                                                    };
 
   ~TransformedHash()
   {
+	if (key_buf != nullptr)	::utils::mem::aligned_free(key_buf);
+	if (trans_buf != nullptr) ::utils::mem::aligned_free(trans_buf);
+	if (hash_buf != nullptr) ::utils::mem::aligned_free(hash_buf);
   }
+
+
+  TransformedHash(TransformedHash const & other) :
+	TransformedHash(other.h, other.trans, other.posttrans)
+	{
+  }
+
+
+  TransformedHash(TransformedHash && other) :
+	TransformedHash(other.h, other.trans, other.posttrans)
+	{
+  }
+
+
+  TransformedHash & operator=(TransformedHash const & other) {
+h = other.h;
+trans = other.trans;
+posttrans = other.posttrans;	
+  }
+  
+
+  TransformedHash & operator=(TransformedHash && other) {
+h = std::move(other.h);
+trans = std::move(other.trans);
+posttrans = std::move(other.posttrans);	
+  }
+  
+
+
+
 
   // conditionally defined, there should be just 1 defined methods after compiler resolves all this.
   // note that the compiler may do the same if it notices no-op....
@@ -1307,6 +1354,18 @@ public:
 #endif
   }
 };
+template <typename Key, template <typename> class Hash,
+          template <typename> class PreTransform,
+          template <typename> class PostTransform>
+constexpr size_t TransformedHash<Key, Hash, PreTransform, PostTransform>::pretrans_batch_size;
+template <typename Key, template <typename> class Hash,
+          template <typename> class PreTransform,
+          template <typename> class PostTransform>
+constexpr size_t TransformedHash<Key, Hash, PreTransform, PostTransform>::hash_batch_size;
+template <typename Key, template <typename> class Hash,
+          template <typename> class PreTransform,
+          template <typename> class PostTransform>
+constexpr size_t TransformedHash<Key, Hash, PreTransform, PostTransform>::posttrans_batch_size;
 template <typename Key, template <typename> class Hash,
           template <typename> class PreTransform,
           template <typename> class PostTransform>
