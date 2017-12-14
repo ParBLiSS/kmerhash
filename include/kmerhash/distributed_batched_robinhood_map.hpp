@@ -2771,8 +2771,9 @@ if (measure_mode == MEASURE_INSERT)
 
     BL_BENCH_REPORT_MPI_NAMED(insert, "hashmap:insert_1", this->comm);
 
-    printf("rank %d of %d insert. before %ld after %ld\n", this->comm.rank(), this->comm.size(), before, this->c.size());
-
+#ifndef NDEBUG
+    printf("rank %d of %d insert %ld, recv %ld. before %ld after %ld\n", this->comm.rank(), this->comm.size(), input.size(), input.size(), before, this->c.size());
+#endif
     return this->c.size() - before;
   }
 
@@ -3043,7 +3044,9 @@ BL_BENCH_START(insert);
 
     BL_BENCH_REPORT_MPI_NAMED(insert, "hashmap:insert_p", this->comm);
 
-    printf("rank %d of %d insert. before %ld after %ld\n", this->comm.rank(), this->comm.size(), before, this->c.size());
+#ifndef NDEBUG
+    printf("rank %d of %d insert %ld, recv %ld. before %ld after %ld\n", this->comm.rank(), this->comm.size(), input.size(), recv_total, before, this->c.size());
+#endif
 
     return this->c.size() - before;
   }

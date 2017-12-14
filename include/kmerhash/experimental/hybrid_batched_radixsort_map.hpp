@@ -37,6 +37,9 @@
  *          signature of predicate is bool pred(T&).  if predicate needs to access the local map, it should be done via its constructor.
  *
 
+ * TODO:
+ * [ ] explicitly set the thread affinity - possible with openmp?  http://scc.ustc.edu.cn/zlsc/chinagrid/intel/mkl/mkl_userguide/GUID-0902790E-A4E0-4C1F-BE78-176AD178E18B.htm
+
  */
 
 #ifndef HYBRID_BATCHED_RADIXSORT_MAP_HPP
@@ -2557,14 +2560,20 @@ public:
       size_t insert_no_finalize(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
 
         auto insert_key_functor = [this](int tid, Key * it, Key * et, bool est = true){
+          size_t cnt = std::distance(it, et);
+
             if (est) {
-                printf("thread %d inserting %ld \n", tid, std::distance(it, et)); 
                 this->c[tid].estimate_and_insert(it, std::distance(it, et));
             } else
                 this->c[tid].insert(it, std::distance(it, et));
+
+            printf("thread %d inserting %ld, inserted %ld\n", tid, cnt, this->c[tid].size());
+
         };
         auto insert_key_no_est_functor = [this](int tid, Key * it, Key * et){
             this->c[tid].insert(it, std::distance(it, et));
+            printf("thread %d inserting %ld, inserted %ld\n", tid, std::distance(it, et), this->c[tid].size());
+
         };
 
 
