@@ -48,11 +48,8 @@ shash=CRC32C
 export MV2_SHOW_CPU_BINDING=1
 export MV2_ENABLE_AFFINITY=1
 
-if [ 1 -eq 0 ]
-then
 
-
-for map in RADIXSORT BROBINHOOD
+for map in RADIXSORT #BROBINHOOD
 do
 
 for EXEC in bin/*KmerIndex-${format}-a${a}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${dhash}-sh${shash}
@@ -72,23 +69,24 @@ done
 	mpirun_rsh -hostfile=$PBS_NODEFILE -np $PBS_NP ${EXEC} ${df} ${df2} > ${EXEC/#bin/log}.p28.t1.log 2>&1
 done
 
-fi
+
 
 export OMP_DISPLAY_ENV=true
 export OMP_PLACES=cores
 export OMP_PROC_BIND=true
 
-for map in MTROBINHOOD # MTRADIXSORT
+if [ 1 -eq 0 ]
+then
+
+for map in MTROBINHOOD MTRADIXSORT
 do
 
-for EXEC in bin/testKmerIndex-${format}-a${a}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${dhash}-sh${shash}
+for EXEC in bin/*KmerIndex-${format}-a${a}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${dhash}-sh${shash}
 do
 	echo "running ${EXEC} 1x28"
 	export OMP_NUM_THREADS=$PBS_NP
 	mpirun_rsh -hostfile=$PBS_NODEFILE -np 1 OMP_NUM_THREADS=28 MV2_CPU_MAPPING=0-27 ${EXEC} -b -F ${df} > ${EXEC/#bin/log}.p1.t28.log 2>&1
 
-if [ 1 -eq 0 ]
-then 
 	echo "running ${EXEC} 2x14"
 	export OMP_NUM_THREADS=14
 	mpirun_rsh -hostfile=$PBS_NODEFILE -np 2 OMP_NUM_THREADS=14 MV2_CPU_MAPPING=0-13:14-27 ${EXEC} -b -F ${df} > ${EXEC/#bin/log}.p2.t14.log 2>&1
@@ -97,16 +95,16 @@ then
 	export OMP_NUM_THREADS=1	
 	mpirun_rsh -hostfile=$PBS_NODEFILE -np $PBS_NP OMP_NUM_THREADS=1 MV2_CPU_BINDING_POLICY=scatter MV2_CPU_BINDING_LEVEL=core ${EXEC} -b -F ${df} > ${EXEC/#bin/log}.p28.t1.log 2>&1
 	
+
+done
+
+	EXEC=bin/testKmerCounter-${format}-a${a}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${dhash}-sh${shash}
+	echo "running ${EXEC} 1x64"
+	mpirun_rsh -hostfile=$PBS_NODEFILE -np 1 OMP_NUM_THREADS=$PBS_NP MV2_CPU_BINDING_POLICY=scatter MV2_CPU_BINDING_LEVEL=socket ${EXEC} ${df} ${df2} > ${EXEC/#bin/log}.p1.t28.log 2>&1
+
+done
+
 fi
-
-done
-
-#	EXEC=bin/testKmerCounter-${format}-a${a}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${dhash}-sh${shash}
-#	echo "running ${EXEC} 1x64"
-#	mpirun_rsh -hostfile=$PBS_NODEFILE -np 1 OMP_NUM_THREADS=$PBS_NP MV2_CPU_BINDING_POLICY=scatter MV2_CPU_BINDING_LEVEL=socket ${EXEC} ${df} ${df2} > ${EXEC/#bin/log}.p1.t28.log 2>&1
-
-done
-
 
 if [ 1 -eq 0 ]
 then

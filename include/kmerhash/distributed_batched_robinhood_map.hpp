@@ -3040,13 +3040,14 @@ BL_BENCH_START(insert);
 	::utils::mem::aligned_free(distributed);
     BL_BENCH_END(insert, "clean up", recv_total);
 
-#endif // non overlap
-
-    BL_BENCH_REPORT_MPI_NAMED(insert, "hashmap:insert_p", this->comm);
-
 #ifndef NDEBUG
     printf("rank %d of %d insert %ld, recv %ld. before %ld after %ld\n", this->comm.rank(), this->comm.size(), input.size(), recv_total, before, this->c.size());
 #endif
+
+
+#endif // non overlap
+
+    BL_BENCH_REPORT_MPI_NAMED(insert, "hashmap:insert_p", this->comm);
 
     return this->c.size() - before;
   }

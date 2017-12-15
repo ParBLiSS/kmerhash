@@ -2586,12 +2586,12 @@ public:
             } else
                 this->c[tid].insert(it, std::distance(it, et));
 
-            printf("thread %d inserting %ld, inserted %ld\n", tid, cnt, this->c[tid].size());
+            printf("rank %d thread %d inserting %ld, inserted %ld\n", this->comm.rank(), tid, cnt, this->c[tid].size());
 
         };
         auto insert_key_no_est_functor = [this](int tid, Key * it, Key * et){
             this->c[tid].insert(it, std::distance(it, et));
-            printf("thread %d inserting %ld, inserted %ld\n", tid, std::distance(it, et), this->c[tid].size());
+            printf("rank %d thread %d inserting %ld, inserted %ld\n", this->comm.rank(), tid, std::distance(it, et), this->c[tid].size());
 
         };
 
