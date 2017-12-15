@@ -761,13 +761,14 @@ namespace hsc  // hybrid std container
 		  key_to_hash(DistHash<trans_val_type>(9876543), DistTrans<Key>(), ::bliss::transform::identity<hash_val_type>())
 		  //hll(ceilLog2(_comm.size()))  // top level hll. no need to ignore bits.
         {
+
+		printf("initializing for %d threads\n", omp_get_max_threads());
 		c = new local_container_type[omp_get_max_threads()];
 		hlls = new hyperloglog64<Key, InternalHash, 12>[omp_get_max_threads()]; 
  //   	  this->c.set_ignored_msb(ceilLog2(_comm.size()));   // NOTE THAT THIS SHOULD MATCH KEY_TO_RANK use of bits in hash table.
 
 	#pragma omp parallel
 	{
-		
 	}
       }
 
@@ -1026,7 +1027,7 @@ namespace hsc  // hybrid std container
                 this->assign_count(buffer, buffer + block, static_cast<uint32_t>(nthreads_global),
                  thread_bucket_sizes[tid], reinterpret_cast<uint32_t*>(bid_buf) );
             }
-            thread_bucket_offsets[tid].resize(nthreads_global);
+            thread_bucket_offsets[tid].resize(nthreads_global, 0);
 
             #pragma omp barrier
 
@@ -1051,7 +1052,6 @@ namespace hsc  // hybrid std container
             // wait for all to be done with the scan.
             #pragma omp barrier
 
-            if (tcnt > 1) {  // update offsets if more than 1 thread.
                 //  2. 1 thread to scan thread total to get thread offsets.  O(C) instead of O(CP)
                 #pragma omp single
                 {
@@ -1077,9 +1077,10 @@ namespace hsc  // hybrid std container
                         thread_bucket_offsets[t][j] += offset;
                     }
                 }
-            }            
    
             //===============  now the offsets are ready.  we can permute.
+            // since each thread updates a portion of every other thread's thread buckewt sizes, need this barrier here.
+			#pragma omp barrier
 
             // then call permute_by_bucketId and computed offsets. 
             // NOTE: permute back into input
@@ -1257,7 +1258,7 @@ namespace hsc  // hybrid std container
         }
     #endif
         // do some calc with thread_bucket_sizes to get offsets for each bucket for each thread in node-wide permuted input array.
-        thread_bucket_offsets[tid].resize(nthreads_global);
+        thread_bucket_offsets[tid].resize(nthreads_global, 0);
         
         // make sure all threads have reached hererehashing
         #pragma omp barrier
@@ -1370,6 +1371,8 @@ namespace hsc  // hybrid std container
             }            
 
         //===============  now the offsets are ready.  we can permute.
+            // since each thread updates a portion of every other thread's thread buckewt sizes, need this barrier here.
+		#pragma omp barrier
 
         // then call permute_by_bucketId and computed offsets.
             if (nthreads_global <= std::numeric_limits<uint8_t>::max()) {
@@ -1440,7 +1443,7 @@ namespace hsc  // hybrid std container
     if (estimate) {
         BL_BENCH_COLLECTIVE_START(modify, "alloc_hashtable", this->comm);
         size_t est = this->hlls[0].estimate_average_per_rank(this->comm);
-        if (this->comm.rank() == 0) std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
+        printf("rank %d estimated size %ld\n", this->comm.rank(), est);
 
         #pragma omp parallel
         {
@@ -1598,14 +1601,14 @@ namespace hsc  // hybrid std container
               OP compute) const {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(query);
-std::cout << "query1 " << std::endl << std::flush;
+
         if (::dsc::empty(input, this->comm)) {
           BL_BENCH_REPORT_MPI_NAMED(query, "base_batched_radixsort_map:query", this->comm);
           return;
         }
 
         BL_BENCH_START(query);
-printf("1\n");
+
         // get some common variables
         size_t in_size = input.size();
         size_t nthreads_global = omp_get_max_threads();
@@ -1620,7 +1623,6 @@ printf("1\n");
         std::vector<size_t> thread_total(omp_get_max_threads(), 0);
 
         BL_BENCH_END(query, "alloc", nthreads_global);
-printf("2\n");
 
         // resize
         BL_BENCH_START(query);
@@ -1638,12 +1640,11 @@ printf("2\n");
             size_t r_start = block * tid + std::min(rem, static_cast<size_t>(tid));
             block += (static_cast<size_t>(tid) < rem ? 1: 0);
             size_t r_end = r_start + block;
-printf("start %ld end %ld block %ld rem %ld\n", r_start, r_end, block, rem);
 
             auto it = input.data() + r_start;
             auto et = input.data() + r_end;
             auto rt = results.data();
-printf("%d 3\n", tid);
+
             // transform once.  bucketing and distribute will read it multiple times.
             if (tcnt > 1) { // only do if more than 1 thread.  then we need to permute
                 // require permuting.  leave the input in the permuted order after.
@@ -1666,11 +1667,10 @@ printf("%d 3\n", tid);
                     this->assign_count(buffer, buffer + block, static_cast<uint32_t>(nthreads_global),
                     thread_bucket_sizes[tid], reinterpret_cast<uint32_t*>(bid_buf) );
                 }
-                thread_bucket_offsets[tid].resize(nthreads_global);
+                thread_bucket_offsets[tid].resize(nthreads_global, 0);
 
                 #pragma omp barrier
 
-printf("%d 3.1\n", tid);
                 // ===== now compute the offsets 
                 // exclusive scan of everyhing.  proceed in 3 step
                 //  1. thread local scan for each bucket, each thread do a block of comm_size buckets, across all thread., store back into each thread's thread_bucket_offsets
@@ -1692,8 +1692,6 @@ printf("%d 3.1\n", tid);
                 // wait for all to be done with the scan.
                 #pragma omp barrier
 
-printf("%d 3.2\n", tid);
-                if (tcnt > 1) {  // update offsets if more than 1 thread.
                     //  2. 1 thread to scan thread total to get thread offsets.  O(C) instead of O(CP)
                     #pragma omp single
                     {
@@ -1719,10 +1717,11 @@ printf("%d 3.2\n", tid);
                             thread_bucket_offsets[t][j] += offset;
                         }
                     }
-                }            
-                    //===============  now the offsets are ready.  we can permute.
 
-printf("%d 3.3\n", tid);
+				//===============  now the offsets are ready.  we can permute.
+	            // since each thread updates a portion of every other thread's thread buckewt sizes, need this barrier here.
+				#pragma omp barrier
+
                     // then call permute_by_bucketId and computed offsets. 
                     // NOTE: permute back into input
                 if (nthreads_global <= std::numeric_limits<uint8_t>::max()) {
@@ -1741,13 +1740,11 @@ printf("%d 3.3\n", tid);
 
                 #pragma omp barrier
 
-printf("%d 3.4\n", tid);
                 // update it and et.
                 it = input.data() + node_bucket_offsets[tid];
                 et = it + node_bucket_sizes[tid];
                 rt = results.data() + node_bucket_offsets[tid];
             } else {
-printf("%d 3\n", tid);
                 this->transform_input(it, et, it);
                 rt = results.data() + r_start;
             }
@@ -1757,8 +1754,8 @@ printf("%d 3\n", tid);
 
         } // end parallel section
         BL_BENCH_END(query, "local_find", results.size());
-printf("4\n");
-        BL_BENCH_REPORT_NAMED(query, "base_hashmap:query");
+
+        BL_BENCH_REPORT_MPI_NAMED(query, "base_hashmap:query", this->comm);
 
         return;
       }
@@ -1866,7 +1863,7 @@ printf("4\n");
                         reinterpret_cast<uint32_t*>(bid_buf) );
         }
         // do some calc with thread_bucket_sizes to get offsets for each bucket for each thread in node-wide permuted input array.
-        thread_bucket_offsets[tid].resize(nthreads_global);
+        thread_bucket_offsets[tid].resize(nthreads_global, 0);
         
         // make sure all threads have reached here
         #pragma omp barrier
@@ -1918,6 +1915,7 @@ printf("4\n");
             }
         }
         //===============  now the offsets are ready.  we can permute.
+		#pragma omp barrier
 
         // then call permute_by_bucketId and computed offsets.
             if (nthreads_global <= std::numeric_limits<uint8_t>::max()) {
