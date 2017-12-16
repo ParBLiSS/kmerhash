@@ -1305,7 +1305,7 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
 
     MicroBenchmark mb;
     //bench_sequential_insert(hopscotch_map<int, int, H>(), "tessil/hopscotch_map", upTo, times, all_stats);
-/*
+
 	{
 		::fsc::hashmap_robinhood_doubling<K, V, H<K>> m;
 		m.set_max_load_factor(max_load);
@@ -1339,7 +1339,7 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
 		m.set_min_load_factor(min_load);
         bench_batch_insert_robinhood(m, mb, "BRHO_Prefetch_avx", upTo, times, all_stats);  // no overflow
     }
-*/
+
     {
         ::fsc::hashmap_radixsort<K, V, H> m;
         bench_batch_insert_radix(m, mb, "BRS_Prefetch", upTo, times, all_stats);  // radixsort
