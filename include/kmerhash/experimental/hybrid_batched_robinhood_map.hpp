@@ -196,7 +196,7 @@ namespace hsc  // hybrid std container
 //      using TransHash = typename MapParams<K>::template StoreTransFuncTemplate<K>;
 
     // own hyperloglog definition.  separate from the local container's.  this estimates using the transformed distribute hash.
-    hyperloglog64<Key, InternalHash, 12> * hlls;
+    std::vector<hyperloglog64<Key, InternalHash, 12> > hlls;
 
 
 	template <typename K>
@@ -234,7 +234,7 @@ namespace hsc  // hybrid std container
                                                                                            ::std::declval<::bliss::filter::TruePredicate>()));
 
     protected:
-      local_container_type * c;
+      std::vector<local_container_type> c;
 
 
       /// local reduction via a copy of local container type (i.e. batched_robinhood_map).
@@ -761,20 +761,26 @@ namespace hsc  // hybrid std container
 
     	  if (_comm.rank() == 0)
     		  printf("rank %d initializing for %d threads\n", _comm.rank(), omp_get_max_threads());
-		c = new local_container_type[omp_get_max_threads()];
-		hlls = new hyperloglog64<Key, InternalHash, 12>[omp_get_max_threads()]; 
+//		c = new local_container_type[omp_get_max_threads()];
+//		hlls = new hyperloglog64<Key, InternalHash, 12>[omp_get_max_threads()];
+  	  c.resize(omp_get_max_threads());
+  	  hlls.resize(omp_get_max_threads());
+
  //   	  this->c.set_ignored_msb(ceilLog2(_comm.size()));   // NOTE THAT THIS SHOULD MATCH KEY_TO_RANK use of bits in hash table.
 
 	#pragma omp parallel
 	{
+			int tid = omp_get_thread_num();
+			c[tid].swap(local_container_type());  // get thread local allocation
+			hlls[tid].swap(hyperloglog64<Key, InternalHash, 12>());
 	}
       }
 
 
 
       virtual ~batched_robinhood_map_base() {
-	delete [] c;
-	delete [] hlls;
+//	delete [] c;
+//	delete [] hlls;
 	};
 
 

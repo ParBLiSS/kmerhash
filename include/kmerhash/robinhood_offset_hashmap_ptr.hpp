@@ -595,7 +595,7 @@ public:
 		std::swap(QUERY_LOOKAHEAD, other.QUERY_LOOKAHEAD);
 		std::swap(INSERT_LOOKAHEAD_MASK, other.INSERT_LOOKAHEAD_MASK);
 		std::swap(QUERY_LOOKAHEAD_MASK, other.QUERY_LOOKAHEAD_MASK);
-		std::swap(hll, std::move(other.hll));
+		hll.swap(std::move(other.hll));
 		std::swap(lsize, other.lsize);
 		std::swap(buckets, other.buckets);
 		std::swap(mask, other.mask);
@@ -614,14 +614,14 @@ public:
 		std::swap(shifts, other.shifts);
 		std::swap(max_shifts, other.max_shifts);
 #endif
-		std::swap(filter, std::move(other.filter));
-		std::swap(hash, std::move(other.hash));
+		std::swap(filter, other.filter);
+		std::swap(hash, other.hash);
 		std::swap(hash_mod2, other.hash_mod2);
 
-		std::swap(eq, std::move(other.eq));
-		std::swap(reduc, std::move(other.reduc));
-		std::swap(container, std::move(other.container));
-		std::swap(info_container, std::move(other.info_container));
+		std::swap(eq, other.eq);
+		std::swap(reduc, other.reduc);
+		std::swap(container, other.container);
+		info_container.swap(other.info_container);
 	}
 
 

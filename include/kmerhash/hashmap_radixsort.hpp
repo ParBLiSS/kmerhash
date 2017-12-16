@@ -740,6 +740,33 @@ public:
     }
 
 
+    void swap(hashmap_radixsort && other) {
+        std::swap(numBuckets, other.numBuckets);
+        std::swap(bucketMask, other.bucketMask);
+        std::swap(numBins   , other.numBins);
+        std::swap(binMask   , other.binMask);
+        std::swap(binShift  , other.binShift);
+        std::swap(binSize   , other.binSize);
+        std::swap(overflowBufSize, other.overflowBufSize);
+        std::swap(curOverflowBufId, other.curOverflowBufId);
+        std::swap(sortBufSize, other.sortBufSize);
+        std::swap(noValue, other.noValue);
+        std::swap(coherence, other.coherence);
+        std::swap(seed, other.seed);
+        std::swap(totalKeyCount, other.totalKeyCount);
+
+        std::swap(eq, other.eq);
+        std::swap(hash, other.hash);
+        hll.swap(std::move(other.hll));
+        std::swap(hash_mod2, other.hash_mod2);
+
+        std::swap(countArray, other.countArray);
+        std::swap(hashTable, other.hashTable);
+        std::swap(overflowBuf, other.overflowBuf);
+        std::swap(sortBuf, other.sortBuf);
+        std::swap(countSortBuf, other.countSortBuf);
+        std::swap(info_container, other.info_container);
+    }
 
 
 

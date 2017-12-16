@@ -320,14 +320,14 @@ TYPED_TEST_P(HyperLogLog64Test, swap){
 
 		this->update(lhll, this->uniq);
 
-		this->hll.swap(lhll);
+		this->hll.swap(std::move(lhll));
 
 //		this->report(i, this->hll, this->uniq);
 
-		lhll.swap(this->hll);
+		lhll.swap(std::move(this->hll));
 		this->hll.clear();
 	}
-	this->hll.swap(lhll);
+	this->hll.swap(std::move(lhll));
 
 	this->report(this->iterations, this->hll, this->uniq);
 
