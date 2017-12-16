@@ -2619,9 +2619,9 @@ public:
           size_t cnt = std::distance(it, et);
 
             if (est) {
-                this->c[tid].estimate_and_insert(it, std::distance(it, et));
+                this->c[tid].estimate_and_insert(it, cnt);
             } else
-                this->c[tid].insert(it, std::distance(it, et));
+                this->c[tid].insert(it, cnt);
 
 #ifdef MT_DEBUG
             printf("rank %d thread %d inserting %ld, inserted %ld\n", this->comm.rank(), tid, cnt, this->c[tid].size());

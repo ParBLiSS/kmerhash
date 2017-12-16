@@ -384,12 +384,9 @@ namespace dsc  // distributed std container
         	return;  // no data in question.
         }
 
-
-        constexpr size_t batch_size = InternalHash::batch_size;
-
         // do a few cachelines at a time.  probably a good compromise is to do batch_size number of cachelines
         // 64 / sizeof(ASSIGN_TYPE)...
-        constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) * batch_size;
+        constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) * InternalHash::batch_size;
 
 //        BL_BENCH_START(permute_est);
 
@@ -407,7 +404,7 @@ namespace dsc  // distributed std container
 
           // and compute the hll.
     	  IT it = _begin;
-          if (batch_size > 1) {
+          if (InternalHash::batch_size > 1) {
         	  transhash_val_type hashvals[block_size];
 
         	  // do blocks
@@ -457,7 +454,7 @@ namespace dsc  // distributed std container
 
 //        BL_BENCH_START(permute_est);
 
-        ASSIGN_TYPE* bucketIds = ::utils::mem::aligned_alloc<ASSIGN_TYPE>(input_size);
+        ASSIGN_TYPE* bucketIds = ::utils::mem::aligned_alloc<ASSIGN_TYPE>(input_size + InternalHash::batch_size);
 //        BL_BENCH_END(permute_est, "alloc", input_size);
 
 
@@ -473,7 +470,7 @@ namespace dsc  // distributed std container
           ASSIGN_TYPE rank;
 
           // and compute the hll.
-          if (batch_size > 1) {
+          if (InternalHash::batch_size > 1) {
         	  transhash_val_type hashvals[block_size];
 
         	  size_t max = (input_size / block_size) * block_size;
@@ -619,11 +616,10 @@ namespace dsc  // distributed std container
                 ::fsc::hash::TransformedHash<Key, DistHash, DistTrans, mod_int> >::type>::type;
         InternalHashMod key_to_rank2(DistHash<trans_val_type>(9876543), DistTrans<Key>(), modulus<transhash_val_type, ASSIGN_TYPE>(num_buckets));
 
-        constexpr size_t batch_size = InternalHashMod::batch_size;
 //        		decltype(declval<decltype(declval<KeyToRank>().proc_trans_hash)>().h)::batch_size;
         // do a few cachelines at a time.  probably a good compromise is to do batch_size number of cachelines
         // 64 / sizeof(ASSIGN_TYPE)...
-        constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) * batch_size;
+        constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) * InternalHash::batch_size;
 
 //        BL_BENCH_START(permute_est);
         // initialize number of elements per bucket
@@ -649,7 +645,7 @@ namespace dsc  // distributed std container
 
 //        BL_BENCH_START(permute_est);
 
-        ASSIGN_TYPE* bucketIds = ::utils::mem::aligned_alloc<ASSIGN_TYPE>(input_size);
+        ASSIGN_TYPE* bucketIds = ::utils::mem::aligned_alloc<ASSIGN_TYPE>(input_size + InternalHash::batch_size);
 //        BL_BENCH_END(permute_est, "alloc", input_size);
 
 
@@ -665,7 +661,7 @@ namespace dsc  // distributed std container
     	  ASSIGN_TYPE* i2o_eit;
 
           // and compute the hll.
-          if (batch_size > 1) {
+          if (InternalHash::batch_size > 1) {
         	  size_t max = (input_size / block_size) * block_size;
 
 			  for (; i < max; i += block_size, it += block_size) {
@@ -897,7 +893,7 @@ namespace dsc  // distributed std container
 
   	  	  	int comm_size = this->comm.size();
 
-            ::std::pair<Key, T>* buffer = ::utils::mem::aligned_alloc<::std::pair<Key, T> >(input.size());
+            ::std::pair<Key, T>* buffer = ::utils::mem::aligned_alloc<::std::pair<Key, T> >(input.size() + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1035,7 +1031,7 @@ namespace dsc  // distributed std container
 #endif
   	  	  	  size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
 
-  	          ::std::pair<Key, T>* distributed = ::utils::mem::aligned_alloc<::std::pair<Key, T> >(recv_total);
+  	          ::std::pair<Key, T>* distributed = ::utils::mem::aligned_alloc<::std::pair<Key, T> >(recv_total + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1224,7 +1220,7 @@ namespace dsc  // distributed std container
 
             int comm_size = this->comm.size();
 
-            Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size());
+            Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size() + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1354,8 +1350,8 @@ namespace dsc  // distributed std container
 #endif
               size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
 
-              Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
-              count_result_type* dist_results = ::utils::mem::aligned_alloc<count_result_type>(recv_total);
+              Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total + InternalHash::batch_size);
+              count_result_type* dist_results = ::utils::mem::aligned_alloc<count_result_type>(recv_total + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1587,7 +1583,7 @@ if (measure_mode == MEASURE_A2A)
 
   	  	  	int comm_size = this->comm.size();
 
-  	  	  	Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size());
+  	  	  	Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size() + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1715,8 +1711,8 @@ if (measure_mode == MEASURE_A2A)
 #endif
   	  	  	  size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
 
-  	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
-  	          mapped_type* dist_results = ::utils::mem::aligned_alloc<mapped_type>(recv_total);
+  	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total + InternalHash::batch_size);
+  	          mapped_type* dist_results = ::utils::mem::aligned_alloc<mapped_type>(recv_total + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -2132,7 +2128,7 @@ if (measure_mode == MEASURE_A2A)
 
   	  	  	int comm_size = this->comm.size();
 
-  	  	  	Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size());
+  	  	  	Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size() + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -2222,7 +2218,7 @@ if (measure_mode == MEASURE_A2A)
 #elif defined(OVERLAPPED_COMM_BATCH)
 
 
-          BL_BENCH_COLLECTIVE_START(erase, "a2av_erase", this->comm);
+          BL_BENCH_COLLECTIVE_START(erase, "a2av_erase_batch", this->comm);
 
           ::khmxx::incremental::ialltoallv_and_modify_batch(
               input.data(), input.data() + input.size(), send_counts,
@@ -2231,7 +2227,7 @@ if (measure_mode == MEASURE_A2A)
                                                       },
                                                       this->comm);
 
-          BL_BENCH_END(erase, "a2av_erase", this->c.size());
+          BL_BENCH_END(erase, "a2av_erase_batch", this->c.size());
 
 
 #elif defined(OVERLAPPED_COMM_FULLBUFFER)
@@ -2274,7 +2270,7 @@ if (measure_mode == MEASURE_A2A)
 #endif
   	  	  	  size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
 
-  	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
+  	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -2579,7 +2575,8 @@ if (measure_mode == MEASURE_TRANSFORM)
 if (estimate) {
       BL_BENCH_COLLECTIVE_START(insert, "estimate", this->comm);
       // local hash computation and hll update.
-      hvals = ::utils::mem::aligned_alloc<HVT>(input.size() + local_container_type::PFD);  // 64 byte alignment.
+      hvals = ::utils::mem::aligned_alloc<HVT>(input.size() + local_container_type::PFD + Base::InternalHash::batch_size);  // 64 byte alignment.
+      memset(hvals + input.size(), 0, (local_container_type::PFD + Base::InternalHash::batch_size) * sizeof(HVT) );
       this->c.get_hll().update(input.data(), input.size(), hvals);
 
       size_t est = this->c.get_hll().estimate();
@@ -2660,7 +2657,7 @@ if (measure_mode == MEASURE_RESERVE)
 
 	  	  	int comm_size = this->comm.size();
 
-        Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size());
+        Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size() + Base::InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_RESERVE)
@@ -2825,7 +2822,7 @@ if (measure_mode == MEASURE_RESERVE)
 #endif
 	  	  	  size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
 
-	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
+	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total + Base::InternalHash::batch_size);
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_RESERVE)
   __itt_pause();
@@ -2868,7 +2865,8 @@ if (estimate) {
 
 BL_BENCH_COLLECTIVE_START(insert, "estimate", this->comm);
 // local hash computation and hll update.
-hvals = ::utils::mem::aligned_alloc<HVT>(recv_total + local_container_type::PFD);  // 64 byte alignment.
+hvals = ::utils::mem::aligned_alloc<HVT>(recv_total + local_container_type::PFD + Base::InternalHash::batch_size);  // 64 byte alignment.
+memset(hvals + recv_total, 0, (local_container_type::PFD + Base::InternalHash::batch_size) * sizeof(HVT) );
 this->c.get_hll().update(distributed, recv_total, hvals);
 
 size_t est = this->c.get_hll().estimate();

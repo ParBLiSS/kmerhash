@@ -3249,8 +3249,9 @@ public:
       size_t insert(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
 
         auto insert_key_functor = [this](int tid, Key * it, Key * et, bool est = true){
+#ifdef MT_DEBUG
            size_t before = this->c[tid].size();
-
+#endif
             if (estimate)
                 this->c[tid].insert(it, et, T(1));
             else
@@ -3260,8 +3261,9 @@ public:
 #endif
         };
         auto insert_key_no_est_functor = [this](int tid, Key * it, Key * et){
+#ifdef MT_DEBUG
           size_t before = this->c[tid].size();
-
+#endif
             this->c[tid].insert_no_estimate(it, et, T(1));
 #ifdef MT_DEBUG
             printf("rank %d of %d thread %d inserting %ld, before %ld, after %ld\n", this->comm.rank(), this->comm.size(), tid, std::distance(it, et), before, this->c[tid].size());

@@ -590,6 +590,7 @@ public:
         countSortBuf = (uint16_t *)_mm_malloc(sortBufSize * sizeof(uint16_t), 64);
         binShift = log2(sortBufSize);
         info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
+        memset(info_container, 0, numBuckets * sizeof(int16_t));
         curOverflowBufId = 0;
 #ifndef NDEBUG
         printf("numBuckets = %u, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
@@ -904,6 +905,7 @@ public:
 
     _mm_free(info_container);
         info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
+        memset(info_container, 0, numBuckets * sizeof(int16_t));
         curOverflowBufId = 0;
 #ifndef NDEBUG
         printf("numBuckets = %u, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
@@ -1192,7 +1194,8 @@ public:
     size_t estimate_and_insert(Key *keyArray, size_t numKeys) {
 
       // local hash computation and hll update.
-        hash_val_type* hvals = ::utils::mem::aligned_alloc<hash_val_type>(numKeys + PFD);  // 64 byte alignment.
+        hash_val_type* hvals = (hash_val_type *)_mm_malloc((numKeys + PFD) * sizeof(hash_val_type), 64);
+        memset(hvals + numKeys, 0, sizeof(hash_val_type) * PFD);
         this->hll.update(keyArray, numKeys, hvals);
 
         size_t est = this->hll.estimate();
@@ -1203,7 +1206,7 @@ public:
 
         size_t inserted = insert(keyArray, hvals, numKeys);
 
-        ::utils::mem::aligned_free(hvals);
+        _mm_free(hvals);
 
         return inserted;
     }
@@ -1243,7 +1246,7 @@ public:
             //hashTicks += (endTick - startTick);
 #if ENABLE_PREFETCH
             uint32_t f_bucketId = bucketIdArray[(i + PFD) & 31];
-            int64_t f_binId = f_bucketId >> binShift;
+			int64_t f_binId = f_bucketId >> binShift;
             int f_count = countArray[f_binId];
             _mm_prefetch((const char *)(hashTable + f_binId * binSize + f_count), _MM_HINT_T0);
 #endif
@@ -1637,7 +1640,8 @@ public:
             uint32_t firstBucketId = i << binShift;
             uint32_t lastBucketId = firstBucketId + sortBufSize - 1;
             uint32_t prevBucketId = firstBucketId - 1;
-            uint32_t j, k;
+            uint32_t k;
+            int32_t j;
             y = std::min(count, binSize - 1);
             for(j = 0; j < y; j++)
             {
@@ -1695,7 +1699,7 @@ public:
                 uint32_t bucketId = he.bucketId;
                 if(bucketId < prevBucketId)
                 {
-                    printf("ERROR! [%d,%d] prevBucketId = %u, bucketId = %u\n", i, j, prevBucketId, bucketId);
+                    printf("ERROR! [%ld,%d] prevBucketId = %u, bucketId = %u\n", i, j, prevBucketId, bucketId);
                     exit(0);
                 }
                 kmerCountSum += (he.val * he.val);
@@ -1709,7 +1713,7 @@ public:
                 uint32_t bucketId = he.bucketId;
                 if(bucketId < prevBucketId)
                 {
-                    printf("ERROR! [%d,%d] prevBucketId = %u, bucketId = %u\n", i, j, prevBucketId, bucketId);
+                    printf("ERROR! [%ld,%d] prevBucketId = %u, bucketId = %u\n", i, j, prevBucketId, bucketId);
                     exit(0);
                 }
                 kmerCountSum += (he.val * he.val);
@@ -1731,7 +1735,7 @@ public:
 
             if(end < start)
             {
-                printf("ERROR! [%d] start = %d, end = %d, binId = %ld, binId2 = %ld\n", i, start, end, binId, binId2);
+                printf("ERROR! [%ld] start = %d, end = %d, binId = %ld, binId2 = %ld\n", i, start, end, binId, binId2);
                 exit(0);
             }
             for(j = start; j < end; j++)
@@ -1748,7 +1752,7 @@ public:
                 }
                 if(bucketId != i)
                 {
-                    printf("ERROR! [%d,%d] bucketId = %u\n", i, j, bucketId);
+                    printf("ERROR! [%ld,%d] bucketId = %u\n", i, j, bucketId);
                     exit(0);
                 }
             }
