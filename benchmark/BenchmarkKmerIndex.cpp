@@ -771,16 +771,34 @@ int main(int argc, char** argv) {
 
 	  {
 		  auto lquery = query;
+#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT)
+		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
+		  uint8_t * count_res = ::utils::mem::aligned_alloc<uint8_t>(lquery.size(), 64);
+		  size_t count_res_size = idx.get_map().count(lquery, count_res);
+
+		  ::utils::mem::aligned_free(count_res);
+		  BL_BENCH_END(test, "count", count_res_size);
+#else
 		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
 		  auto counts = idx.count(lquery);
 		  BL_BENCH_END(test, "count", counts.size());
-	  }
+#endif
+		  }
 
 	  {
 		  auto lquery = query;
+#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT)
+		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
+		  CountType * find_res = ::utils::mem::aligned_alloc<CountType>(lquery.size(), 64);
+		  size_t find_res_size = idx.get_map().find(lquery, find_res);
+
+		  ::utils::mem::aligned_free(find_res);
+		  BL_BENCH_END(test, "count", find_res_size);
+#else
 		  BL_BENCH_COLLECTIVE_START(test, "find", comm);
 		  auto found = idx.find(lquery);
 		  BL_BENCH_END(test, "find", found.size());
+#endif
 	  }
 
 

@@ -1949,7 +1949,7 @@ namespace hsc  // hybrid std container
        */
       template <typename V, typename OP>
       void query_1(std::vector<Key> & input,
-    		  std::vector<V> & results,
+    		  V* results,
               OP compute) const {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(query);
@@ -2015,10 +2015,6 @@ namespace hsc  // hybrid std container
     ::utils::mem::aligned_free(transformed);
 #endif
 
-        // resize
-        BL_BENCH_START(query);
-        results.resize(in_size);
-        BL_BENCH_END(query, "alloc_output", results.size());
 
         BL_BENCH_START(query);
         #pragma omp parallel
@@ -2034,7 +2030,7 @@ namespace hsc  // hybrid std container
 
             auto it = input.data() + r_start;
             auto et = input.data() + r_end;
-            auto rt = results.data();
+            auto rt = results;
 
             // transform once.  bucketing and distribute will read it multiple times.
             if (tcnt > 1) { // only do if more than 1 thread.  then we need to permute
@@ -2177,7 +2173,7 @@ namespace hsc  // hybrid std container
                 // update it and et.
                 it = input.data() + node_bucket_offsets[tid];
                 et = it + node_bucket_sizes[tid];
-                rt = results.data() + node_bucket_offsets[tid];
+                rt = results + node_bucket_offsets[tid];
 
 #ifdef MT_DEBUG
 #pragma omp barrier
@@ -2194,7 +2190,7 @@ namespace hsc  // hybrid std container
 #endif
             } else {
                 this->transform_input(it, et, it);
-                rt = results.data() + r_start;
+                rt = results + r_start;
             }
 
 #ifdef MT_DEBUG
@@ -2214,7 +2210,7 @@ namespace hsc  // hybrid std container
             compute(tid, it, et, rt);
 
         } // end parallel section
-        BL_BENCH_END(query, "local_find", results.size());
+        BL_BENCH_END(query, "local_find", in_size);
 
 #ifdef MT_DEBUG
         {
@@ -2247,7 +2243,7 @@ namespace hsc  // hybrid std container
        */
       template <typename V, typename OP>
       void query_p(std::vector<Key >& input,
-    		  std::vector<V> & results,
+    		  V * results,
               OP compute) const {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(query);
@@ -2632,12 +2628,6 @@ namespace hsc  // hybrid std container
 
 #if defined(OVERLAPPED_COMM) 
 
-    BL_BENCH_COLLECTIVE_START(query, "alloc_out", this->comm);
-    // get mapping to proc
-    results.resize(input.size());
-    BL_BENCH_END(query, "alloc_out", input.size());
-
-
     BL_BENCH_COLLECTIVE_START(query, "a2av_query", this->comm);
 
     ::khmxx::incremental::ialltoallv_and_query_one_to_one(
@@ -2656,7 +2646,7 @@ namespace hsc  // hybrid std container
                 compute(tid, bb, ee, rr); // this->c[tid].insert_no_estimate(bb, ee, T(1));
             }  // finished parallel modify.
         },
-        results.data(), 
+        results,
         this->comm);
 
     BL_BENCH_END(query, "a2av_query", input.size());
@@ -2723,19 +2713,15 @@ namespace hsc  // hybrid std container
 
     // local query. memory utilization a potential problem.
     // do for each src proc one at a time.
-    BL_BENCH_COLLECTIVE_START(query, "alloc_out", this->comm);
-    results.resize(input.size() );                   // TODO:  should estimate coverage.
-    BL_BENCH_END(query, "alloc_out", results.capacity());
-
 
     // send back using the constructed recv count
     BL_BENCH_COLLECTIVE_START(query, "a2a2", this->comm);
     ::khmxx::distribute_permuted(dist_results, dist_results + recv_total,
-            recv_counts, results.data(), send_counts, this->comm);
+            recv_counts, results, send_counts, this->comm);
 
     ::utils::mem::aligned_free(dist_results);
 
-    BL_BENCH_END(query, "a2a2", results.size());
+    BL_BENCH_END(query, "a2a2", input.size());
 
 
 #endif // non overlap
@@ -2754,8 +2740,26 @@ namespace hsc  // hybrid std container
     		  bool sorted_input = false,
 			  Predicate const& pred = Predicate() ) const {
 
-        std::vector<count_result_type> results;
-        results.reserve(keys.size());
+        std::vector<count_result_type> results(keys.size());
+
+        auto count_functor =
+            [this, &pred](int tid, Key* b, Key* e, count_result_type * out) {
+  	            this->c[tid].count(out, b, e, pred, pred);
+            };
+
+        if (this->comm.size() == 1) {
+            query_1(keys, results.data(), count_functor);
+        } else {
+            query_p(keys, results.data(), count_functor);
+        }
+
+        return results;
+      }
+
+      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
+      size_t count(::std::vector<Key>& keys, count_result_type* results,
+    		  bool sorted_input = false,
+			  Predicate const& pred = Predicate() ) const {
         
         auto count_functor =  
             [this, &pred](int tid, Key* b, Key* e, count_result_type * out) {
@@ -2768,8 +2772,9 @@ namespace hsc  // hybrid std container
             query_p(keys, results, count_functor);
         }
 
-        return results;
+        return keys.size();
       }
+
 
 //      template <typename Predicate = ::bliss::filter::TruePredicate>
 //      ::std::vector<::std::pair<Key, size_type> > count(Predicate const & pred = Predicate()) const {
@@ -2787,10 +2792,30 @@ namespace hsc  // hybrid std container
     		  bool sorted_input = false,
 			  Predicate const& pred = Predicate() ) const {
 
-        std::vector<mapped_type> results;
-        results.reserve(keys.size());
+        std::vector<mapped_type> results(keys.size());
         
         auto find_functor =  
+            [this, &pred, &nonexistent](int tid, Key* b, Key* e, mapped_type * out) {
+  	            this->c[tid].find(out, b, e, nonexistent, pred, pred);
+            };
+
+        if (this->comm.size() == 1) {
+            query_1(keys, results.data(), find_functor);
+        } else {
+            query_p(keys, results.data(), find_functor);
+        }
+
+        return results;
+      }
+
+
+      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
+      size_t find(::std::vector<Key>& keys, mapped_type * results,
+    		  mapped_type const & nonexistent = mapped_type(),
+    		  bool sorted_input = false,
+			  Predicate const& pred = Predicate() ) const {
+
+        auto find_functor =
             [this, &pred, &nonexistent](int tid, Key* b, Key* e, mapped_type * out) {
   	            this->c[tid].find(out, b, e, nonexistent, pred, pred);
             };
@@ -2801,8 +2826,9 @@ namespace hsc  // hybrid std container
             query_p(keys, results, find_functor);
         }
 
-        return results;
+        return keys.size();
       }
+
 
 #if 0  // TODO: temporarily retired.
       /**
