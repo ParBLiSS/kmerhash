@@ -13,7 +13,7 @@ cat $PBS_NODEFILE > nodes.log
 cd ~/build/kmerhash-test-gcc494-mvapich23b
 mkdir -p ~/build/kmerhash-test-gcc494-mvapich23b/log
 
-if [ 1 -eq 0 ]
+if [ 1 -eq 1 ]
 then
 
 for EXEC in test/test-*
@@ -48,8 +48,11 @@ shash=CRC32C
 export MV2_SHOW_CPU_BINDING=1
 export MV2_ENABLE_AFFINITY=1
 
+if [ 1 -eq 1 ]
+then
 
-for map in RADIXSORT #BROBINHOOD
+
+for map in RADIXSORT BROBINHOOD
 do
 
 for EXEC in bin/*KmerIndex-${format}-a${a}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${dhash}-sh${shash}
@@ -69,16 +72,17 @@ done
 	mpirun_rsh -hostfile=$PBS_NODEFILE -np $PBS_NP ${EXEC} ${df} ${df2} > ${EXEC/#bin/log}.p28.t1.log 2>&1
 done
 
-
+fi
 
 export OMP_DISPLAY_ENV=true
 export OMP_PLACES=cores
 export OMP_PROC_BIND=true
 
-if [ 1 -eq 0 ]
+if [ 1 -eq 1 ]
 then
 
-for map in MTROBINHOOD MTRADIXSORT
+
+for map in MTRADIXSORT MTROBINHOOD 
 do
 
 for EXEC in bin/*KmerIndex-${format}-a${a}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${dhash}-sh${shash}
@@ -106,7 +110,7 @@ done
 
 fi
 
-if [ 1 -eq 0 ]
+if [ 1 -eq 1 ]
 then
 
 EXEC=bin/testKmerIndex-${format}-a${a}-k${k}-CANONICAL-DENSEHASH-COUNT-dtIDEN-dhMURMUR-shCRC32C

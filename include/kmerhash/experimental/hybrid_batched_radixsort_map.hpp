@@ -762,7 +762,8 @@ namespace hsc  // hybrid std container
 		  //hll(ceilLog2(_comm.size()))  // top level hll. no need to ignore bits.
         {
 
-		printf("initializing for %d threads\n", omp_get_max_threads());
+    	  if (_comm.rank() == 0)
+    		  printf("initializing for %d threads\n", omp_get_max_threads());
 		c = new local_container_type[omp_get_max_threads()];
 		hlls = new hyperloglog64<Key, InternalHash, 12>[omp_get_max_threads()]; 
  //   	  this->c.set_ignored_msb(ceilLog2(_comm.size()));   // NOTE THAT THIS SHOULD MATCH KEY_TO_RANK use of bits in hash table.
@@ -1001,8 +1002,9 @@ namespace hsc  // hybrid std container
         block += (static_cast<size_t>(tid) < rem ? 1: 0);
         size_t r_end = r_start + block;
 
+#ifdef MT_DEBUG
 	printf("tid %d of %d insize %ld with block %ld rem %ld, start %ld, end %ld\n", tid, tcnt, in_size, block, rem, r_start, r_end);
-
+#endif
         auto it = input.data() + r_start;
         auto et = input.data() + r_end;
 
@@ -1443,7 +1445,8 @@ namespace hsc  // hybrid std container
     if (estimate) {
         BL_BENCH_COLLECTIVE_START(modify, "alloc_hashtable", this->comm);
         size_t est = this->hlls[0].estimate_average_per_rank(this->comm);
-        printf("rank %d estimated size %ld\n", this->comm.rank(), est);
+        if (this->comm.rank() == 0)
+        	printf("rank %d estimated size %ld\n", this->comm.rank(), est);
 
         #pragma omp parallel
         {
@@ -2586,13 +2589,15 @@ public:
             } else
                 this->c[tid].insert(it, std::distance(it, et));
 
+#ifdef MT_DEBUG
             printf("rank %d thread %d inserting %ld, inserted %ld\n", this->comm.rank(), tid, cnt, this->c[tid].size());
-
+#endif
         };
         auto insert_key_no_est_functor = [this](int tid, Key * it, Key * et){
             this->c[tid].insert(it, std::distance(it, et));
+#ifdef MT_DEBUG
             printf("rank %d thread %d inserting %ld, inserted %ld\n", this->comm.rank(), tid, std::distance(it, et), this->c[tid].size());
-
+#endif
         };
 
 

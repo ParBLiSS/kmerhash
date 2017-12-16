@@ -2279,8 +2279,10 @@ if (measure_mode == MEASURE_A2A)
   if (measure_mode == MEASURE_COUNT)
       __itt_pause();
 #endif
-        printf("rank %d of %d erase. before %ld after %ld\n", this->comm.rank(), this->comm.size(), before, this->c.size());
 
+#ifndef NDEBUG
+  printf("rank %d of %d erase. before %ld after %ld\n", this->comm.rank(), this->comm.size(), before, this->c.size());
+#endif
 
           }
           BL_BENCH_END(erase, "local_erase", erased);
@@ -2540,8 +2542,9 @@ if (measure_mode == MEASURE_A2A)
 
         BL_BENCH_REPORT_MPI_NAMED(erase, "hashmap:erase_p", this->comm);
 
+#ifndef NDEBUG
         printf("rank %d of %d erase.  before %ld after %ld\n", this->comm.rank(), this->comm.size(), before, this->c.size());
-
+#endif
         return before - this->c.size();
       }
 

@@ -759,7 +759,8 @@ namespace hsc  // hybrid std container
 		  //hll(ceilLog2(_comm.size()))  // top level hll. no need to ignore bits.
         {
 
-		printf("initializing for %d threads\n", omp_get_max_threads());
+    	  if (_comm.rank() == 0)
+    		  printf("rank %d initializing for %d threads\n", _comm.rank(), omp_get_max_threads());
 		c = new local_container_type[omp_get_max_threads()];
 		hlls = new hyperloglog64<Key, InternalHash, 12>[omp_get_max_threads()]; 
  //   	  this->c.set_ignored_msb(ceilLog2(_comm.size()));   // NOTE THAT THIS SHOULD MATCH KEY_TO_RANK use of bits in hash table.
@@ -3228,7 +3229,7 @@ public:
                 this->c[tid].insert(it, et, T(1));
             else
                 this->c[tid].insert_no_estimate(it, et, T(1));
-#ifndef NDEBUG
+#ifdef MT_DEBUG
             printf("rank %d of %d thread %d inserting %ld, before %ld, after %ld\n", this->comm.rank(), this->comm.size(), tid, std::distance(it, et), before, this->c[tid].size());
 #endif
         };
@@ -3236,7 +3237,7 @@ public:
           size_t before = this->c[tid].size();
 
             this->c[tid].insert_no_estimate(it, et, T(1));
-#ifndef NDEBUG
+#ifdef MT_DEBUG
             printf("rank %d of %d thread %d inserting %ld, before %ld, after %ld\n", this->comm.rank(), this->comm.size(), tid, std::distance(it, et), before, this->c[tid].size());
 #endif
         };
