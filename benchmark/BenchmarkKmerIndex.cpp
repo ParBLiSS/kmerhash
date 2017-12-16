@@ -771,7 +771,7 @@ int main(int argc, char** argv) {
 
 	  {
 		  auto lquery = query;
-#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT)
+#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT) || (pMAP == BROBINHOOD) || (pMAP == RADIXSORT)
 		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
 		  uint8_t * count_res = ::utils::mem::aligned_alloc<uint8_t>(lquery.size(), 64);
 		  size_t count_res_size = idx.get_map().count(lquery, count_res);
@@ -787,7 +787,7 @@ int main(int argc, char** argv) {
 
 	  {
 		  auto lquery = query;
-#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT)
+#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT) || (pMAP == BROBINHOOD) || (pMAP == RADIXSORT)
 		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
 		  CountType * find_res = ::utils::mem::aligned_alloc<CountType>(lquery.size(), 64);
 		  size_t find_res_size = idx.get_map().find(lquery, find_res);
