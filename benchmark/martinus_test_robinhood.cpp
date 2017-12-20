@@ -1455,16 +1455,17 @@ std::vector<std::vector<Stats>> bench_insert_find(size_t upTo, size_t times, dou
         bench_batch_insertonly_radix(m, mb, "BRS_Prefetch_avx", upTo, times, all_stats, true);  // radixsort
     }
 
-    {
-        ::fsc::hashmap_radixsort<K, V, H> m;
-        bench_batch_insertonly_radix(m, mb, "BRS_Prefetch_noest", upTo, times, all_stats, false);  // radixsort
-    }
-
-    if (!::std::is_same<H<K>, Havx<K> >::value)
-    {
-        ::fsc::hashmap_radixsort<K, V, Havx> m;
-        bench_batch_insertonly_radix(m, mb, "BRS_Prefetch_noest_avx", upTo, times, all_stats, false);  // radixsort
-    }
+// BRS currently does not support insertion without estimates.
+//    {
+//        ::fsc::hashmap_radixsort<K, V, H> m;
+//        bench_batch_insertonly_radix(m, mb, "BRS_Prefetch_noest", upTo, times, all_stats, false);  // radixsort
+//    }
+//
+//    if (!::std::is_same<H<K>, Havx<K> >::value)
+//    {
+//        ::fsc::hashmap_radixsort<K, V, Havx> m;
+//        bench_batch_insertonly_radix(m, mb, "BRS_Prefetch_noest_avx", upTo, times, all_stats, false);  // radixsort
+//    }
 
 #if 0
     {
@@ -2371,8 +2372,20 @@ int main(int argc, char** argv) {
     benchRng<Pcg32>("Pcg32");
 
 //    test1_std<RobinHoodInfobytePairNoOverflow::Map<int, int> >(100000);
-    size_t iterations = 100;
-    size_t cnt_per_iter = 1000 * 1000;
+    size_t iterations = (argc > 1) ? atoi(argv[1]) : 100;
+    size_t cnt_per_iter = (argc > 2) ? atoi(argv[2]) : 1000 * 1000;
+
+    std::string iter_str = (argc > 1) ? argv[1] : "100";
+    std::string cnt_str = (argc > 2) ? argv[2] : "1000000";
+
+    std::string prefix = "datascaling_benchmark_64_32_";
+    std::string suffix = ".i";
+    suffix += iter_str + ".c" + cnt_str;
+#ifndef ENABLE_PREFETCH
+    suffix += ".nopref";
+#endif
+    suffix += ".txt";
+
 //    {
 //        // using murmur32avx, as farmhash impl is sensitive to prefetch on/off.
 //      auto stats64 = bench_insert_find<uint32_t, uint32_t, ::fsc::hash::murmur32, ::fsc::hash::murmur3avx32 >(cnt_per_iter, iterations, 0.8, 0.35);
@@ -2389,11 +2402,7 @@ int main(int argc, char** argv) {
         // using murmur32avx, as farmhash impl is sensitive to prefetch on/off.
       auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur32, ::fsc::hash::murmur3avx32 >(cnt_per_iter, iterations, 0.8, 0.35);
       print(std::cout, stats64);
-#if defined(ENABLE_PREFETCH)
-      std::ofstream fout("datascaling_benchmark_64_32_murmur32avx-0.8-0.35_prefetch.txt");
-#else
-      std::ofstream fout("datascaling_benchmark_64_32_murmur32avx-0.8-0.35.txt");
-#endif
+      std::ofstream fout(prefix + "murmur32avx-0.8-0.35" + suffix);
       print(fout, stats64);
     }
 //    {
@@ -2412,36 +2421,17 @@ int main(int argc, char** argv) {
     //   auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::clhash, ::fsc::hash::clhash >(cnt_per_iter, iterations, 0.8, 0.35);
     auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur, ::fsc::hash::murmur3avx64 >(cnt_per_iter, iterations, 0.8, 0.35);
     print(std::cout, stats64);
-#if defined(ENABLE_PREFETCH)
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.8-0.35_prefetch.txt");
-#else
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.8-0.35.txt");
-#endif
+    std::ofstream fout(prefix + "murmur64avx-0.8-0.35" + suffix);
       print(fout, stats64);
     }
 #endif
-    {
-        // using murmur32avx, as farmhash impl is sensitive to prefetch on/off.
-      auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::crc32c, ::fsc::hash::crc32c >(cnt_per_iter, iterations, 0.8, 0.35);
-      print(std::cout, stats64);
-#if defined(ENABLE_PREFETCH)
-      std::ofstream fout("datascaling_benchmark_64_32_crc32c-0.8-0.35_prefetch.txt");
-#else
-      std::ofstream fout("datascaling_benchmark_64_32_crc32c-0.8-0.35.txt");
-#endif
-      print(fout, stats64);
-    }
 
     {
         // using murmur32avx, as farmhash impl is sensitive to prefetch on/off.
     //   auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::clhash, ::fsc::hash::clhash >(cnt_per_iter, iterations, 0.8, 0.35);
     auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur, ::fsc::hash::murmur3avx64 >(cnt_per_iter, iterations, 0.9, 0.2);
     print(std::cout, stats64);
-#if defined(ENABLE_PREFETCH)
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.9-0.2_prefetch.txt");
-#else
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.9-0.2.txt");
-#endif
+    std::ofstream fout(prefix + "murmur64avx-0.9-0.2" + suffix);
       print(fout, stats64);
     }
 
@@ -2450,11 +2440,7 @@ int main(int argc, char** argv) {
     //   auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::clhash, ::fsc::hash::clhash >(cnt_per_iter, iterations, 0.8, 0.35);
     auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur, ::fsc::hash::murmur3avx64 >(cnt_per_iter, iterations, 0.8, 0.2);
     print(std::cout, stats64);
-#if defined(ENABLE_PREFETCH)
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.8-0.2_prefetch.txt");
-#else
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.8-0.2.txt");
-#endif
+    std::ofstream fout(prefix + "murmur64avx-0.8-0.2" + suffix);
       print(fout, stats64);
     }
     {
@@ -2462,11 +2448,7 @@ int main(int argc, char** argv) {
     //   auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::clhash, ::fsc::hash::clhash >(cnt_per_iter, iterations, 0.8, 0.35);
     auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur, ::fsc::hash::murmur3avx64 >(cnt_per_iter, iterations, 0.7, 0.2);
     print(std::cout, stats64);
-#if defined(ENABLE_PREFETCH)
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.7-0.2_prefetch.txt");
-#else
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.7-0.2.txt");
-#endif
+    std::ofstream fout(prefix + "murmur64avx-0.7-0.2" + suffix);
       print(fout, stats64);
     }
 
@@ -2475,11 +2457,7 @@ int main(int argc, char** argv) {
     //   auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::clhash, ::fsc::hash::clhash >(cnt_per_iter, iterations, 0.8, 0.35);
     auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur, ::fsc::hash::murmur3avx64 >(cnt_per_iter, iterations, 0.6, 0.2);
     print(std::cout, stats64);
-#if defined(ENABLE_PREFETCH)
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.6-0.2_prefetch.txt");
-#else
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.6-0.2.txt");
-#endif
+    std::ofstream fout(prefix + "murmur64avx-0.6-0.2" + suffix);
       print(fout, stats64);
     }
 
@@ -2488,11 +2466,14 @@ int main(int argc, char** argv) {
     //   auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::clhash, ::fsc::hash::clhash >(cnt_per_iter, iterations, 0.8, 0.35);
     auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::murmur, ::fsc::hash::murmur3avx64 >(cnt_per_iter, iterations, 0.5, 0.2);
     print(std::cout, stats64);
-#if defined(ENABLE_PREFETCH)
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.5-0.2_prefetch.txt");
-#else
-      std::ofstream fout("datascaling_benchmark_64_32_murmur64avx-0.5-0.2.txt");
-#endif
+    std::ofstream fout(prefix + "murmur64avx-0.5-0.2" + suffix);
+      print(fout, stats64);
+    }
+    {
+        // using murmur32avx, as farmhash impl is sensitive to prefetch on/off.
+      auto stats64 = bench_insert_find<uint64_t, uint32_t, ::fsc::hash::crc32c, ::fsc::hash::crc32c >(cnt_per_iter, iterations, 0.8, 0.35);
+      print(std::cout, stats64);
+      std::ofstream fout(prefix + "crc32c-0.8-0.35" + suffix);
       print(fout, stats64);
     }
 
