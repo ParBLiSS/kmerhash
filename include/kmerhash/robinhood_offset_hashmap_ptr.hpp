@@ -405,10 +405,10 @@ public:
 	 * _capacity is the number of usable entries, not the capacity of the underlying container.
 	 */
 	explicit hashmap_robinhood_offsets_reduction(size_t const & _capacity = 128,
-			double const & _min_load_factor = 0.4,
-			double const & _max_load_factor = 0.9,
+			double const & _min_load_factor = 0.2,
+			double const & _max_load_factor = 0.8,
 			uint8_t const & _insert_lookahead = 8,
-			uint8_t const & _query_lookahead = 16) :
+			uint8_t const & _query_lookahead = 8) :
 			INSERT_LOOKAHEAD(_insert_lookahead), QUERY_LOOKAHEAD(_query_lookahead),
 			INSERT_LOOKAHEAD_MASK(_insert_lookahead * 2 - 1), QUERY_LOOKAHEAD_MASK(_query_lookahead * 2 - 1),
 			lsize(0), buckets(next_power_of_2(_capacity)), mask(buckets - 1),
@@ -430,10 +430,10 @@ public:
 	template <typename Iter, typename = typename std::enable_if<
 			::std::is_constructible<value_type, typename ::std::iterator_traits<Iter>::value_type>::value  ,int>::type >
 	hashmap_robinhood_offsets_reduction(Iter begin, Iter end,
-			double const & _min_load_factor = 0.4,
-			double const & _max_load_factor = 0.9,
+			double const & _min_load_factor = 0.2,
+			double const & _max_load_factor = 0.8,
 			uint8_t const & _insert_lookahead = 8,
-			uint8_t const & _query_lookahead = 16) :
+			uint8_t const & _query_lookahead = 8) :
 			hashmap_robinhood_offsets_reduction(::std::distance(begin, end) / 4,
 					_min_load_factor, _max_load_factor, _insert_lookahead, _query_lookahead) {
 
@@ -1683,6 +1683,8 @@ protected:
 //		}
 //		std::cout << std::endl;
 
+		auto ptr_addr = info_container.data();
+
 		//prefetch only if target_buckets is larger than INSERT_LOOKAHEAD
 		size_t max_prefetch = std::min(input_size, static_cast<size_t>(2 * INSERT_LOOKAHEAD));
 		// prefetch 2*INSERT_LOOKAHEAD of the info_container.
@@ -1694,19 +1696,23 @@ protected:
 		//		}
 
 		for (ii = 0; ii < max_prefetch; ++ii) {
-
 			bid = *(hashes + ii) & mask;
 			// prefetch the info_container entry for ii.
 			KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + bid), _MM_HINT_T0);
-
 			//			KH_PREFETCH(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(info_container.data() + id) & cache_align_mask), _MM_HINT_T0);
 			//			KH_PREFETCH(reinterpret_cast<const char *>(reinterpret_cast<bucket_id_type>(info_container.data() + id + 1) & cache_align_mask), _MM_HINT_T0);
 			//			if ((reinterpret_cast<bucket_id_type>(info_container.data() + id + 1) & cache_align_mask) == 0)
 			//			  KH_PREFETCH((const char *)(info_container.data() + id + 1), _MM_HINT_T1);
+		}
+		for (ii = 0; ii < max_prefetch; ++ii) {
+			bid = *(hashes + ii) & mask;
+
+			ptr_addr = info_container.data() + bid + 1;
+			if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+				KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
-
+			KH_PREFETCH((const char *)(container + bid + get_offset(info_container[bid])), _MM_HINT_T0);
 		}
 
 		value_type val;
@@ -1755,9 +1761,14 @@ protected:
 				bid = *(hashes + i + INSERT_LOOKAHEAD) & mask;
 				// intention is to write, so should prefetch...
 				//				if (is_normal(info_container[bid])) {
-				bid1 = bid + 1;
+
+				ptr_addr = info_container.data() + (bid + 1);
+				if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+					KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
+//				bid1 = bid + 1;
 				bid += get_offset(info_container[bid]);
-				bid1 += get_offset(info_container[bid1]);
+//				bid1 += get_offset(info_container[bid1]);
 
 				//					for (size_t j = bid; j < bid1; j += value_per_cacheline) {
 				//						KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
@@ -1765,8 +1776,8 @@ protected:
 				KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
 
 				// NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH, bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
-				if (bid1 > (bid + value_per_cacheline))
-					KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+//				if (bid1 > (bid + value_per_cacheline))
+//					KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
 
 				//				}
 
@@ -1806,12 +1817,15 @@ protected:
 
 			bid = *(hashes + i + INSERT_LOOKAHEAD) & mask;
 
-
 			// prefetch container.  intention is to write. so should alway prefetch.
 			//			if (is_normal(info_container[bid])) {
-			bid1 = bid + 1;
+			ptr_addr = info_container.data() + bid + 1;
+			if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+				KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
+//			bid1 = bid + 1;
 			bid += get_offset(info_container[bid]);
-			bid1 += get_offset(info_container[bid1]);
+//			bid1 += get_offset(info_container[bid1]);
 
 			//				for (size_t j = bid; j < bid1; j += value_per_cacheline) {
 			//					KH_PREFETCH((const char *)(container.data() + j), _MM_HINT_T0);
@@ -1819,8 +1833,8 @@ protected:
 			KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
 
 			// NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH, bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
-			if (bid1 > (bid + value_per_cacheline))
-				KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+//			if (bid1 > (bid + value_per_cacheline))
+//				KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
 			//			}
 			val = *it;
 			insert_bid = insert_with_hint(container, info_container, *(hashes + i) & mask, val);
@@ -1911,6 +1925,9 @@ protected:
     memset(profile, 0, bin_size * sizeof(uint32_t));
 #endif
 
+    auto ptr_addr = info_container.data();
+    size_t bid, bid1;
+
     // compute the first part of the hashes
     size_t max_prefetch = std::min(input_size, lookahead2);
     //compute hash and prefetch a little.
@@ -1918,14 +1935,22 @@ protected:
     for (j = 0; j < max_prefetch; ++j) {
       // prefetch the info_container entry for ii.
       KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + hashes[j]), _MM_HINT_T0);
+
+    }
+    for (j = 0; j < max_prefetch; ++j) {
+    	bid = hashes[j];
+
+    	ptr_addr = info_container.data() + bid + 1;
+  		if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+  			KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
       // prefetch container as well - would be NEAR but may not be exact.
-      KH_PREFETCH((const char *)(container + hashes[j]), _MM_HINT_T0);
+      KH_PREFETCH((const char *)(container + bid + get_offset(info_container[bid])), _MM_HINT_T0);
     }
 
     size_t i = 0, k, kmax;   // j is index fo hashes array
     size_t max = input_size - (input_size & (batch_size - 1));
     size_t insert_bid;
-    size_t bid, bid1;
 
     value_type val;
 
@@ -1981,15 +2006,20 @@ protected:
             // intention is to write, so should prefetch for empty entries too.
             // prefetch container
             bid = hashes[k + INSERT_LOOKAHEAD];
-            bid1 = bid + 1;
+
+            ptr_addr = info_container.data() + bid + 1;
+      		if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+      			KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
+//            bid1 = bid + 1;
             bid += get_offset(info_container[bid]);
-            bid1 += get_offset(info_container[bid1]);
+//            bid1 += get_offset(info_container[bid1]);
 
             KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
             // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
             // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
-            if (bid1 > (bid + value_per_cacheline))
-              KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+//            if (bid1 > (bid + value_per_cacheline))
+//              KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
 
             // prefetch info container.
             bid = hashes[k + lookahead2];
@@ -2001,11 +2031,18 @@ protected:
     		max_prefetch = std::min(input_size - (i + lookahead2), lookahead2);
     		hash_mod2(input + i + lookahead2, max_prefetch, hashes);
 			for (j = 0; j < max_prefetch; ++j) {
-          // prefetch the info_container entry for ii.
-          KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + hashes[j]), _MM_HINT_T0);
-          // prefetch container as well - would be NEAR but may not be exact.
-          KH_PREFETCH((const char *)(container + hashes[j]), _MM_HINT_T0);
-        }
+			  // prefetch the info_container entry for ii.
+			  KH_PREFETCH(reinterpret_cast<const char *>(info_container.data() + hashes[j]), _MM_HINT_T0);
+			}
+			for (j = 0; j < max_prefetch; ++j) {
+				bid = hashes[j];
+	            ptr_addr = info_container.data() + bid + 1;
+				if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+					KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
+			  // prefetch container as well - would be NEAR but may not be exact.
+			  KH_PREFETCH((const char *)(container + bid + get_offset(info_container[bid])), _MM_HINT_T0);
+			}
     	}
     	// now finish the current section with limited prefetching.
     	// and loop and insert.
@@ -2055,15 +2092,20 @@ protected:
             // intention is to write, so should prefetch for empty entries too.
             // prefetch container
             bid = hashes[k + INSERT_LOOKAHEAD];
-            bid1 = bid + 1;
+
+    		ptr_addr = info_container.data() + bid + 1;
+    		if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+    			KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
+//            bid1 = bid + 1;
             bid += get_offset(info_container[bid]);
-            bid1 += get_offset(info_container[bid1]);
+//            bid1 += get_offset(info_container[bid1]);
 
             KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
             // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
             // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
-            if (bid1 > (bid + value_per_cacheline))
-              KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+//            if (bid1 > (bid + value_per_cacheline))
+//              KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
     	}
 
     	for (; k < batch_size; ++k, ++i) {
@@ -2195,15 +2237,20 @@ protected:
             // prefetch container
             if ((k + INSERT_LOOKAHEAD) < (input_size - max)) {
             bid = hashes[k + INSERT_LOOKAHEAD];
-            bid1 = bid + 1;
+
+    		ptr_addr = info_container.data() + bid + 1;
+    		if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+    			KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
+//            bid1 = bid + 1;
             bid += get_offset(info_container[bid]);
-            bid1 += get_offset(info_container[bid1]);
+//            bid1 += get_offset(info_container[bid1]);
 
             KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
             // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
             // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
-            if (bid1 > (bid + value_per_cacheline))
-              KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+//            if (bid1 > (bid + value_per_cacheline))
+//              KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
 			}
             // prefetch info container.
             if ((k + lookahead2) < (input_size - max)) {
@@ -2263,15 +2310,20 @@ protected:
             if ((k + INSERT_LOOKAHEAD) < (input_size - max)) {
 
             bid = hashes[k + INSERT_LOOKAHEAD];
-            bid1 = bid + 1;
+
+    		ptr_addr = info_container.data() + bid + 1;
+    		if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+    			KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
+//            bid1 = bid + 1;
             bid += get_offset(info_container[bid]);
-            bid1 += get_offset(info_container[bid1]);
+//            bid1 += get_offset(info_container[bid1]);
 
             KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
             // NOTE!!!  IF WE WERE TO ALWAYS PREFETCH RATHER THAN CONDITIONALLY PREFETCH,
             // bandwidth is eaten up and on i7-4770 the overall time was 2x slower FROM THIS LINE ALONE
-            if (bid1 > (bid + value_per_cacheline))
-              KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+//            if (bid1 > (bid + value_per_cacheline))
+//              KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
     	}
     	}
 
@@ -3073,6 +3125,8 @@ protected:
 				::utils::mem::aligned_alloc<typename InternalHash::result_type>(lookahead2);
 
 		size_t max = std::min(lookahead2, total);
+		auto ptr_addr = info_container.data();
+		size_t bid, bid1;
 
 		// kick start prefetching.
 		size_t i = 0;
@@ -3080,16 +3134,21 @@ protected:
 		hash_mod2(it, max, bids);
 #if defined(ENABLE_PREFETCH)
 		for (i = 0; i < max; ++it, ++i) {
-			h =  bids[i];
 			// prefetch the info_container entry for ii.
-			KH_PREFETCH((const char *)(info_container.data() + h), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(info_container.data() + bids[i]), _MM_HINT_T0);
+		}
+
+		for (i = 0; i < max; ++it, ++i) {
+			bid = bids[i];
+            ptr_addr = info_container.data() + bid + 1;
+			if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+				KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
 
 			// prefetch container as well - would be NEAR but may not be exact.
-			KH_PREFETCH((const char *)(container + h), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(container + bid + get_offset(info_container[bid])), _MM_HINT_T0);
 		}
 #endif
 
-		size_t bid, bid1;
 		max = total - (total & lookahead2_mask);
 		bucket_id_type found;
 		size_t j, k, jmax;
@@ -3109,12 +3168,17 @@ protected:
 				// prefetch the container in this loop too.
 				bid = bids[k];
 				if (is_normal(info_container[bid])) {
-					bid1 = bid + 1 + get_offset(info_container[bid + 1]);
+					ptr_addr = info_container.data() + bid + 1;
+					if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+						KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
+//					bid1 = bid + 1 + get_offset(info_container[bid + 1]);
 					bid += get_offset(info_container[bid]);
 
 					KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
-					if (bid1 > (bid + value_per_cacheline))
-						KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+//					if (bid1 > (bid + value_per_cacheline))
+//						KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+					// prefetch the adjacent info container if needed.
 				}
 			}
 
@@ -3143,12 +3207,16 @@ protected:
 			if (total > (i + lookahead) ) {
 				bid = bids[k];
 				if (is_normal(info_container[bid])) {
-					bid1 = bid + 1 + get_offset(info_container[bid + 1]);
+					ptr_addr = info_container.data() + bid + 1;
+					if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+						KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
+//					bid1 = bid + 1 + get_offset(info_container[bid + 1]);
 					bid += get_offset(info_container[bid]);
 
 					KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
-					if (bid1 > (bid + value_per_cacheline))
-						KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+//					if (bid1 > (bid + value_per_cacheline))
+//						KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
 				}
 			}
 		}
@@ -3555,24 +3623,31 @@ public:
 
 		size_t max = std::min(lookahead2, total);
 
+		auto ptr_addr = info_container.data();
+		size_t bid, bid1;
+
 		// kick start prefetching.
 		size_t i = 0;
 		key_type const * it = begin;
 		hash_mod2(it, max, bids);
 #if defined(ENABLE_PREFETCH)
 		for (i = 0; i < max; ++it, ++i) {
-
-			h =  bids[i];
 			// prefetch the info_container entry for ii.
-			KH_PREFETCH((const char *)(info_container.data() + h), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(info_container.data() + bids[i]), _MM_HINT_T0);
+		}
 
+		for (i = 0; i < max; ++it, ++i) {
+			bid = bids[i];
+			ptr_addr = info_container.data() + bid + 1;
+			if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+				KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+			
 			// prefetch container as well - would be NEAR but may not be exact.
-			KH_PREFETCH((const char *)(container + h), _MM_HINT_T0);
+			KH_PREFETCH((const char *)(container + bid + get_offset(info_container[bid])), _MM_HINT_T0);
 		}
 #endif
 //		std::cout << "hashed and prefetched [0, " << i << ")" << std::endl;
 
-		size_t bid, bid1;
 		max = total - (total & lookahead2_mask);
 		//max = total - lookahead2_mask;
 		size_t j, k, jmax;
@@ -3597,12 +3672,16 @@ public:
 				// prefetch the container in this loop too.
 				bid = bids[k];
 				if (is_normal(info_container[bid])) {
-					bid1 = bid + 1 + get_offset(info_container[bid + 1]);
+					ptr_addr = info_container.data() + bid + 1;
+					if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+						KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
+//					bid1 = bid + 1 + get_offset(info_container[bid + 1]);
 					bid += get_offset(info_container[bid]);
 
 					KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
-					if (bid1 > (bid + value_per_cacheline))
-						KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+//					if (bid1 > (bid + value_per_cacheline))
+//						KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
 				}
 			}
 
@@ -3644,12 +3723,17 @@ public:
 			if (total > (i + lookahead) ) {
 				bid = bids[k];
 				if (is_normal(info_container[bid])) {
-					bid1 = bid + 1 + get_offset(info_container[bid + 1]);
+					ptr_addr = info_container.data() + bid + 1;
+					if ((reinterpret_cast<size_t>(ptr_addr) & 63) == 0)
+						KH_PREFETCH((const char *)(ptr_addr), _MM_HINT_T0);
+
+
+//					bid1 = bid + 1 + get_offset(info_container[bid + 1]);
 					bid += get_offset(info_container[bid]);
 
 					KH_PREFETCH((const char *)(container + bid), _MM_HINT_T0);
-					if (bid1 > (bid + value_per_cacheline))
-						KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
+//					if (bid1 > (bid + value_per_cacheline))
+//						KH_PREFETCH((const char *)(container + bid + value_per_cacheline), _MM_HINT_T1);
 				}
 			}
 		}

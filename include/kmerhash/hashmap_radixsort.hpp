@@ -788,6 +788,8 @@ public:
 	// return fail or success
 	bool resize(uint32_t _newNumBuckets )
 	{
+		if (next_power_of_2(_newNumBuckets) == numBuckets) return true;
+
 #ifndef NDEBUG
         int64_t preStart = __rdtsc();
 #endif

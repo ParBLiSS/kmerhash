@@ -552,7 +552,7 @@ int main(int argc, char** argv) {
   double max_load = 0.8;
   double min_load = 0.35;
   uint8_t insert_prefetch = 8;
-  uint8_t query_prefetch = 16;
+  uint8_t query_prefetch = 8;
 
   bool balance_input = false;
 
@@ -587,8 +587,8 @@ int main(int argc, char** argv) {
 
 	  TCLAP::ValueArg<double> maxLoadArg("","max_load","maximum load factor", false, max_load, "double", cmd);
 	  TCLAP::ValueArg<double> minLoadArg("","min_load","minimum load factor", false, min_load, "double", cmd);
-	  TCLAP::ValueArg<unsigned char> insertPrefetchArg("","insert_prefetch","number of elements to prefetch during insert", false, insert_prefetch, "unsigned char", cmd);
-	  TCLAP::ValueArg<unsigned char> queryPrefetchArg("","query_prefetch","number of elements to prefetch during queries", false, query_prefetch, "unsigned char", cmd);
+	  TCLAP::ValueArg<uint32_t> insertPrefetchArg("","insert_prefetch","number of elements to prefetch during insert", false, insert_prefetch, "uint32_t", cmd);
+	  TCLAP::ValueArg<uint32_t> queryPrefetchArg("","query_prefetch","number of elements to prefetch during queries", false, query_prefetch, "uint32_t", cmd);
 
 #ifdef VTUNE_ANALYSIS
     std::vector<std::string> measure_modes;
