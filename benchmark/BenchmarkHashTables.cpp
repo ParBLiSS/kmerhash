@@ -1905,7 +1905,7 @@ int main(int argc, char** argv) {
    }
 
 
-  if ((map == ROBINHOOD_OFFSET_TYPE) || (map == ALL_TYPE))  {
+  if (map == ROBINHOOD_OFFSET_TYPE)  {
     BL_BENCH_INIT(test);
 
 	  //================ my new hashmap offsets

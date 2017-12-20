@@ -1926,7 +1926,7 @@ protected:
 #endif
 
     auto ptr_addr = info_container.data();
-    size_t bid, bid1;
+    size_t bid; //, bid1;
 
     // compute the first part of the hashes
     size_t max_prefetch = std::min(input_size, lookahead2);
@@ -3103,9 +3103,9 @@ protected:
 		size_t total = std::distance(begin, end);
 
 		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
-#if defined(ENABLE_PREFETCH)
-		size_t h;
-#endif
+//#if defined(ENABLE_PREFETCH)
+//		size_t h;
+//#endif
 
 		size_t batch_size = InternalHash::batch_size; // static_cast<size_t>(QUERY_LOOKAHEAD));
 
@@ -3126,7 +3126,7 @@ protected:
 
 		size_t max = std::min(lookahead2, total);
 		auto ptr_addr = info_container.data();
-		size_t bid, bid1;
+		size_t bid; //, bid1;
 
 		// kick start prefetching.
 		size_t i = 0;
@@ -3597,9 +3597,9 @@ public:
 		size_t total = std::distance(begin, end);
 
 		//prefetch only if target_buckets is larger than QUERY_LOOKAHEAD
-#if defined(ENABLE_PREFETCH)
-		size_t h;
-#endif
+//#if defined(ENABLE_PREFETCH)
+//		size_t h;
+//#endif
 
 
 		size_t batch_size = InternalHash::batch_size; // static_cast<size_t>(QUERY_LOOKAHEAD));
@@ -3624,7 +3624,7 @@ public:
 		size_t max = std::min(lookahead2, total);
 
 		auto ptr_addr = info_container.data();
-		size_t bid, bid1;
+		size_t bid; //, bid1;
 
 		// kick start prefetching.
 		size_t i = 0;
