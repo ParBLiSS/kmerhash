@@ -20,6 +20,27 @@
 #include "iterators/transform_iterator.hpp"
 
 namespace fsc {
+/*
+	template <typename S>
+	struct modulus2 {
+		static constexpr size_t batch_size = 1;
+
+		S mask;
+
+		modulus2(S const & _mask, int) :	mask(_mask) {}  // dummy
+
+		template <typename IN>
+		inline IN operator()(IN const & x) const { return (x & mask); }
+
+//		template <typename IN, typename OUT>
+//		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
+//			// TODO: [ ] do SSE version here
+//			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
+//		}
+	};
+	template <typename S>
+	constexpr size_t modulus2<S>::batch_size;
+*/
 
 template <class Key, class V, template <typename> class Hash = ::std::hash,
           template <typename> class Equal = ::std::equal_to
@@ -270,16 +291,16 @@ public:
 
 		S mask;
 
-		modulus2(S const & _mask) :	mask(_mask) {}
+		modulus2(S const & _mask, int) :	mask(_mask) {}  // dummy
 
 		template <typename IN>
 		inline IN operator()(IN const & x) const { return (x & mask); }
 
-		template <typename IN, typename OUT>
-		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
-			// TODO: [ ] do SSE version here
-			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
-		}
+//		template <typename IN, typename OUT>
+//		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
+//			// TODO: [ ] do SSE version here
+//			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
+//		}
 	};
 
 	// mod 2 okay since hashtable size is always power of 2.
@@ -548,7 +569,7 @@ public:
             	numBuckets(next_power_of_2(_numBuckets)),
 				bucketMask(numBuckets - 1),
 				totalKeyCount(0),
-				hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(bucketMask))
+				hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(bucketMask, 0))
     {
 	if (numBuckets >= (1 << 30)) 
 		throw std::invalid_argument("number of buckets cannot exceed 2^30");
@@ -569,6 +590,7 @@ public:
         countSortBuf = (uint16_t *)_mm_malloc(sortBufSize * sizeof(uint16_t), 64);
         binShift = log2(sortBufSize);
         info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
+        memset(info_container, 0, numBuckets * sizeof(int16_t));
         curOverflowBufId = 0;
 #ifndef NDEBUG
         printf("numBuckets = %u, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
@@ -588,6 +610,166 @@ public:
 		_mm_free(info_container);
 	}
 
+    hashmap_radixsort(hashmap_radixsort const & other) : 
+        numBuckets(other.numBuckets),
+        bucketMask(other.bucketMask),
+        numBins(other.numBins),
+        binMask(other.binMask),
+        binShift(other.binShift),
+        binSize(other.binSize),
+        overflowBufSize(other.overflowBufSize),
+        curOverflowBufId(other.curOverflowBufId),
+        sortBufSize(other.sortBufSize),
+        noValue(other.noValue),
+        coherence(other.coherence),
+        seed(other.seed),
+        totalKeyCount(other.totalKeyCount),
+        eq(other.eq),
+        hash(other.hash),
+        hll(other.hll),
+        hash_mod2(other.hash_mod2)
+    {
+        countArray = (uint16_t *)_mm_malloc(numBins * sizeof(uint16_t), 64);
+        memcpy(countArray, other.countArray, numBins * sizeof(uint16_t));
+        hashTable = (HashElement *)_mm_malloc(numBins * binSize * sizeof(HashElement), 64);
+        memcpy(hashTable, other.hashTable, numBins * binSize * sizeof(HashElement));
+        overflowBuf = (HashElement *)_mm_malloc(overflowBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(overflowBuf, other.overflowBuf, overflowBufSize * binSize * sizeof(HashElement));
+        sortBuf = (HashElement *)_mm_malloc(sortBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(sortBuf, other.sortBuf, sortBufSize * binSize * sizeof(HashElement));
+        countSortBuf = (uint16_t *)_mm_malloc(sortBufSize * sizeof(uint16_t), 64);
+        memcpy(countSortBuf, other.countSortBuf, sortBufSize * sizeof(uint16_t));
+        info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
+        memcpy(info_container, other.info_container, numBuckets * sizeof(int16_t));
+    }
+    hashmap_radixsort(hashmap_radixsort && other) : 
+        numBuckets(other.numBuckets),
+        bucketMask(other.bucketMask),
+        numBins(other.numBins),
+        binMask(other.binMask),
+        binShift(other.binShift),
+        binSize(other.binSize),
+        overflowBufSize(other.overflowBufSize),
+        curOverflowBufId(other.curOverflowBufId),
+        sortBufSize(other.sortBufSize),
+        noValue(other.noValue),
+        coherence(other.coherence),
+        seed(other.seed),
+        totalKeyCount(other.totalKeyCount),
+        eq(std::move(other.eq)),
+        hash(std::move(other.hash)),
+        hash_mod2(std::move(other.hash_mod2))
+    {
+        hll.swap(other.hll),
+        std::swap(countArray, other.countArray);
+        std::swap(hashTable, other.hashTable);
+        std::swap(overflowBuf, other.overflowBuf);
+        std::swap(sortBuf, other.sortBuf);
+        std::swap(countSortBuf, other.countSortBuf);
+        std::swap(info_container, other.info_container);
+    }
+    hashmap_radixsort & operator=(hashmap_radixsort const & other) {
+        numBuckets = other.numBuckets;
+        bucketMask = other.bucketMask;
+        numBins = other.numBins;
+        binMask = other.binMask;
+        binShift = other.binShift;
+        binSize = other.binSize;
+        overflowBufSize = other.overflowBufSize;
+        curOverflowBufId = other.curOverflowBufId;
+        sortBufSize = other.sortBufSize;
+        noValue = other.noValue;
+        coherence = other.coherence;
+        seed = other.seed;
+        totalKeyCount = other.totalKeyCount;
+
+        eq = other.eq;
+        hash = other.hash;
+        hll = other.hll;
+        hash_mod2 = other.hash_mod2;
+
+        _mm_free(countArray);
+        countArray = (uint16_t *)_mm_malloc(numBins * sizeof(uint16_t), 64);
+        memcpy(countArray, other.countArray, numBins * sizeof(uint16_t));
+        _mm_free(hashTable);
+        hashTable = (HashElement *)_mm_malloc(numBins * binSize * sizeof(HashElement), 64);
+        memcpy(hashTable, other.hashTable, numBins * binSize * sizeof(HashElement));
+        _mm_free(overflowBuf);
+        overflowBuf = (HashElement *)_mm_malloc(overflowBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(overflowBuf, other.overflowBuf, overflowBufSize * binSize * sizeof(HashElement));
+        _mm_free(sortBuf);
+        sortBuf = (HashElement *)_mm_malloc(sortBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(sortBuf, other.sortBuf, sortBufSize * binSize * sizeof(HashElement));
+        _mm_free(countSortBuf);
+        countSortBuf = (uint16_t *)_mm_malloc(sortBufSize * sizeof(uint16_t), 64);
+        memcpy(countSortBuf, other.countSortBuf, sortBufSize * sizeof(uint16_t));
+        _mm_free(info_container);
+        info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
+        memcpy(info_container, other.info_container, numBuckets * sizeof(int16_t));
+
+        return *this;
+    }
+    hashmap_radixsort & operator=(hashmap_radixsort && other) {
+        numBuckets = other.numBuckets;
+        bucketMask = other.bucketMask;
+        numBins = other.numBins;
+        binMask = other.binMask;
+        binShift = other.binShift;
+        binSize = other.binSize;
+        overflowBufSize = other.overflowBufSize;
+        curOverflowBufId = other.curOverflowBufId;
+        sortBufSize = other.sortBufSize;
+        noValue = other.noValue;
+        coherence = other.coherence;
+        seed = other.seed;
+        totalKeyCount = other.totalKeyCount;
+
+        eq = std::move(other.eq);
+        hash = std::move(other.hash);
+        hll.swap(other.hll);
+        hash_mod2 = std::move(other.hash_mod2);
+
+        std::swap(countArray, other.countArray);
+        std::swap(hashTable, other.hashTable);
+        std::swap(overflowBuf, other.overflowBuf);
+        std::swap(sortBuf, other.sortBuf);
+        std::swap(countSortBuf, other.countSortBuf);
+        std::swap(info_container, other.info_container);
+
+        return *this;
+    }
+
+
+    void swap(hashmap_radixsort && other) {
+        std::swap(numBuckets, other.numBuckets);
+        std::swap(bucketMask, other.bucketMask);
+        std::swap(numBins   , other.numBins);
+        std::swap(binMask   , other.binMask);
+        std::swap(binShift  , other.binShift);
+        std::swap(binSize   , other.binSize);
+        std::swap(overflowBufSize, other.overflowBufSize);
+        std::swap(curOverflowBufId, other.curOverflowBufId);
+        std::swap(sortBufSize, other.sortBufSize);
+        std::swap(noValue, other.noValue);
+        std::swap(coherence, other.coherence);
+        std::swap(seed, other.seed);
+        std::swap(totalKeyCount, other.totalKeyCount);
+
+        std::swap(eq, other.eq);
+        std::swap(hash, other.hash);
+        hll.swap(std::move(other.hll));
+        std::swap(hash_mod2, other.hash_mod2);
+
+        std::swap(countArray, other.countArray);
+        std::swap(hashTable, other.hashTable);
+        std::swap(overflowBuf, other.overflowBuf);
+        std::swap(sortBuf, other.sortBuf);
+        std::swap(countSortBuf, other.countSortBuf);
+        std::swap(info_container, other.info_container);
+    }
+
+
+
 	void set_novalue(V _noValue) const { noValue = _noValue; }
 
 	const_iterator cbegin() const {
@@ -606,6 +788,8 @@ public:
 	// return fail or success
 	bool resize(uint32_t _newNumBuckets )
 	{
+		if (next_power_of_2(_newNumBuckets) == numBuckets) return true;
+
 #ifndef NDEBUG
         int64_t preStart = __rdtsc();
 #endif
@@ -750,6 +934,7 @@ public:
 
     _mm_free(info_container);
         info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
+        memset(info_container, 0, numBuckets * sizeof(int16_t));
         curOverflowBufId = 0;
 #ifndef NDEBUG
         printf("numBuckets = %u, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
@@ -1038,7 +1223,8 @@ public:
     size_t estimate_and_insert(Key *keyArray, size_t numKeys) {
 
       // local hash computation and hll update.
-        hash_val_type* hvals = ::utils::mem::aligned_alloc<hash_val_type>(numKeys + PFD);  // 64 byte alignment.
+        hash_val_type* hvals = (hash_val_type *)_mm_malloc((numKeys + PFD) * sizeof(hash_val_type), 64);
+        memset(hvals + numKeys, 0, sizeof(hash_val_type) * PFD);
         this->hll.update(keyArray, numKeys, hvals);
 
         size_t est = this->hll.estimate();
@@ -1049,7 +1235,7 @@ public:
 
         size_t inserted = insert(keyArray, hvals, numKeys);
 
-        ::utils::mem::aligned_free(hvals);
+        _mm_free(hvals);
 
         return inserted;
     }
@@ -1089,7 +1275,7 @@ public:
             //hashTicks += (endTick - startTick);
 #if ENABLE_PREFETCH
             uint32_t f_bucketId = bucketIdArray[(i + PFD) & 31];
-            int64_t f_binId = f_bucketId >> binShift;
+			int64_t f_binId = f_bucketId >> binShift;
             int f_count = countArray[f_binId];
             _mm_prefetch((const char *)(hashTable + f_binId * binSize + f_count), _MM_HINT_T0);
 #endif
@@ -1483,7 +1669,8 @@ public:
             uint32_t firstBucketId = i << binShift;
             uint32_t lastBucketId = firstBucketId + sortBufSize - 1;
             uint32_t prevBucketId = firstBucketId - 1;
-            uint32_t j, k;
+            uint32_t k;
+            int32_t j;
             y = std::min(count, binSize - 1);
             for(j = 0; j < y; j++)
             {
@@ -1541,7 +1728,7 @@ public:
                 uint32_t bucketId = he.bucketId;
                 if(bucketId < prevBucketId)
                 {
-                    printf("ERROR! [%d,%d] prevBucketId = %u, bucketId = %u\n", i, j, prevBucketId, bucketId);
+                    printf("ERROR! [%ld,%d] prevBucketId = %u, bucketId = %u\n", i, j, prevBucketId, bucketId);
                     exit(0);
                 }
                 kmerCountSum += (he.val * he.val);
@@ -1555,7 +1742,7 @@ public:
                 uint32_t bucketId = he.bucketId;
                 if(bucketId < prevBucketId)
                 {
-                    printf("ERROR! [%d,%d] prevBucketId = %u, bucketId = %u\n", i, j, prevBucketId, bucketId);
+                    printf("ERROR! [%ld,%d] prevBucketId = %u, bucketId = %u\n", i, j, prevBucketId, bucketId);
                     exit(0);
                 }
                 kmerCountSum += (he.val * he.val);
@@ -1577,7 +1764,7 @@ public:
 
             if(end < start)
             {
-                printf("ERROR! [%d] start = %d, end = %d, binId = %ld, binId2 = %ld\n", i, start, end, binId, binId2);
+                printf("ERROR! [%ld] start = %d, end = %d, binId = %ld, binId2 = %ld\n", i, start, end, binId, binId2);
                 exit(0);
             }
             for(j = start; j < end; j++)
@@ -1594,7 +1781,7 @@ public:
                 }
                 if(bucketId != i)
                 {
-                    printf("ERROR! [%d,%d] bucketId = %u\n", i, j, bucketId);
+                    printf("ERROR! [%ld,%d] bucketId = %u\n", i, j, bucketId);
                     exit(0);
                 }
             }

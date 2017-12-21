@@ -37,6 +37,9 @@
  *          signature of predicate is bool pred(T&).  if predicate needs to access the local map, it should be done via its constructor.
  *
 
+ * TODO:
+ * [ ] explicitly set the thread affinity - possible with openmp?  http://scc.ustc.edu.cn/zlsc/chinagrid/intel/mkl/mkl_userguide/GUID-0902790E-A4E0-4C1F-BE78-176AD178E18B.htm
+
  */
 
 #ifndef HYBRID_BATCHED_RADIXSORT_MAP_HPP
@@ -197,8 +200,8 @@ namespace hsc  // hybrid std container
 //      using TransHash = typename MapParams<K>::template StoreTransFuncTemplate<K>;
 
     // own hyperloglog definition.  separate from the local container's.  this estimates using the transformed distribute hash.
+    //hyperloglog64<Key, InternalHash, 12> *hlls;
     std::vector<hyperloglog64<Key, InternalHash, 12> > hlls;
-
 
 	template <typename K>
 	using StoreHash = typename MapParams<K>::template StorageFunction<K>;
@@ -235,7 +238,7 @@ namespace hsc  // hybrid std container
     using count_result_type = uint8_t;   // don't have single element count in radixsort, so use uint8_t directly.
 
     protected:
-      std::vector<local_container_type> c;
+    	std::vector<local_container_type> c;
 
 
     //   /// local reduction via a copy of local container type (i.e. batched_radixsort_map).
@@ -755,17 +758,32 @@ namespace hsc  // hybrid std container
     public:
 
       batched_radixsort_map_base(const mxx::comm& _comm) : Base(_comm),
-		  key_to_hash(DistHash<trans_val_type>(9876543), DistTrans<Key>(), ::bliss::transform::identity<hash_val_type>()),
-          hlls(omp_get_max_threads()),
-          c(omp_get_max_threads())
+		  key_to_hash(DistHash<trans_val_type>(9876543), DistTrans<Key>(), ::bliss::transform::identity<hash_val_type>())
 		  //hll(ceilLog2(_comm.size()))  // top level hll. no need to ignore bits.
         {
- //   	  this->c.set_ignored_msb(ceilLog2(_comm.size()));   // NOTE THAT THIS SHOULD MATCH KEY_TO_RANK use of bits in hash table.
+
+    	  if (_comm.rank() == 0)
+    		  printf("initializing for %d threads\n", omp_get_max_threads());
+//		c = new local_container_type[omp_get_max_threads()];
+//		hlls = new hyperloglog64<Key, InternalHash, 12>[omp_get_max_threads()];
+    	  c.resize(omp_get_max_threads());
+    	  hlls.resize(omp_get_max_threads());
+    	  //   	  this->c.set_ignored_msb(ceilLog2(_comm.size()));   // NOTE THAT THIS SHOULD MATCH KEY_TO_RANK use of bits in hash table.
+
+	#pragma omp parallel
+	{
+			int tid = omp_get_thread_num();
+			c[tid].swap(local_container_type());  // get thread local allocation
+			hlls[tid].swap(hyperloglog64<Key, InternalHash, 12>());
+	}
       }
 
 
 
-      virtual ~batched_radixsort_map_base() {};
+      virtual ~batched_radixsort_map_base() {
+//	delete [] c;
+//	delete [] hlls;
+	};
 
 
 
@@ -773,8 +791,8 @@ namespace hsc  // hybrid std container
       local_container_type& get_local_container(int tid) { return c[tid]; }
       local_container_type const & get_local_container(int tid) const { return c[tid]; }
 
-      std::vector<local_container_type>& get_local_containers() { return c; }
-      std::vector<local_container_type> const & get_local_containers() const { return c; }
+      local_container_type* get_local_containers() { return c; }
+      local_container_type const * get_local_containers() const { return c; }
 
       // ================ local overrides
 
@@ -964,6 +982,7 @@ namespace hsc  // hybrid std container
     size_t in_size = input.size();
     size_t nthreads_global = omp_get_max_threads();
     int comm_size = 1;
+    int batch_size = InternalHash::batch_size;
 
     // set up per thread storage
     std::vector< std::vector<size_t> > thread_bucket_sizes(omp_get_max_threads());
@@ -987,18 +1006,21 @@ namespace hsc  // hybrid std container
         block += (static_cast<size_t>(tid) < rem ? 1: 0);
         size_t r_end = r_start + block;
 
+#ifdef MT_DEBUG
+	printf("tid %d of %d insize %ld with block %ld rem %ld, start %ld, end %ld\n", tid, tcnt, in_size, block, rem, r_start, r_end);
+#endif
         auto it = input.data() + r_start;
         auto et = input.data() + r_end;
 
         if (tcnt > 1) { // only do if more than 1 thread.  then we need to permute
-            V* buffer = ::utils::mem::aligned_alloc<V>(r_end - r_start);
+            V* buffer = ::utils::mem::aligned_alloc<V>(r_end - r_start + batch_size);
 
             // transform once.  bucketing and distribute will read it multiple times.
             this->transform_input(it, et, buffer);
 
             // ===== assign to get bucket ids.
             thread_bucket_sizes[tid].resize(nthreads_global, 0);
-            uint32_t* bid_buf = ::utils::mem::aligned_alloc<uint32_t>(r_end - r_start);
+            uint32_t* bid_buf = ::utils::mem::aligned_alloc<uint32_t>(r_end - r_start + batch_size);
 
 
             if (nthreads_global <= std::numeric_limits<uint8_t>::max()) {
@@ -1011,7 +1033,7 @@ namespace hsc  // hybrid std container
                 this->assign_count(buffer, buffer + block, static_cast<uint32_t>(nthreads_global),
                  thread_bucket_sizes[tid], reinterpret_cast<uint32_t*>(bid_buf) );
             }
-            thread_bucket_offsets[tid].resize(nthreads_global);
+            thread_bucket_offsets[tid].resize(nthreads_global, 0);
 
             #pragma omp barrier
 
@@ -1036,7 +1058,6 @@ namespace hsc  // hybrid std container
             // wait for all to be done with the scan.
             #pragma omp barrier
 
-            if (tcnt > 1) {  // update offsets if more than 1 thread.
                 //  2. 1 thread to scan thread total to get thread offsets.  O(C) instead of O(CP)
                 #pragma omp single
                 {
@@ -1062,9 +1083,10 @@ namespace hsc  // hybrid std container
                         thread_bucket_offsets[t][j] += offset;
                     }
                 }
-            }            
    
             //===============  now the offsets are ready.  we can permute.
+            // since each thread updates a portion of every other thread's thread buckewt sizes, need this barrier here.
+			#pragma omp barrier
 
             // then call permute_by_bucketId and computed offsets. 
             // NOTE: permute back into input
@@ -1139,6 +1161,7 @@ namespace hsc  // hybrid std container
     int comm_rank = this->comm.rank();
     size_t in_size = input.size();
     size_t nthreads_global = comm_size * omp_get_max_threads();
+    int batch_size = InternalHash::batch_size;
 
     // set up per thread storage
     std::vector< std::vector<size_t> > thread_bucket_sizes(omp_get_max_threads());
@@ -1172,7 +1195,7 @@ namespace hsc  // hybrid std container
 
       // get mapping to proc
       // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
-        V* buffer = ::utils::mem::aligned_alloc<V>(r_end - r_start);
+        V* buffer = ::utils::mem::aligned_alloc<V>(r_end - r_start + batch_size);
 
 //        BL_BENCH_END(modify, "alloc", input.size());
         auto it = input.data() + r_start;
@@ -1195,7 +1218,7 @@ namespace hsc  // hybrid std container
 
         thread_bucket_sizes[tid].resize(nthreads_global, 0);
     
-        uint32_t* bid_buf = ::utils::mem::aligned_alloc<uint32_t>(r_end - r_start);
+        uint32_t* bid_buf = ::utils::mem::aligned_alloc<uint32_t>(r_end - r_start + batch_size);
 
     #if defined(OVERLAPPED_COMM) //|| defined(OVERLAPPED_COMM_BATCH) || defined(OVERLAPPED_COMM_FULLBUFFER) || defined(OVERLAPPED_COMM_2P)
         if (estimate) {
@@ -1241,7 +1264,7 @@ namespace hsc  // hybrid std container
         }
     #endif
         // do some calc with thread_bucket_sizes to get offsets for each bucket for each thread in node-wide permuted input array.
-        thread_bucket_offsets[tid].resize(nthreads_global);
+        thread_bucket_offsets[tid].resize(nthreads_global, 0);
         
         // make sure all threads have reached hererehashing
         #pragma omp barrier
@@ -1354,6 +1377,8 @@ namespace hsc  // hybrid std container
             }            
 
         //===============  now the offsets are ready.  we can permute.
+            // since each thread updates a portion of every other thread's thread buckewt sizes, need this barrier here.
+		#pragma omp barrier
 
         // then call permute_by_bucketId and computed offsets.
             if (nthreads_global <= std::numeric_limits<uint8_t>::max()) {
@@ -1424,7 +1449,8 @@ namespace hsc  // hybrid std container
     if (estimate) {
         BL_BENCH_COLLECTIVE_START(modify, "alloc_hashtable", this->comm);
         size_t est = this->hlls[0].estimate_average_per_rank(this->comm);
-        if (this->comm.rank() == 0) std::cout << "rank " << this->comm.rank() << " estimated size " << est << std::endl;
+        if (this->comm.rank() == 0)
+        	printf("rank %d estimated size %ld\n", this->comm.rank(), est);
 
         #pragma omp parallel
         {
@@ -1475,7 +1501,7 @@ namespace hsc  // hybrid std container
     size_t recv_total = recv_offset;  // for overlap, this would be incorrect but that is okay.
 
     BL_BENCH_START(modify);
-    V* distributed = ::utils::mem::aligned_alloc<V>(recv_total);
+    V* distributed = ::utils::mem::aligned_alloc<V>(recv_total + batch_size);
     BL_BENCH_END(modify, "alloc_output", recv_total);
 
 
@@ -1494,7 +1520,7 @@ namespace hsc  // hybrid std container
         V* shuffled;
         
         if (tcnt > 1) {   // only need to shuffle if more than 1 thread
-            shuffled = ::utils::mem::aligned_alloc<V>(rthread_total[tid]);
+            shuffled = ::utils::mem::aligned_alloc<V>(rthread_total[tid] + batch_size);
             V* it = shuffled;
             for (int i = 0; i < this->comm.size(); ++i) {
                 // copy from one src rank at a time
@@ -1578,7 +1604,7 @@ namespace hsc  // hybrid std container
        */
       template <typename V, typename OP>
       void query_1(std::vector<Key> & input,
-    		  std::vector<V> & results,
+    		  V* results,
               OP compute) const {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(query);
@@ -1594,6 +1620,7 @@ namespace hsc  // hybrid std container
         size_t in_size = input.size();
         size_t nthreads_global = omp_get_max_threads();
         int comm_size = 1;
+	size_t batch_size = InternalHash::batch_size;
 
         // set up per thread storage
         std::vector< std::vector<size_t> > thread_bucket_sizes(omp_get_max_threads());
@@ -1604,11 +1631,6 @@ namespace hsc  // hybrid std container
 
         BL_BENCH_END(query, "alloc", nthreads_global);
 
-
-        // resize
-        BL_BENCH_START(query);
-        results.resize(in_size);
-        BL_BENCH_END(query, "alloc_output", results.size());
 
         BL_BENCH_START(query);
         #pragma omp parallel
@@ -1624,19 +1646,19 @@ namespace hsc  // hybrid std container
 
             auto it = input.data() + r_start;
             auto et = input.data() + r_end;
-            auto rt = results.data();
+            auto rt = results;
 
             // transform once.  bucketing and distribute will read it multiple times.
             if (tcnt > 1) { // only do if more than 1 thread.  then we need to permute
                 // require permuting.  leave the input in the permuted order after.
-                Key* buffer = ::utils::mem::aligned_alloc<Key>(r_end - r_start);
+                Key* buffer = ::utils::mem::aligned_alloc<Key>(r_end - r_start + batch_size);
 
                 // transform once.  bucketing and distribute will read it multiple times.
                 this->transform_input(it, et, buffer);
 
                 // ===== assign to get bucket ids.
                 thread_bucket_sizes[tid].resize(nthreads_global, 0);
-                uint32_t* bid_buf = ::utils::mem::aligned_alloc<uint32_t>(r_end - r_start);
+                uint32_t* bid_buf = ::utils::mem::aligned_alloc<uint32_t>(r_end - r_start + batch_size);
 
                 if (nthreads_global <= std::numeric_limits<uint8_t>::max()) {
                     this->assign_count(buffer, buffer + block, static_cast<uint8_t>(nthreads_global),
@@ -1648,7 +1670,7 @@ namespace hsc  // hybrid std container
                     this->assign_count(buffer, buffer + block, static_cast<uint32_t>(nthreads_global),
                     thread_bucket_sizes[tid], reinterpret_cast<uint32_t*>(bid_buf) );
                 }
-                thread_bucket_offsets[tid].resize(nthreads_global);
+                thread_bucket_offsets[tid].resize(nthreads_global, 0);
 
                 #pragma omp barrier
 
@@ -1673,7 +1695,6 @@ namespace hsc  // hybrid std container
                 // wait for all to be done with the scan.
                 #pragma omp barrier
 
-                if (tcnt > 1) {  // update offsets if more than 1 thread.
                     //  2. 1 thread to scan thread total to get thread offsets.  O(C) instead of O(CP)
                     #pragma omp single
                     {
@@ -1699,8 +1720,10 @@ namespace hsc  // hybrid std container
                             thread_bucket_offsets[t][j] += offset;
                         }
                     }
-                }            
-                    //===============  now the offsets are ready.  we can permute.
+
+				//===============  now the offsets are ready.  we can permute.
+	            // since each thread updates a portion of every other thread's thread buckewt sizes, need this barrier here.
+				#pragma omp barrier
 
                     // then call permute_by_bucketId and computed offsets. 
                     // NOTE: permute back into input
@@ -1723,17 +1746,17 @@ namespace hsc  // hybrid std container
                 // update it and et.
                 it = input.data() + node_bucket_offsets[tid];
                 et = it + node_bucket_sizes[tid];
-                rt = results.data() + node_bucket_offsets[tid];
+                rt = results + node_bucket_offsets[tid];
             } else {
                 this->transform_input(it, et, it);
-                rt = results.data() + r_start;
+                rt = results + r_start;
             }
 
 
             compute(tid, it, et, rt);
 
         } // end parallel section
-        BL_BENCH_END(query, "local_find", results.size());
+        BL_BENCH_END(query, "local_find", input.size());
 
         BL_BENCH_REPORT_MPI_NAMED(query, "base_hashmap:query", this->comm);
 
@@ -1747,7 +1770,7 @@ namespace hsc  // hybrid std container
        */
       template <typename V, typename OP>
       void query_p(std::vector<Key >& input,
-    		  std::vector<V> & results,
+    		  V* results,
               OP compute) const {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(query);
@@ -1776,7 +1799,8 @@ namespace hsc  // hybrid std container
         int comm_size = this->comm.size();
         size_t in_size = input.size();
         size_t nthreads_global = comm_size * omp_get_max_threads();
-
+	size_t batch_size = InternalHash::batch_size;
+	
         // set up per thread storage
         std::vector< std::vector<size_t> > thread_bucket_sizes(omp_get_max_threads());
         std::vector< std::vector<size_t> > thread_bucket_offsets(omp_get_max_threads());
@@ -1806,7 +1830,7 @@ namespace hsc  // hybrid std container
 
       // get mapping to proc
       // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
-        Key* buffer = ::utils::mem::aligned_alloc<Key>(r_end - r_start);
+        Key* buffer = ::utils::mem::aligned_alloc<Key>(r_end - r_start + batch_size);
 
 //        BL_BENCH_END(modify, "alloc", input.size());
         auto it = input.data() + r_start;
@@ -1829,7 +1853,7 @@ namespace hsc  // hybrid std container
 
         thread_bucket_sizes[tid].resize(nthreads_global, 0);
     
-        uint32_t* bid_buf = ::utils::mem::aligned_alloc<uint32_t>(r_end - r_start);
+        uint32_t* bid_buf = ::utils::mem::aligned_alloc<uint32_t>(r_end - r_start + batch_size);
 
         if (nthreads_global <= std::numeric_limits<uint8_t>::max()) {
             this->assign_count(buffer, buffer + block, static_cast<uint8_t>(nthreads_global), thread_bucket_sizes[tid],
@@ -1842,7 +1866,7 @@ namespace hsc  // hybrid std container
                         reinterpret_cast<uint32_t*>(bid_buf) );
         }
         // do some calc with thread_bucket_sizes to get offsets for each bucket for each thread in node-wide permuted input array.
-        thread_bucket_offsets[tid].resize(nthreads_global);
+        thread_bucket_offsets[tid].resize(nthreads_global, 0);
         
         // make sure all threads have reached here
         #pragma omp barrier
@@ -1894,6 +1918,7 @@ namespace hsc  // hybrid std container
             }
         }
         //===============  now the offsets are ready.  we can permute.
+		#pragma omp barrier
 
         // then call permute_by_bucketId and computed offsets.
             if (nthreads_global <= std::numeric_limits<uint8_t>::max()) {
@@ -1961,11 +1986,6 @@ namespace hsc  // hybrid std container
 
 #if defined(OVERLAPPED_COMM) 
 
-    BL_BENCH_COLLECTIVE_START(query, "alloc_out", this->comm);
-    // get mapping to proc
-    results.resize(input.size());
-    BL_BENCH_END(query, "alloc_out", input.size());
-
 
     BL_BENCH_COLLECTIVE_START(query, "a2av_query", this->comm);
 
@@ -1985,7 +2005,7 @@ namespace hsc  // hybrid std container
                 compute(tid, bb, ee, rr); // this->c[tid].insert_no_estimate(bb, ee, T(1));
             }  // finished parallel modify.
         },
-        results.data(), 
+        results,
         this->comm);
 
     BL_BENCH_END(query, "a2av_query", input.size());
@@ -1994,8 +2014,8 @@ namespace hsc  // hybrid std container
     size_t recv_total = recv_offset;  // for overlap, this would be incorrect but that is okay.
 
     BL_BENCH_START(query);
-    Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
-    V* dist_results = ::utils::mem::aligned_alloc<V>(recv_total);
+    Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total + batch_size);
+    V* dist_results = ::utils::mem::aligned_alloc<V>(recv_total + batch_size);
     BL_BENCH_END(query, "alloc_intermediates", recv_total);
 
     BL_BENCH_COLLECTIVE_START(query, "a2a", this->comm);
@@ -2031,20 +2051,16 @@ namespace hsc  // hybrid std container
     BL_BENCH_END(query, "cleanup", recv_total);
 
     // local query. memory utilization a potential problem.
-    // do for each src proc one at a time.
-    BL_BENCH_COLLECTIVE_START(query, "alloc_out", this->comm);
-    results.resize(input.size() );                   // TODO:  should estimate coverage.
-    BL_BENCH_END(query, "alloc_out", results.capacity());
 
 
     // send back using the constructed recv count
     BL_BENCH_COLLECTIVE_START(query, "a2a2", this->comm);
     ::khmxx::distribute_permuted(dist_results, dist_results + recv_total,
-            recv_counts, results.data(), send_counts, this->comm);
+            recv_counts, results, send_counts, this->comm);
 
     ::utils::mem::aligned_free(dist_results);
 
-    BL_BENCH_END(query, "a2a2", results.size());
+    BL_BENCH_END(query, "a2a2", input.size());
 
 
 #endif // non overlap
@@ -2058,18 +2074,38 @@ namespace hsc  // hybrid std container
 
     public:
 
+
       template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
       ::std::vector<count_result_type > count(::std::vector<Key>& keys,
     		  bool sorted_input = false,
 			  Predicate const& pred = Predicate() ) const {
 
-        std::vector<count_result_type> results;
-        results.reserve(keys.size());
-        
+        std::vector<count_result_type> results(keys.size());
+
         auto count_functor =  
             [this, &pred](int tid, Key* b, Key* e, count_result_type * out) {
   	            this->c[tid].count(b, std::distance(b, e), out);
             };
+
+        if (this->comm.size() == 1) {
+            query_1(keys, results.data(), count_functor);
+        } else {
+            query_p(keys, results.data(), count_functor);
+        }
+
+        return results;
+      }
+
+
+      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
+      size_t count(::std::vector<Key>& keys, count_result_type* results,
+    		  bool sorted_input = false,
+			  Predicate const& pred = Predicate() ) const {
+
+          auto count_functor =
+              [this, &pred](int tid, Key* b, Key* e, count_result_type * out) {
+    	            this->c[tid].count(b, std::distance(b, e), out);
+              };
 
         if (this->comm.size() == 1) {
             query_1(keys, results, count_functor);
@@ -2077,8 +2113,9 @@ namespace hsc  // hybrid std container
             query_p(keys, results, count_functor);
         }
 
-        return results;
+        return keys.size();
       }
+
 
 //      template <typename Predicate = ::bliss::filter::TruePredicate>
 //      ::std::vector<::std::pair<Key, size_type> > count(Predicate const & pred = Predicate()) const {
@@ -2090,18 +2127,18 @@ namespace hsc  // hybrid std container
 //      }
 
 
+
       template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
       ::std::vector<mapped_type > find(::std::vector<Key>& keys,
     		  mapped_type const & nonexistent = mapped_type(),
     		  bool sorted_input = false,
 			  Predicate const& pred = Predicate() ) const {
 
-        std::vector<mapped_type> results;
-        results.reserve(keys.size());
+        std::vector<mapped_type> results(keys.size());
         
-        #pragma omp parallel
+        for (int i = 0; i < omp_get_max_threads(); ++i)
         {
-            this->c[omp_get_thread_num()].set_novalue(nonexistent);
+            this->c[i].set_novalue(nonexistent);
         }
 
         auto find_functor =  
@@ -2110,12 +2147,38 @@ namespace hsc  // hybrid std container
             };
 
         if (this->comm.size() == 1) {
+            query_1(keys, results.data(), find_functor);
+        } else {
+            query_p(keys, results.data(), find_functor);
+        }
+
+        return results;
+      }
+
+
+      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
+      size_t find(::std::vector<Key>& keys, mapped_type * results,
+    		  mapped_type const & nonexistent = mapped_type(),
+    		  bool sorted_input = false,
+			  Predicate const& pred = Predicate() ) const {
+
+          for (int i = 0; i < omp_get_max_threads(); ++i)
+          {
+              this->c[i].set_novalue(nonexistent);
+          }
+
+          auto find_functor =
+              [this, &pred, &nonexistent](int tid, Key* b, Key* e, mapped_type * out) {
+    	            this->c[tid].find(b, std::distance(b, e), out);
+              };
+
+        if (this->comm.size() == 1) {
             query_1(keys, results, find_functor);
         } else {
             query_p(keys, results, find_functor);
         }
 
-        return results;
+        return keys.size();
       }
 
 #if 0  // TODO: temporarily retired.
@@ -2557,14 +2620,22 @@ public:
       size_t insert_no_finalize(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
 
         auto insert_key_functor = [this](int tid, Key * it, Key * et, bool est = true){
+          size_t cnt = std::distance(it, et);
+
             if (est) {
-                printf("thread %d inserting %ld \n", tid, std::distance(it, et)); 
-                this->c[tid].estimate_and_insert(it, std::distance(it, et));
+                this->c[tid].estimate_and_insert(it, cnt);
             } else
-                this->c[tid].insert(it, std::distance(it, et));
+                this->c[tid].insert(it, cnt);
+
+#ifdef MT_DEBUG
+            printf("rank %d thread %d inserting %ld, inserted %ld\n", this->comm.rank(), tid, cnt, this->c[tid].size());
+#endif
         };
         auto insert_key_no_est_functor = [this](int tid, Key * it, Key * et){
             this->c[tid].insert(it, std::distance(it, et));
+#ifdef MT_DEBUG
+            printf("rank %d thread %d inserting %ld, inserted %ld\n", this->comm.rank(), tid, std::distance(it, et), this->c[tid].size());
+#endif
         };
 
 

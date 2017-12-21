@@ -324,7 +324,7 @@ public:
 	}
 
 
-	void swap(hyperloglog64 & other) {
+	void swap(hyperloglog64 && other) {
 		std::swap(registers, other.registers);
 		std::swap(amm, other.amm);
 		std::swap(ignored_msb, other.ignored_msb);

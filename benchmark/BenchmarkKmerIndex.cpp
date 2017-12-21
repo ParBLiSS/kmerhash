@@ -487,7 +487,7 @@ std::vector<KmerType> readForQuery_posix(const std::string & filename, MPI_Comm 
 
 template<typename KmerType>
 void sample(std::vector<KmerType> &query, size_t n, unsigned int seed, mxx::comm const & comm) {
-  std::shuffle(query.begin(), query.end(), std::default_random_engine(seed));
+  //std::shuffle(query.begin(), query.end(), std::default_random_engine(seed));
 
   size_t n_p = (n / comm.size());
   std::vector<size_t> send_counts(comm.size(), n_p);
@@ -552,7 +552,7 @@ int main(int argc, char** argv) {
   double max_load = 0.8;
   double min_load = 0.35;
   uint8_t insert_prefetch = 8;
-  uint8_t query_prefetch = 16;
+  uint8_t query_prefetch = 8;
 
   bool balance_input = false;
 
@@ -587,8 +587,8 @@ int main(int argc, char** argv) {
 
 	  TCLAP::ValueArg<double> maxLoadArg("","max_load","maximum load factor", false, max_load, "double", cmd);
 	  TCLAP::ValueArg<double> minLoadArg("","min_load","minimum load factor", false, min_load, "double", cmd);
-	  TCLAP::ValueArg<unsigned char> insertPrefetchArg("","insert_prefetch","number of elements to prefetch during insert", false, insert_prefetch, "unsigned char", cmd);
-	  TCLAP::ValueArg<unsigned char> queryPrefetchArg("","query_prefetch","number of elements to prefetch during queries", false, query_prefetch, "unsigned char", cmd);
+	  TCLAP::ValueArg<uint32_t> insertPrefetchArg("","insert_prefetch","number of elements to prefetch during insert", false, insert_prefetch, "uint32_t", cmd);
+	  TCLAP::ValueArg<uint32_t> queryPrefetchArg("","query_prefetch","number of elements to prefetch during queries", false, query_prefetch, "uint32_t", cmd);
 
 #ifdef VTUNE_ANALYSIS
     std::vector<std::string> measure_modes;
@@ -771,16 +771,34 @@ int main(int argc, char** argv) {
 
 	  {
 		  auto lquery = query;
+#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT) || (pMAP == BROBINHOOD) || (pMAP == RADIXSORT)
+		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
+		  uint8_t * count_res = ::utils::mem::aligned_alloc<uint8_t>(lquery.size(), 64);
+		  size_t count_res_size = idx.get_map().count(lquery, count_res);
+
+		  ::utils::mem::aligned_free(count_res);
+		  BL_BENCH_END(test, "count", count_res_size);
+#else
 		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
 		  auto counts = idx.count(lquery);
 		  BL_BENCH_END(test, "count", counts.size());
-	  }
+#endif
+		  }
 
 	  {
 		  auto lquery = query;
+#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT) || (pMAP == BROBINHOOD) || (pMAP == RADIXSORT)
+		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
+		  CountType * find_res = ::utils::mem::aligned_alloc<CountType>(lquery.size(), 64);
+		  size_t find_res_size = idx.get_map().find(lquery, find_res);
+
+		  ::utils::mem::aligned_free(find_res);
+		  BL_BENCH_END(test, "count", find_res_size);
+#else
 		  BL_BENCH_COLLECTIVE_START(test, "find", comm);
 		  auto found = idx.find(lquery);
 		  BL_BENCH_END(test, "find", found.size());
+#endif
 	  }
 
 
