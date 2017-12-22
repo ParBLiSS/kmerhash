@@ -36,6 +36,8 @@
  *
  *          signature of predicate is bool pred(T&).  if predicate needs to access the local map, it should be done via its constructor.
  *
+ * general: specify OMP_NUM_THREADS,  OMP_PROC_BIND=true, OMP_PLACES=cores
+ * OpenMPI: specify for mpirun --map-by ppr:1:node:pe=64 or ppr:4:socket:pe=16
  */
 
 #ifndef HYBRID_BATCHED_ROBINHOOD_MAP_HPP
