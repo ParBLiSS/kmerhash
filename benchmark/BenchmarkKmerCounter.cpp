@@ -1444,6 +1444,7 @@ int main(int argc, char** argv) {
       // =========== update the parameters
 #if (pMAP == SORTED) || (pMAP == RADIXSORT) || (pMAP == MTRADIXSORT) 
     buckets = idx.get_map().local_capacity();
+	orig_buckets = buckets;
       max_load = buckets;
 #elif (pMAP == MTROBINHOOD)
 	    buckets = idx.get_map().local_capacity();
@@ -1478,13 +1479,13 @@ int main(int argc, char** argv) {
         kmer_est = static_cast<size_t>(static_cast<float>(file_size) / chars_per_kmer);
 
         // estimate free memory usage.
-//#if (pMAP == SORTED)
-//        mem_use_est += kmer_est * 4UL * sizeof(typename IndexType::KmerParserType::value_type) +
-//            file_size * 2UL;
-//#else
+#if (pMAP == BROBINHOOD) || (pMAP == MTROBINHOOD) || (pMAP == RADIXSORT) || (pMAP == MTRADIXSORT)
+        mem_use_est += kmer_est * 5UL * sizeof(typename IndexType::KmerParserType::value_type) +
+            file_size * 2UL;
+#else
         mem_use_est += kmer_est * 3UL * sizeof(typename IndexType::KmerParserType::value_type) +
             file_size * 2UL;
-//#endif
+#endif
         // expected change in hash table size
         delta_distinct += static_cast<size_t>(distinct_ratio * static_cast<float>(kmer_est));
 #if (pMAP == SORTED)
