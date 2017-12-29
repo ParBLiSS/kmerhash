@@ -821,12 +821,12 @@ int main(int argc, char** argv) {
 	  {
 		  auto lquery = query;
 #if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT) || (pMAP == BROBINHOOD) || (pMAP == RADIXSORT)
-		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
+		  BL_BENCH_COLLECTIVE_START(test, "find", comm);
 		  CountType * find_res = ::utils::mem::aligned_alloc<CountType>(lquery.size(), 64);
 		  size_t find_res_size = idx.get_map().find(lquery, find_res);
 
 		  ::utils::mem::aligned_free(find_res);
-		  BL_BENCH_END(test, "count", find_res_size);
+		  BL_BENCH_END(test, "find", find_res_size);
 #else
 		  BL_BENCH_COLLECTIVE_START(test, "find", comm);
 		  auto found = idx.find(lquery);
