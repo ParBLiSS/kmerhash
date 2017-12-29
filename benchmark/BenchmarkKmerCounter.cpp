@@ -237,21 +237,20 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 	using DistTrans = bliss::transform::identity<KM>;
 #endif
 
+
 	// distribution hash
-	#if (pDistHash == STD)
-	  template <typename KM>
-	  using DistHash = bliss::kmer::hash::cpp_std<KM, true>;
-	#elif (pDistHash == IDEN)
-	  template <typename KM>
-	//  using DistHash = bliss::kmer::hash::identity<KM, true>;
-	  using DistHash = ::fsc::hash::identity<KM>;
+	#if (pMAP == MTRADIXSORT) || (pMAP == RADIXSORT) || (pMAP == MTROBINHOOD) || (pMAP == BROBINHOOD)
+	#if (pDistHash == IDEN)
+		template <typename KM>
+	//	using DistHash = bliss::kmer::hash::identity<KM, true>;
+		using DistHash = ::fsc::hash::identity<KM>;
 	#elif (pDistHash == MURMUR)
-	  template <typename KM>
-	//  using DistHash = bliss::kmer::hash::murmur<KM, true>;
-	  using DistHash = ::fsc::hash::murmur<KM>;
+		template <typename KM>
+	//	using DistHash = bliss::kmer::hash::murmur<KM, true>;
+		using DistHash = ::fsc::hash::murmur<KM>;
 	#elif (pDistHash == MURMUR32)
-	  template <typename KM>
-	  using DistHash = ::fsc::hash::murmur32<KM>;
+		template <typename KM>
+		using DistHash = ::fsc::hash::murmur32<KM>;
 	#elif (pDistHash == MURMUR32sse)
 	  template <typename KM>
 	  using DistHash = ::fsc::hash::murmur3sse32<KM>;
@@ -268,30 +267,47 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 	  template <typename KM>
 	  using DistHash = ::fsc::hash::clhash<KM>;
 	#elif (pDistHash == FARM32)
-	  template <typename KM>
-	  using DistHash = ::fsc::hash::farm32<KM>;
+		template <typename KM>
+		using DistHash = ::fsc::hash::farm32<KM>;
 	#elif (pDistHash == FARM)
 	  template <typename KM>
 	  //using DistHash = bliss::kmer::hash::farm<KM, true>;
 	  using DistHash = ::fsc::hash::farm<KM>;
+	#else
+	  static_assert(false, "RADIXSORT and BROBINHOOD do not support the specified distr hash function");
+	#endif
+	#else
+	#if (pDistHash == STD)
+		template <typename KM>
+		using DistHash = bliss::kmer::hash::cpp_std<KM, true>;
+	#elif (pDistHash == IDEN)
+		template <typename KM>
+		using DistHash = bliss::kmer::hash::identity<KM, true>;
+	#elif (pDistHash == MURMUR)
+		template <typename KM>
+		using DistHash = bliss::kmer::hash::murmur<KM, true>;
+	#elif (pDistHash == FARM)
+	  template <typename KM>
+	  	using DistHash = bliss::kmer::hash::farm<KM, true>;
+	#else
+	  static_assert(false, "DENSEHASH, unordered map, sorted, ordered, and ROBINHOOD do not support the specified distr hash function");
 	#endif
 
+	#endif
 
 	// storage hash type
-	#if (pStoreHash == STD)
-	  template <typename KM>
-	  using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
-	#elif (pStoreHash == IDEN)
-	  template <typename KM>
-	//  using StoreHash = bliss::kmer::hash::identity<KM, false>;
-	  using StoreHash = ::fsc::hash::identity<KM>;
+	#if (pMAP == MTRADIXSORT) || (pMAP == RADIXSORT) || (pMAP == MTROBINHOOD) || (pMAP == BROBINHOOD)
+	#if (pStoreHash == IDEN)
+		template <typename KM>
+	//	using StoreHash = bliss::kmer::hash::identity<KM, false>;
+		using StoreHash = ::fsc::hash::identity<KM>;
 	#elif (pStoreHash == MURMUR)
-	  template <typename KM>
-	//  using StoreHash = bliss::kmer::hash::murmur<KM, false>;
-	  using StoreHash = ::fsc::hash::murmur<KM>;
+		template <typename KM>
+	//	using StoreHash = bliss::kmer::hash::murmur<KM, false>;
+		using StoreHash = ::fsc::hash::murmur<KM>;
 	#elif (pStoreHash == MURMUR32)
-	  template <typename KM>
-	  using StoreHash = ::fsc::hash::murmur32<KM>;
+		template <typename KM>
+		using StoreHash = ::fsc::hash::murmur32<KM>;
 	#elif (pStoreHash == MURMUR32sse)
 	  template <typename KM>
 	  using StoreHash = ::fsc::hash::murmur3sse32<KM>;
@@ -308,12 +324,31 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 	  template <typename KM>
 	  using StoreHash = ::fsc::hash::clhash<KM>;
 	#elif (pStoreHash == FARM32)
-	  template <typename KM>
-	  using StoreHash = ::fsc::hash::farm32<KM>;
+		template <typename KM>
+		using StoreHash = ::fsc::hash::farm32<KM>;
 	#elif (pStoreHash == FARM)
 	  template <typename KM>
 	//  using StoreHash = bliss::kmer::hash::farm<KM, false>;
 	  using StoreHash = ::fsc::hash::farm<KM>;
+	#else
+	  static_assert(false, "RADIXSORT and BROBINHOOD do not support the specified store hash function");
+	#endif
+	#else
+	#if (pStoreHash == STD)
+		template <typename KM>
+		using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
+	#elif (pStoreHash == IDEN)
+		template <typename KM>
+		using StoreHash = bliss::kmer::hash::identity<KM, false>;
+	#elif (pStoreHash == MURMUR)
+		template <typename KM>
+		using StoreHash = bliss::kmer::hash::murmur<KM, false>;
+	#elif (pStoreHash == FARM)
+	  template <typename KM>
+	  using StoreHash = bliss::kmer::hash::farm<KM, false>;
+	#else
+	  static_assert(false, "DENSEHASH, unordered map, sorted, ordered, and ROBINHOOD do not support the specified store hash function");
+	#endif
 	#endif
 
 

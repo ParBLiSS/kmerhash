@@ -150,7 +150,7 @@ if (BUILD_BENCHMARKS)
 	
 	# distributed benchmarks.
 	foreach(map DENSEHASH)
-		foreach(hash FARM MURMUR MURMUR32 CLHASH) # no FARM because it was affected by prefetching.
+		foreach(hash FARM MURMUR ) # MURMUR32 CLHASH) # no FARM because it was affected by prefetching.
 
 			foreach(k 15 21 31 63)
 				add_dist_hashmap_kmer_target(testKmerIndex ${k} 4 ${map} ${hash} ${hash} KH_DUMMY KH_DUMMY2 dist_benchmarks)
@@ -313,7 +313,7 @@ foreach(map BROBINHOOD RADIXSORT MTROBINHOOD MTRADIXSORT)
 		add_dist_counter_target(testKmerCounter FASTQ 31 ${map} ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
 	endforeach(hash)
 endforeach(map)
-foreach(hash MURMUR32 MURMUR CLHASH)  #  this is not using overlapped IO, so can use MURMUR32avx.
+foreach(hash FARM MURMUR)  #  MURMUR32 CLHASH this is not using overlapped IO, so can use MURMUR32avx.
 	add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
 	add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
 	add_dist_counter_target(testKmerCounter FASTQ 31 DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
@@ -330,7 +330,7 @@ foreach(map BROBINHOOD RADIXSORT)
 		endforeach(k)
 	endforeach(hash)
 endforeach(map)
-foreach(hash MURMUR32 MURMUR) # CLHASH)  #  this is not using overlapped IO, so can use MURMUR32avx.
+foreach(hash FARM MURMUR) # MURMUR32 CLHASH)  #  this is not using overlapped IO, so can use MURMUR32avx.
 	foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
 		add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH k_benchmarks)
 		add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH k_benchmarks)

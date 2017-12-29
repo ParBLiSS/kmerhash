@@ -208,10 +208,8 @@ using CountType = uint32_t;
 #endif
 
 // distribution hash
-#if (pDistHash == STD)
-	template <typename KM>
-	using DistHash = bliss::kmer::hash::cpp_std<KM, true>;
-#elif (pDistHash == IDEN)
+#if (pMAP == MTRADIXSORT) || (pMAP == RADIXSORT) || (pMAP == MTROBINHOOD) || (pMAP == BROBINHOOD)
+#if (pDistHash == IDEN)
 	template <typename KM>
 //	using DistHash = bliss::kmer::hash::identity<KM, true>;
 	using DistHash = ::fsc::hash::identity<KM>;
@@ -244,14 +242,31 @@ using CountType = uint32_t;
   template <typename KM>
   //using DistHash = bliss::kmer::hash::farm<KM, true>;
   using DistHash = ::fsc::hash::farm<KM>;
+#else
+  static_assert(false, "RADIXSORT and BROBINHOOD do not support the specified distr hash function");
+#endif
+#else
+#if (pDistHash == STD)
+	template <typename KM>
+	using DistHash = bliss::kmer::hash::cpp_std<KM, true>;
+#elif (pDistHash == IDEN)
+	template <typename KM>
+	using DistHash = bliss::kmer::hash::identity<KM, true>;
+#elif (pDistHash == MURMUR)
+	template <typename KM>
+	using DistHash = bliss::kmer::hash::murmur<KM, true>;
+#elif (pDistHash == FARM)
+  template <typename KM>
+  	using DistHash = bliss::kmer::hash::farm<KM, true>;
+#else
+  static_assert(false, "DENSEHASH, unordered map, sorted, ordered, and ROBINHOOD do not support the specified distr hash function");
 #endif
 
+#endif
 
 // storage hash type
-#if (pStoreHash == STD)
-	template <typename KM>
-	using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
-#elif (pStoreHash == IDEN)
+#if (pMAP == MTRADIXSORT) || (pMAP == RADIXSORT) || (pMAP == MTROBINHOOD) || (pMAP == BROBINHOOD)
+#if (pStoreHash == IDEN)
 	template <typename KM>
 //	using StoreHash = bliss::kmer::hash::identity<KM, false>;
 	using StoreHash = ::fsc::hash::identity<KM>;
@@ -284,8 +299,26 @@ using CountType = uint32_t;
   template <typename KM>
 //  using StoreHash = bliss::kmer::hash::farm<KM, false>;
   using StoreHash = ::fsc::hash::farm<KM>;
+#else
+  static_assert(false, "RADIXSORT and BROBINHOOD do not support the specified store hash function");
 #endif
-
+#else
+#if (pStoreHash == STD)
+	template <typename KM>
+	using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
+#elif (pStoreHash == IDEN)
+	template <typename KM>
+	using StoreHash = bliss::kmer::hash::identity<KM, false>;
+#elif (pStoreHash == MURMUR)
+	template <typename KM>
+	using StoreHash = bliss::kmer::hash::murmur<KM, false>;
+#elif (pStoreHash == FARM)
+  template <typename KM>
+  using StoreHash = bliss::kmer::hash::farm<KM, false>;
+#else
+  static_assert(false, "DENSEHASH, unordered map, sorted, ordered, and ROBINHOOD do not support the specified store hash function");
+#endif
+#endif
 
 
 // ==== define Map parameter
@@ -698,7 +731,7 @@ int main(int argc, char** argv) {
     idx.get_map().get_local_container().set_min_load_factor(min_load);
     idx.get_map().get_local_container().set_insert_lookahead(insert_prefetch);
     idx.get_map().get_local_container().set_query_lookahead(query_prefetch);
-  #elif (pMAP == TROBINHOOD)
+  #elif (pMAP == MTROBINHOOD)
     idx.get_map().set_max_load_factor(max_load);
     idx.get_map().set_min_load_factor(min_load);
     idx.get_map().set_insert_lookahead(insert_prefetch);
