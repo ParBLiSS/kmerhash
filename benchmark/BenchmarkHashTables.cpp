@@ -329,8 +329,11 @@ void benchmark_classicRH(std::string name, std::vector<::std::pair<Kmer, Value> 
 
   BL_BENCH_START(map);
   // no transform involved.
+#if (pStoreHash == STD)
+  RobinHoodHashMap<Value, std::hash<size_t> > map;
+#else
   RobinHoodHashMap<Value, StoreHash<size_t> > map;
-
+#endif
   BL_BENCH_END(map, "reserve", input.size());
 
   {
