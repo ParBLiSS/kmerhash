@@ -346,6 +346,9 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 	#elif (pStoreHash == FARM)
 	  template <typename KM>
 	  using StoreHash = bliss::kmer::hash::farm<KM, false>;
+	#elif (pStoreHash == CRC32C)
+	  template <typename KM>
+	  using StoreHash = ::fsc::hash::crc32c<KM>;
 	#else
 	  static_assert(false, "DENSEHASH, unordered map, sorted, ordered, and ROBINHOOD do not support the specified store hash function");
 	#endif
