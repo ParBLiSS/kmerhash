@@ -559,7 +559,7 @@ protected:
   }
 
 public:
-    static constexpr uint8_t batch_size = 16;
+    static constexpr size_t batch_size = 16;
 
   explicit Murmur32SSE(uint32_t _seed) : Murmur32SSE(_mm_set1_epi32(_seed))
   {
@@ -1447,7 +1447,7 @@ public:
 
 };
 template <typename T>
-constexpr uint8_t Murmur32SSE<T>::batch_size;
+constexpr size_t Murmur32SSE<T>::batch_size;
 
 
 #endif
@@ -1464,7 +1464,7 @@ template <typename T>
 class murmur3sse32
 {
 public:
-  static constexpr uint8_t batch_size = ::fsc::hash::sse::Murmur32SSE<T>::batch_size;
+  static constexpr size_t batch_size = ::fsc::hash::sse::Murmur32SSE<T>::batch_size;
 
 protected:
   ::fsc::hash::sse::Murmur32SSE<T> hasher;
@@ -1474,7 +1474,9 @@ public:
   using result_type = uint32_t;
   using argument_type = T;
 
-  murmur3sse32(uint32_t const &_seed = 43) : hasher(_seed){};
+  murmur3sse32(uint32_t const &_seed = 43) : hasher(_seed) {
+    memset(temp, 0, batch_size * sizeof(uint32_t));
+  };
 
   inline uint32_t operator()(const T &key) const
   {
@@ -1562,7 +1564,7 @@ public:
   // TODO: [ ] add a transform_hash_mod.
 };
 template <typename T>
-constexpr uint8_t murmur3sse32<T>::batch_size;
+constexpr size_t murmur3sse32<T>::batch_size;
 
 #endif
 

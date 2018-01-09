@@ -66,7 +66,7 @@ public:
       kmer.nextFromChar(rand() % T::KmerAlphabet::SIZE);
     }
 
-    kmers.resize(iterations);
+    kmers.resize(iterations + 32);
     for (size_t i = 0; i < iterations; ++i)
     {
       kmers[i] = kmer;

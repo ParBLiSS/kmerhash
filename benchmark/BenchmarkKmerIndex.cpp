@@ -85,6 +85,9 @@ static int measure_mode = MEASURE_DISABLED;
 #include "kmerhash/distributed_batched_robinhood_map.hpp"
 #include "kmerhash/distributed_batched_radixsort_map.hpp"
 
+#include "kmerhash/experimental/hybrid_batched_robinhood_map.hpp"
+#include "kmerhash/experimental/hybrid_batched_radixsort_map.hpp"
+
 
 #include "index/kmer_index.hpp"
 
@@ -132,6 +135,8 @@ static int measure_mode = MEASURE_DISABLED;
 #define ROBINHOOD 48
 #define BROBINHOOD 49
 #define RADIXSORT 50
+#define MTROBINHOOD 51
+#define MTRADIXSORT 52
 
 #define SINGLE 61
 #define CANONICAL 62
@@ -378,6 +383,12 @@ using CountType = uint32_t;
     #elif (pMAP == BROBINHOOD)
       using MapType = ::dsc::counting_batched_robinhood_map<
           KmerType, ValType, MapParams>;
+    #elif (pMAP == MTROBINHOOD)  // hybrid version
+      using MapType = ::hsc::counting_batched_robinhood_map<
+          KmerType, ValType, MapParams>;
+    #elif (pMAP == MTRADIXSORT)  // hybrid version
+      using MapType = ::hsc::counting_batched_radixsort_map<
+          KmerType, ValType, MapParams>;
 	#elif (pMAP == RADIXSORT)
       using MapType = ::dsc::counting_batched_radixsort_map<
     		  KmerType, ValType, MapParams>;
@@ -476,7 +487,7 @@ std::vector<KmerType> readForQuery_posix(const std::string & filename, MPI_Comm 
 
 template<typename KmerType>
 void sample(std::vector<KmerType> &query, size_t n, unsigned int seed, mxx::comm const & comm) {
-  std::shuffle(query.begin(), query.end(), std::default_random_engine(seed));
+  //std::shuffle(query.begin(), query.end(), std::default_random_engine(seed));
 
   size_t n_p = (n / comm.size());
   std::vector<size_t> send_counts(comm.size(), n_p);
@@ -571,7 +582,7 @@ int main(int argc, char** argv) {
                                  false, 7, "int", cmd);
 
     TCLAP::ValueArg<int> sampleArg("q",
-                                 "query-sample", "sampling ratio for the query kmers. default=100",
+                                 "query-sample", "sampling ratio for the query kmers. default=2 (half)",
                                  false, sample_ratio, "int", cmd);
 
 	  TCLAP::ValueArg<double> maxLoadArg("","max_load","maximum load factor", false, max_load, "double", cmd);
@@ -687,6 +698,11 @@ int main(int argc, char** argv) {
     idx.get_map().get_local_container().set_min_load_factor(min_load);
     idx.get_map().get_local_container().set_insert_lookahead(insert_prefetch);
     idx.get_map().get_local_container().set_query_lookahead(query_prefetch);
+  #elif (pMAP == TROBINHOOD)
+    idx.get_map().set_max_load_factor(max_load);
+    idx.get_map().set_min_load_factor(min_load);
+    idx.get_map().set_insert_lookahead(insert_prefetch);
+    idx.get_map().set_query_lookahead(query_prefetch);
 
   #endif
 #endif
@@ -755,16 +771,34 @@ int main(int argc, char** argv) {
 
 	  {
 		  auto lquery = query;
+#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT)
+		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
+		  uint8_t * count_res = ::utils::mem::aligned_alloc<uint8_t>(lquery.size(), 64);
+		  size_t count_res_size = idx.get_map().count(lquery, count_res);
+
+		  ::utils::mem::aligned_free(count_res);
+		  BL_BENCH_END(test, "count", count_res_size);
+#else
 		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
 		  auto counts = idx.count(lquery);
 		  BL_BENCH_END(test, "count", counts.size());
-	  }
+#endif
+		  }
 
 	  {
 		  auto lquery = query;
+#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT)
+		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
+		  CountType * find_res = ::utils::mem::aligned_alloc<CountType>(lquery.size(), 64);
+		  size_t find_res_size = idx.get_map().find(lquery, find_res);
+
+		  ::utils::mem::aligned_free(find_res);
+		  BL_BENCH_END(test, "count", find_res_size);
+#else
 		  BL_BENCH_COLLECTIVE_START(test, "find", comm);
 		  auto found = idx.find(lquery);
 		  BL_BENCH_END(test, "find", found.size());
+#endif
 	  }
 
 

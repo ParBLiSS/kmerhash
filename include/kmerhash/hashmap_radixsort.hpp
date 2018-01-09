@@ -20,6 +20,27 @@
 #include "iterators/transform_iterator.hpp"
 
 namespace fsc {
+/*
+	template <typename S>
+	struct modulus2 {
+		static constexpr size_t batch_size = 1;
+
+		S mask;
+
+		modulus2(S const & _mask, int) :	mask(_mask) {}  // dummy
+
+		template <typename IN>
+		inline IN operator()(IN const & x) const { return (x & mask); }
+
+//		template <typename IN, typename OUT>
+//		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
+//			// TODO: [ ] do SSE version here
+//			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
+//		}
+	};
+	template <typename S>
+	constexpr size_t modulus2<S>::batch_size;
+*/
 
 template <class Key, class V, template <typename> class Hash = ::std::hash,
           template <typename> class Equal = ::std::equal_to
@@ -29,7 +50,7 @@ class hashmap_radixsort {
 
 public:
 
-	static constexpr int32_t PFD = 16;
+	static constexpr size_t PFD = 16;
     using key_type              = Key;
     using mapped_type           = V;
     using value_type            = ::std::pair<const Key, V>;
@@ -42,21 +63,196 @@ public:
     {
         Key key;
         V val;
-        int32_t bucketId;
+        uint32_t bucketId;
     } HashElement;
 
-    struct HashElementTransform {
-    	::std::pair<const Key, V> operator()(HashElement const & x) const {
-    		return std::make_pair(x.key, x.val);
-    	}
+    template <typename KV>
+    class IndexedRangesIterator :
+        public std::iterator<
+            std::random_access_iterator_tag,
+            KV, std::ptrdiff_t>
+    {
+        protected:
+            using Distance = std::ptrdiff_t;
+
+            HashElement const * table;
+            uint16_t const * counts;
+
+            int32_t numBins;
+            int32_t binSize;
+
+            int32_t binId;
+            int32_t idx;
+
+        public:
+
+            // contructor.  construct end iterator.
+            IndexedRangesIterator(HashElement const * _table, uint16_t const * _counts,
+                int32_t num_bins, int32_t bin_size, int32_t bin_id = 0, uint16_t _idx = 0) :
+                table(_table), counts(_counts), numBins(num_bins), binSize(bin_size), binId(bin_id), idx(static_cast<int32_t>(_idx)) {}
+
+            IndexedRangesIterator(IndexedRangesIterator const & other) : 
+                IndexedRangesIterator(other.table, other.counts, other.numBins, other.binSize, other.binId, other.idx) {}
+            IndexedRangesIterator(IndexedRangesIterator && other) : 
+                IndexedRangesIterator(other.table, other.counts, other.numBins, other.binSize, other.binId, other.idx) {}
+            // assignement operators
+            IndexedRangesIterator& operator=(IndexedRangesIterator const & other) {
+                table = other.table;
+                counts = other.counts;
+                numBins = other.numBins;
+                binSize = other.binSize;
+                binId = other.binId;
+                idx = other.idx;
+            }
+            IndexedRangesIterator& operator=(IndexedRangesIterator && other) {
+                table = other.table;
+                counts = other.counts;
+                numBins = other.numBins;
+                binSize = other.binSize;
+                binId = other.binId;
+                idx = other.idx;
+            }
+
+            virtual ~IndexedRangesIterator() {}
+
+            // increment and decrement operators
+            IndexedRangesIterator& operator++() {
+                if (binId >= numBins) return *this;
+                // should always be dereferenceable, before incremented.
+                ++idx;
+                while (idx == counts[binId]) {
+                    ++binId;
+                    if (binId >= numBins) return *this;
+                    idx = 0;
+                }
+                return *this;
+            }
+
+            IndexedRangesIterator operator++(int) const {
+                IndexedRangesIterator it = *this;
+                it.operator++();
+                return it;
+            }
+            IndexedRangesIterator& operator--() {
+                if (binId < 0) return *this;
+                --idx;
+                while (idx < 0) {
+                    --binId;
+                    if (binId < 0) return *this;
+                    idx = counts[binId] - 1;
+                }
+                return *this;
+            }
+
+            IndexedRangesIterator operator--(int) const {
+                IndexedRangesIterator it = *this;
+                it.operator--();
+                return it;
+            }
+
+            IndexedRangesIterator& operator+=(Distance const & n) {
+                if (n < 0) return this->operator-=(n);
+
+                int32_t dist;
+                Distance nn = n;
+                while (nn > 0) {
+                    if (binId >= numBins) return *this;
+
+                    dist = std::min(nn, static_cast<Distance>(counts[binId] - idx));
+                    nn -= dist;
+                    idx += dist;
+                    if (idx == counts[binId]) {
+                        ++binId;
+                        idx = 0;
+                    }
+                }
+            }
+
+            IndexedRangesIterator operator+(Distance const & n) const {
+                IndexedRangesIterator it = *this;
+                it += n;
+                return it;
+            }
+
+            IndexedRangesIterator& operator-=(Distance const & n) {
+                if (n < 0) return this->operator+=(n);
+
+                int32_t dist;
+                Distance nn = n;
+                while (nn > 0) {
+                    if (binId < 0) return *this;
+
+                    dist = std::min(nn, static_cast<Distance>(idx + 1));
+                    nn -= dist;
+                    idx -= dist;
+                    if (idx < 0) {
+                        --binId;
+                        idx = counts[binId] - 1;
+                    }
+                }
+            }
+
+            IndexedRangesIterator operator-(Distance const & n) const {
+                IndexedRangesIterator it = *this;
+                it -= n;
+                return it;
+            }
+
+            Distance operator-(IndexedRangesIterator const & other) const {
+                if (binId == other.binId) return idx - other.idx;
+                else if (binId > other.binId) return other.operator-(*this);
+                else { // binId < other.binId
+                    Distance dist = other.idx;
+                    int32_t j = idx;
+                    for (int32_t i = binId; i < other.binId; ++i) {
+                        dist += counts[binId] - j;
+                        j = 0;
+                    }
+                    return -dist;
+                }
+            }
+
+            // comparison operators
+            bool operator==(IndexedRangesIterator const & other) const {
+                return (binId == other.binId) && (idx == other.idx);
+            }
+            bool operator!=(IndexedRangesIterator const & other) const {
+                return (binId != other.binId) || (idx != other.idx);
+            }
+
+            bool operator<(IndexedRangesIterator const & other) const {
+                return (binId == other.binId) ? (idx < other.idx) : (binId < other.binId);
+            }
+            bool operator>(IndexedRangesIterator const & other) const {
+                return (binId == other.binId) ? (idx > other.idx) : (binId > other.binId);
+            }
+            bool operator>=(IndexedRangesIterator const & other) const {
+                return !(binId < other.binId);
+            }
+            bool operator<=(IndexedRangesIterator const & other) const {
+                return !(binId > other.binId);
+            }
+
+            // dereference operator
+            KV operator[](Distance const & i) const {
+                IndexedRangesIterator it(table, counts, 0, 0);
+                return *(it + i);
+            }
+
+            KV operator*() const {
+                HashElement const* it = table + binId * binSize + idx;
+                return std::make_pair((*it).key, (*it).val);
+            }
+        
+            friend IndexedRangesIterator operator+(std::ptrdiff_t n, IndexedRangesIterator const & right)
+            {
+                // reduced to + operator
+                return right + n;
+            }
     };
-    struct HashElementConstTransform {
-    	const ::std::pair<const Key, V> operator()(HashElement const & x) const {
-    		return std::make_pair(x.key, x.val);
-    	}
-    };
-	using iterator              = ::bliss::iterator::transform_iterator<HashElement*, HashElementTransform>;
-	using const_iterator        = ::bliss::iterator::transform_iterator<HashElement const *, HashElementConstTransform>;
+
+	using iterator              = IndexedRangesIterator<value_type>;
+	using const_iterator        = IndexedRangesIterator<const value_type>;
 
 
 #define COHERENT 0
@@ -64,8 +260,8 @@ public:
 #define ERASE 2
 
     protected:
-    int32_t numBuckets;
-    int32_t bucketMask;
+    uint32_t numBuckets;
+    uint32_t bucketMask;
     int32_t numBins;
     int32_t binMask;
     int32_t binShift;
@@ -76,7 +272,7 @@ public:
     mutable V noValue;
     int8_t  coherence;
     int32_t seed;
-    int32_t totalKeyCount;
+    int64_t totalKeyCount;
 
     uint16_t *countArray;
     HashElement *hashTable;
@@ -91,73 +287,20 @@ public:
 
 	template <typename S>
 	struct modulus2 {
-//#if defined(__AVX2__)
-//		static constexpr size_t batch_size = (sizeof(S) == 4 ? 8 : 4);
-//#elif defined(__SSE2__)
-//		static constexpr size_t batch_size = (sizeof(S) == 4 ? 4 : 2);
-//#else
-		static constexpr size_t batch_size = (sizeof(S) == 4 ? 8 : 4);
-//#endif
+		static constexpr size_t batch_size = 1;
 
-//#if defined(__AVX2__)
-//		__m256i vmask;
-//#elif defined(__SSE2__)
-//		__m128i vmask;
-//#endif
 		S mask;
 
-		modulus2(S const & _mask) :
-//#if defined(__AVX2__)
-//				vmask(sizeof(S) == 4 ?  _mm256_set1_epi32(_mask) : _mm256_set1_epi64x(_mask)),
-//#elif defined(__SSE2__)
-//				vmask(sizeof(S) == 4 ?  _mm_set1_epi32(_mask) : _mm_set1_epi64x(_mask)),
-//#endif
-						mask(_mask)
-				{}
+		modulus2(S const & _mask, int) :	mask(_mask) {}  // dummy
 
 		template <typename IN>
 		inline IN operator()(IN const & x) const { return (x & mask); }
 
-		template <typename IN, typename OUT>
-		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
-			// TODO: [ ] do SSE version here
-			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
-		}
-
-//#if defined(__AVX2__)
-//		// when input nad output are the same types
-//		template <typename IN>
-//		inline void operator()(IN const * x, size_t const & _count, IN * y) const {
-//			// 32 bytes at a time.  input should be
-//			int i = 0;
-//			int imax;
-//
-//			__m256i xx;
-//			for (i = 0, imax = _count - batch_size; i < imax; i += batch_size)  {
-//				xx = _mm256_and_si256(*(reinterpret_cast<__m256i const *>(x + i)), vmask);
-//				_mm256_storeu_si256(reinterpret_cast<__m256i *>(y + i), xx);
-//			}
-//			for (imax = _count; i < imax; ++i)
-//				y[i] = x[i] & mask;
+//		template <typename IN, typename OUT>
+//		inline void operator()(IN const * x, size_t const & _count, OUT * y) const {
+//			// TODO: [ ] do SSE version here
+//			for (size_t i = 0; i < _count; ++i)  y[i] = x[i] & mask;
 //		}
-//#elif defined(__SSE2__)
-//		// when input nad output are the same types
-//		template <typename IN>
-//		inline void operator()(IN const * x, size_t const & _count, IN * y) const {
-//			// 32 bytes at a time.  input should be
-//			int i = 0;
-//			int imax;
-//
-//			__m128i xx;
-//			for (i = 0, imax = _count - batch_size; i < imax; i += batch_size)  {
-//				xx = _mm_and_si128(*(reinterpret_cast<__m128i const *>(x + i)), vmask);
-//				_mm_storeu_si128(reinterpret_cast<__m128i *>(y + i), xx);
-//			}
-//			for (imax = _count; i < imax; ++i)
-//				y[i] = x[i] & mask;
-//		}
-//
-//#endif
 	};
 
 	// mod 2 okay since hashtable size is always power of 2.
@@ -182,7 +325,7 @@ public:
         for(i = 0; i < size; i++)
         {
             HashElement he = A[i];
-            int32_t id = he.bucketId & mask;
+            uint32_t id = he.bucketId & mask;
             //printf("%d] bucketId = %d, id = %d\n", i, he.bucketId, id);
             countBuf[id]++;
         }
@@ -198,9 +341,9 @@ public:
         for(i = 0; i < size; i++)
         {
             HashElement he = A[i];
-            int32_t id = he.bucketId & mask;
+            uint32_t id = he.bucketId & mask;
             int32_t pos = countBuf[id];
-            //printf("%d] bucketId = %d, id = %d, pos = %d\n", i, he.bucketId, id, pos);
+            // printf("%d] bucketId = %u, id = %d, pos = %d, sortBuf size = %d, numBuckets %u, numBins %d, binSize %d\n", i, he.bucketId, id, pos, bufSize, numBuckets, numBins, binSize);
             sortBuf[pos] = he;
             countBuf[id]++;
         }
@@ -210,7 +353,7 @@ public:
         {
             if(sortBuf[i].bucketId < sortBuf[i - 1].bucketId)
             {
-                printf("ERROR! %d] %d, %d\n", i, sortBuf[i - 1].bucketId, sortBuf[i].bucketId);
+                printf("ERROR! %d] %u, %u\n", i, sortBuf[i - 1].bucketId, sortBuf[i].bucketId);
                 exit(0);
             }
         }
@@ -260,7 +403,7 @@ public:
         for(i = 0; i < size; i++)
         {
             HashElement he = A[i];
-            int32_t id = he.bucketId & mask;
+            uint32_t id = he.bucketId & mask;
             int32_t count = countBuf[id];
             for(j = 0; j < count; j++)
             {
@@ -300,8 +443,8 @@ public:
 
         while((pA < sizeA) && (pB < sizeB))
         {
-            int32_t bidA = A[pA].bucketId;
-            int32_t bidB = B[pB].bucketId;
+            uint32_t bidA = A[pA].bucketId;
+            uint32_t bidB = B[pB].bucketId;
             //printf("pA = %d, pB = %d, bidA = %d, bidB = %d\n", pA, pB, bidA, bidB);
             if(bidA <= bidB)
             {
@@ -372,7 +515,7 @@ public:
         {
             if(newBuf[i].bucketId < newBuf[i - 1].bucketId)
             {
-                printf("ERROR! %d] %d, %d\n", i, newBuf[i - 1].bucketId, newBuf[i].bucketId);
+                printf("ERROR! %d] %u, %u\n", i, newBuf[i - 1].bucketId, newBuf[i].bucketId);
                 exit(0);
             }
         }
@@ -387,10 +530,10 @@ public:
         return count;
     }
 
-    inline HashElement *find_internal(Key key, int32_t bucketId) const
+    inline HashElement *find_internal(Key key, uint32_t bucketId) const
     {
-        int32_t binId = bucketId >> binShift;
-        int32_t binId2 = (bucketId + 1) >> binShift;
+        int64_t binId = bucketId >> binShift;
+        int64_t binId2 = (bucketId + 1) >> binShift;
         int32_t start = info_container[bucketId];
         int32_t end;
         if(binId == binId2)
@@ -426,8 +569,12 @@ public:
             	numBuckets(next_power_of_2(_numBuckets)),
 				bucketMask(numBuckets - 1),
 				totalKeyCount(0),
-				hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(bucketMask))
+				hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(bucketMask, 0))
     {
+	if (numBuckets >= (1 << 30)) 
+		throw std::invalid_argument("number of buckets cannot exceed 2^30");
+	// this would cause numBuckets * 2 to overflow, and numBins to become 0 here, and 1 in the resize_alloc function, and numBins * binSize to overflow as well.
+	
         binSize = next_power_of_2(_binSize);
         numBins = numBuckets * 2 / binSize;
         binMask = numBins - 1;
@@ -445,7 +592,7 @@ public:
         info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
         curOverflowBufId = 0;
 #ifndef NDEBUG
-        printf("numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
+        printf("numBuckets = %u, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
                 numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
 #endif
         coherence = COHERENT;
@@ -462,27 +609,149 @@ public:
 		_mm_free(info_container);
 	}
 
+    hashmap_radixsort(hashmap_radixsort const & other) : 
+        numBuckets(other.numBuckets),
+        bucketMask(other.bucketMask),
+        numBins(other.numBins),
+        binMask(other.binMask),
+        binShift(other.binShift),
+        binSize(other.binSize),
+        overflowBufSize(other.overflowBufSize),
+        curOverflowBufId(other.curOverflowBufId),
+        sortBufSize(other.sortBufSize),
+        noValue(other.noValue),
+        coherence(other.coherence),
+        seed(other.seed),
+        totalKeyCount(other.totalKeyCount),
+        eq(other.eq),
+        hash(other.hash),
+        hll(other.hll),
+        hash_mod2(other.hash_mod2)
+    {
+        countArray = (uint16_t *)_mm_malloc(numBins * sizeof(uint16_t), 64);
+        memcpy(countArray, other.countArray, numBins * sizeof(uint16_t));
+        hashTable = (HashElement *)_mm_malloc(numBins * binSize * sizeof(HashElement), 64);
+        memcpy(hashTable, other.hashTable, numBins * binSize * sizeof(HashElement));
+        overflowBuf = (HashElement *)_mm_malloc(overflowBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(overflowBuf, other.overflowBuf, overflowBufSize * binSize * sizeof(HashElement));
+        sortBuf = (HashElement *)_mm_malloc(sortBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(sortBuf, other.sortBuf, sortBufSize * binSize * sizeof(HashElement));
+        countSortBuf = (uint16_t *)_mm_malloc(sortBufSize * sizeof(uint16_t), 64);
+        memcpy(countSortBuf, other.countSortBuf, sortBufSize * sizeof(uint16_t));
+        info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
+        memcpy(info_container, other.info_container, numBuckets * sizeof(int16_t));
+    }
+    hashmap_radixsort(hashmap_radixsort && other) : 
+        numBuckets(other.numBuckets),
+        bucketMask(other.bucketMask),
+        numBins(other.numBins),
+        binMask(other.binMask),
+        binShift(other.binShift),
+        binSize(other.binSize),
+        overflowBufSize(other.overflowBufSize),
+        curOverflowBufId(other.curOverflowBufId),
+        sortBufSize(other.sortBufSize),
+        noValue(other.noValue),
+        coherence(other.coherence),
+        seed(other.seed),
+        totalKeyCount(other.totalKeyCount),
+        eq(std::move(other.eq)),
+        hash(std::move(other.hash)),
+        hash_mod2(std::move(other.hash_mod2))
+    {
+        hll.swap(other.hll),
+        std::swap(countArray, other.countArray);
+        std::swap(hashTable, other.hashTable);
+        std::swap(overflowBuf, other.overflowBuf);
+        std::swap(sortBuf, other.sortBuf);
+        std::swap(countSortBuf, other.countSortBuf);
+        std::swap(info_container, other.info_container);
+    }
+    hashmap_radixsort & operator=(hashmap_radixsort const & other) {
+        numBuckets = other.numBuckets;
+        bucketMask = other.bucketMask;
+        numBins = other.numBins;
+        binMask = other.binMask;
+        binShift = other.binShift;
+        binSize = other.binSize;
+        overflowBufSize = other.overflowBufSize;
+        curOverflowBufId = other.curOverflowBufId;
+        sortBufSize = other.sortBufSize;
+        noValue = other.noValue;
+        coherence = other.coherence;
+        seed = other.seed;
+        totalKeyCount = other.totalKeyCount;
+
+        eq = other.eq;
+        hash = other.hash;
+        hll = other.hll;
+        hash_mod2 = other.hash_mod2;
+
+        _mm_free(countArray);
+        countArray = (uint16_t *)_mm_malloc(numBins * sizeof(uint16_t), 64);
+        memcpy(countArray, other.countArray, numBins * sizeof(uint16_t));
+        _mm_free(hashTable);
+        hashTable = (HashElement *)_mm_malloc(numBins * binSize * sizeof(HashElement), 64);
+        memcpy(hashTable, other.hashTable, numBins * binSize * sizeof(HashElement));
+        _mm_free(overflowBuf);
+        overflowBuf = (HashElement *)_mm_malloc(overflowBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(overflowBuf, other.overflowBuf, overflowBufSize * binSize * sizeof(HashElement));
+        _mm_free(sortBuf);
+        sortBuf = (HashElement *)_mm_malloc(sortBufSize * binSize * sizeof(HashElement), 64);
+        memcpy(sortBuf, other.sortBuf, sortBufSize * binSize * sizeof(HashElement));
+        _mm_free(countSortBuf);
+        countSortBuf = (uint16_t *)_mm_malloc(sortBufSize * sizeof(uint16_t), 64);
+        memcpy(countSortBuf, other.countSortBuf, sortBufSize * sizeof(uint16_t));
+        _mm_free(info_container);
+        info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
+        memcpy(info_container, other.info_container, numBuckets * sizeof(int16_t));
+
+        return *this;
+    }
+    hashmap_radixsort & operator=(hashmap_radixsort && other) {
+        numBuckets = other.numBuckets;
+        bucketMask = other.bucketMask;
+        numBins = other.numBins;
+        binMask = other.binMask;
+        binShift = other.binShift;
+        binSize = other.binSize;
+        overflowBufSize = other.overflowBufSize;
+        curOverflowBufId = other.curOverflowBufId;
+        sortBufSize = other.sortBufSize;
+        noValue = other.noValue;
+        coherence = other.coherence;
+        seed = other.seed;
+        totalKeyCount = other.totalKeyCount;
+
+        eq = std::move(other.eq);
+        hash = std::move(other.hash);
+        hll.swap(other.hll);
+        hash_mod2 = std::move(other.hash_mod2);
+
+        std::swap(countArray, other.countArray);
+        std::swap(hashTable, other.hashTable);
+        std::swap(overflowBuf, other.overflowBuf);
+        std::swap(sortBuf, other.sortBuf);
+        std::swap(countSortBuf, other.countSortBuf);
+        std::swap(info_container, other.info_container);
+
+        return *this;
+    }
+
+
+
+
+
 	void set_novalue(V _noValue) const { noValue = _noValue; }
 
 	const_iterator cbegin() const {
-		std::cerr << "WARNING: NOT FILTERING OUT EMPTY ENTRIES" << std::endl;
-		return const_iterator(hashTable, HashElementConstTransform());
+		return const_iterator(hashTable, countArray, numBins, binSize, 0, 0);
 	}
 
 	const_iterator cend() const {
-		std::cerr << "WARNING: NOT FILTERING OUT EMPTY ENTRIES" << std::endl;
-		return const_iterator(hashTable + numBins * binSize, HashElementConstTransform());
+		return const_iterator(hashTable, countArray, numBins, binSize, numBins, 0);
 	}
 
-	::std::vector<::std::pair<Key, V> > to_vector() const {
-		std::cerr << "WARNING: NOT IMPLEMENTED" << std::endl;
-		return ::std::vector<::std::pair<Key, V> >();
-	}
-
-	::std::vector<Key> keys() const {
-		std::cerr << "WARNING: NOT IMPLEMENTED" << std::endl;
-		return ::std::vector<Key>();
-	}
 
 	void reserve(uint32_t _newElementCount) {
 		resize(next_power_of_2(_newElementCount));
@@ -507,16 +776,23 @@ public:
         int64_t initStart = __rdtsc();
 #endif
 
+       // shortcutting, if starting out with empty.
+       if (totalKeyCount == 0) {
+            resize_alloc(_newNumBuckets, binSize);
+            return true;
+       }
+
+
 //		::std::cout << "RESIZING:  size=" << totalKeyCount
 //				<< " prev capacity=" << capacity()
 //				<< " new capacity=" << _newNumBuckets << std::endl;
 		//::std::cout << "key count " << totalKeyCount << " elem size " << sizeof(HashElement) << std::endl;
         Key *keyArray = (Key *)_mm_malloc((totalKeyCount + PFD) * sizeof(Key), 64);
-		//printf("CURR numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
+		//printf("CURR numBuckets = %u, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
 		//        numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
 
-		  int32_t i, j;
-		uint32_t elemCount = 0;
+		int64_t i, j;
+		int64_t elemCount = 0;
 		for(i = 0; i < numBins; i++)
 		{
 			int count = countArray[i];
@@ -534,7 +810,7 @@ public:
 		}
 #ifndef NDEBUG
         int64_t initTicks = __rdtsc() - initStart;
-		printf("elemCount = %d\n", elemCount);
+		printf("elemCount = %ld\n", elemCount);
 
         int64_t allocStart = __rdtsc();
 #endif
@@ -594,12 +870,17 @@ public:
 	  void resize_alloc(uint32_t _newNumBuckets, int32_t _binSize)
 	  {
 
+
         numBuckets = next_power_of_2(_newNumBuckets);
         bucketMask = numBuckets - 1;
 
+	if (numBuckets >= (1 << 30)) 
+		throw std::invalid_argument("next_power_of_2(_newNumBuckets) number of buckets cannot exceed 2^30");
+	// this would cause numBuckets * 2 to overflow, and numBins to become 0 here, and 1 in the resize_alloc function, and numBins * binSize to overflow as well.
+	
         if (_binSize > -1) binSize = _binSize;    // allow bin size resize.  this is for new one...
 
-        numBins = std::max(1, (numBuckets << 1) / binSize);   // TCP: at least 1 bin
+        numBins = std::max((uint32_t)1, (numBuckets << 1) / binSize);   // TCP: at least 1 bin
         binMask = numBins - 1;
         overflowBufSize = std::max(1, numBins / 8);   // TCP: overflow of at least 1.
 
@@ -625,9 +906,12 @@ public:
         info_container = (int16_t *)_mm_malloc(numBuckets * sizeof(int16_t), 64);
         curOverflowBufId = 0;
 #ifndef NDEBUG
-        printf("numBuckets = %d, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
+        printf("numBuckets = %u, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
                 numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
 #endif
+
+        hash_mod2.posttrans.mask = bucketMask;
+
 	  }
 
         // return fail or success
@@ -637,7 +921,6 @@ public:
     // insert the elements again
         coherence = INSERT;
 
-        hash_mod2.posttrans.mask = bucketMask;
         
 		int32_t hash_batch_size = 512;
         hash_val_type bucketIdArray[2 * hash_batch_size];
@@ -664,7 +947,7 @@ public:
 				he.key = keyArray[j];
 				he.val = 1;
 				he.bucketId = bucketIdArray[j & hash_mask];
-				int binId = he.bucketId >> binShift;
+				int64_t binId = he.bucketId >> binShift;
 				int count = countArray[binId];
 				if(count < binSize)
 				{
@@ -696,7 +979,7 @@ public:
 					overflowBufId = hashTable[binId * binSize + binSize - 1].bucketId;
 					if(count == (2 * binSize - 1))
 					{
-						printf("ERROR! binId = %d, count = 2 * binSize - 1. Please use larger binSize or numBins\n", binId);
+						printf("ERROR! binId = %ld, count = 2 * binSize - 1. Please use larger binSize or numBins\n", binId);
 						return 2;
 					}
 					overflowBuf[overflowBufId * binSize + count - (binSize - 1)] = he;
@@ -715,19 +998,19 @@ public:
 //            printf("ERROR! The hashtable coherence is not set to INSERT at the moment. finalize_insert() can not be serviced\n");
             return;
         }
-        int i, j;
+        int64_t i, j;
         totalKeyCount = 0;
         for(i = 0; i < numBins; i++)
         {
             int32_t count = countArray[i];
-            int32_t firstBucketId = i << binShift;
-            int32_t lastBucketId = firstBucketId + sortBufSize - 1;
-            int32_t prevBucketId = firstBucketId - 1;
-            int32_t k;
+            uint32_t firstBucketId = i << binShift;
+            uint32_t lastBucketId = firstBucketId + sortBufSize - 1;
+            uint32_t prevBucketId = firstBucketId - 1;
+            uint32_t k;
             int32_t y = std::min(count, binSize - 1);
             for(j = 0; j < y; j++)
             {
-                int32_t bucketId = hashTable[i * binSize + j].bucketId;
+                uint32_t bucketId = hashTable[i * binSize + j].bucketId;
                 if(bucketId != prevBucketId)
                 {
                     for(k = prevBucketId; k < bucketId; k++)
@@ -739,7 +1022,7 @@ public:
             overflowBufId = hashTable[i * binSize + binSize - 1].bucketId;
             for(; j < count; j++)
             {
-                int32_t bucketId = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].bucketId;
+                uint32_t bucketId = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].bucketId;
                 if(bucketId != prevBucketId)
                 {
                     for(k = prevBucketId; k < bucketId; k++)
@@ -761,24 +1044,24 @@ public:
     //    return y[0];
     //}
 	/// return number of successful inserts
-    int32_t insert_impl(Key *keyArray, int32_t numKeys)
+    size_t insert_impl(Key *keyArray, size_t numKeys)
     {
         if((coherence != COHERENT) && (coherence != INSERT))
         {
 //            printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
             return 0;
         }
-        int32_t i;
+        size_t i;
         coherence = INSERT;
-		int32_t hash_batch_size = 512;
+		size_t hash_batch_size = 512;
         hash_val_type bucketIdArray[2 * hash_batch_size];
 		memset(bucketIdArray, 0, 2 * hash_batch_size * sizeof(hash_val_type));
-		int32_t hash_mask = 2 * hash_batch_size - 1;
+		size_t hash_mask = 2 * hash_batch_size - 1;
         //int64_t hashTicks = 0;
         //int64_t startTick, endTick;
         //startTick = __rdtsc();
 
-		int32_t hash_count = std::min(numKeys, hash_batch_size);
+		size_t hash_count = std::min(numKeys, hash_batch_size);
         hash_mod2(keyArray, hash_count, bucketIdArray);
 //        for(i = 0; i < PFD; i++)
 //        {
@@ -790,28 +1073,28 @@ public:
         for(i = 0; i < numKeys; i += hash_batch_size)
         {
             //startTick = __rdtsc();
-			int32_t hash_first = i + hash_batch_size;
+			size_t hash_first = i + hash_batch_size;
 			if(hash_first > numKeys) hash_first = numKeys;
-			int32_t hash_last = i + 2 * hash_batch_size;
+			size_t hash_last = i + 2 * hash_batch_size;
 			if(hash_last > numKeys) hash_last = numKeys;
-			int32_t hash_count = hash_last - hash_first;
+			size_t hash_count = hash_last - hash_first;
 			hash_mod2(keyArray + hash_first, hash_count, bucketIdArray + ((hash_first) & hash_mask));
             //endTick = __rdtsc();
             //hashTicks += (endTick - startTick);
-			int32_t last = i + hash_batch_size;
+			size_t last = i + hash_batch_size;
 			if(last > numKeys) last = numKeys;
-			int32_t j;
+			size_t j;
 			for(j = i; j < last; j++)
 			{
 				HashElement he;
 				he.key = keyArray[j];
 				he.val = 1;
 				he.bucketId = bucketIdArray[j & hash_mask];
-				int binId = he.bucketId >> binShift;
+				int64_t binId = he.bucketId >> binShift;
 				int count = countArray[binId];
 #if ENABLE_PREFETCH
-				int32_t f_bucketId = bucketIdArray[(j + PFD) & hash_mask]; // = (hash(keyArray[i + PFD]) & bucketMask);
-				int f_binId = f_bucketId >> binShift;
+				uint32_t f_bucketId = bucketIdArray[(j + PFD) & hash_mask]; // = (hash(keyArray[i + PFD]) & bucketMask);
+				int64_t f_binId = f_bucketId >> binShift;
 				int f_count = countArray[f_binId];
 				_mm_prefetch((const char *)(hashTable + f_binId * binSize + f_count), _MM_HINT_T0);
 #endif
@@ -861,7 +1144,7 @@ public:
 					}
 					if(count == (2 * binSize - 1))
 					{
-						printf("ERROR! binId = %d, count = 2 * binSize - 1. Please use larger binSize or numBins\n", binId);
+						printf("ERROR! binId = %ld, count = 2 * binSize - 1. Please use larger binSize or numBins\n", binId);
 						return j;
 						// return exit(1);
 					}
@@ -877,13 +1160,13 @@ public:
     }
 
 
-    int32_t insert(Key *keyArray, int32_t numKeys) {
-      int32_t inserted = 0;
+    size_t insert(Key *keyArray, size_t numKeys) {
+      size_t inserted = 0;
       bool resize_succeeded = true;
 
       //std::cout << "inserting " << numKeys << std::endl;
 
-      int32_t delta = insert_impl(keyArray + inserted, numKeys - inserted);
+      size_t delta = insert_impl(keyArray + inserted, numKeys - inserted);
       inserted += delta;
       while ((inserted < numKeys) && resize_succeeded) {
   		std::cout << "insert try to resize.  last iter inserted " << delta << std::endl;
@@ -905,16 +1188,36 @@ public:
       return inserted;
     }
 
+
+    size_t estimate_and_insert(Key *keyArray, size_t numKeys) {
+
+      // local hash computation and hll update.
+        hash_val_type* hvals = ::utils::mem::aligned_alloc<hash_val_type>(numKeys + PFD);  // 64 byte alignment.
+        this->hll.update(keyArray, numKeys, hvals);
+
+        size_t est = this->hll.estimate();
+    
+        if (est > this->capacity())
+          // add 10% just to be safe.
+          this->reserve(static_cast<size_t>(static_cast<double>(est) * (1.0 + this->hll.est_error_rate + 0.1)));
+
+        size_t inserted = insert(keyArray, hvals, numKeys);
+
+        ::utils::mem::aligned_free(hvals);
+
+        return inserted;
+    }
+
      // return number of successful inserts.
 	template <class HashType>
-    int32_t insert_impl(Key *keyArray, HashType *hashArray, int32_t numKeys)
+    size_t insert_impl(Key *keyArray, HashType *hashArray, size_t numKeys)
     {
         if((coherence != COHERENT) && (coherence != INSERT))
         {
 //            printf("ERROR! The hashtable is not coherent at the moment. insert() can not be serviced\n");
             return 0;
         }
-        int32_t i;
+        size_t i;
         coherence = INSERT;
         hash_val_type bucketIdArray[32];
         //int64_t hashTicks = 0;
@@ -932,15 +1235,15 @@ public:
             he.key = keyArray[i];
             he.val = 1;
             he.bucketId = bucketIdArray[i & 31];
-            int binId = he.bucketId >> binShift;
+            int64_t binId = he.bucketId >> binShift;
             int count = countArray[binId];
             //startTick = __rdtsc();
             bucketIdArray[(i + PFD) & 31] = (hashArray[i + PFD] & bucketMask);
             //endTick = __rdtsc();
             //hashTicks += (endTick - startTick);
 #if ENABLE_PREFETCH
-            int32_t f_bucketId = bucketIdArray[(i + PFD) & 31];
-            int f_binId = f_bucketId >> binShift;
+            uint32_t f_bucketId = bucketIdArray[(i + PFD) & 31];
+            int64_t f_binId = f_bucketId >> binShift;
             int f_count = countArray[f_binId];
             _mm_prefetch((const char *)(hashTable + f_binId * binSize + f_count), _MM_HINT_T0);
 #endif
@@ -990,7 +1293,7 @@ public:
                 }
                 if(count == (2 * binSize - 1))
                 {
-                    printf("ERROR! binId = %d, count = 2 * binSize - 1. Please use larger binSize or numBins\n", binId);
+                    printf("ERROR! binId = %ld, count = 2 * binSize - 1. Please use larger binSize or numBins\n", binId);
                     return i;
                     //exit(1);
                 }
@@ -1004,14 +1307,14 @@ public:
     }
 
   template <class HashType>
-    int32_t insert(Key *keyArray, HashType *hashArray, int32_t numKeys) {
-      int32_t inserted = 0;
+    size_t insert(Key *keyArray, HashType *hashArray, size_t numKeys) {
+      size_t inserted = 0;
       bool resize_succeeded = true;
 
       //std::cout << "inserting " << numKeys << std::endl;
 
 
-      int32_t delta = insert_impl(keyArray + inserted, hashArray + inserted, numKeys - inserted);
+      size_t delta = insert_impl(keyArray + inserted, hashArray + inserted, numKeys - inserted);
       inserted += delta;
       while ((inserted < numKeys) && resize_succeeded) {
   		std::cout << "insert try to resize.  last iter inserted " << delta << std::endl;
@@ -1040,7 +1343,7 @@ public:
 //            printf("ERROR! The hashtable coherence is not set to INSERT at the moment. finalize_insert() can not be serviced\n");
             return;
         }
-        int i, j;
+        int64_t i, j;
         totalKeyCount = 0;
         for(i = 0; i < numBins; i++)
         {
@@ -1059,14 +1362,14 @@ public:
                 count = merge(hashTable + i * binSize, binSize - 1,
                         overflowBuf + overflowBufId * binSize, c);
             }
-            int32_t firstBucketId = i << binShift;
-            int32_t lastBucketId = firstBucketId + sortBufSize - 1;
-            int32_t prevBucketId = firstBucketId - 1;
-            int32_t k;
+            uint32_t firstBucketId = i << binShift;
+            uint32_t lastBucketId = firstBucketId + sortBufSize - 1;
+            uint32_t prevBucketId = firstBucketId - 1;
+            uint32_t k;
             int32_t y = std::min(count, binSize - 1);
             for(j = 0; j < y; j++)
             {
-                int32_t bucketId = hashTable[i * binSize + j].bucketId;
+                uint32_t bucketId = hashTable[i * binSize + j].bucketId;
                 if(bucketId != prevBucketId)
                 {
                     for(k = prevBucketId; k < bucketId; k++)
@@ -1078,7 +1381,7 @@ public:
             overflowBufId = hashTable[i * binSize + binSize - 1].bucketId;
             for(; j < count; j++)
             {
-                int32_t bucketId = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].bucketId;
+                uint32_t bucketId = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].bucketId;
                 if(bucketId != prevBucketId)
                 {
                     for(k = prevBucketId; k < bucketId; k++)
@@ -1094,7 +1397,7 @@ public:
         coherence = COHERENT;
     }
 
-    size_t find(Key *keyArray, int32_t numKeys, uint32_t *findResult) const
+    size_t find(Key *keyArray, size_t numKeys, uint32_t *findResult) const
     {
         if(coherence != COHERENT)
         {
@@ -1103,16 +1406,16 @@ public:
         }
         size_t foundCount = 0;
 #if ENABLE_PREFETCH
-        int32_t PFD_INFO = PFD;
-        int32_t PFD_HASH = PFD >> 1;
+        size_t PFD_INFO = PFD;
+        size_t PFD_HASH = PFD >> 1;
 #endif
-        int32_t i;
-		int32_t hash_batch_size = 1024;
+        size_t i;
+		size_t hash_batch_size = 1024;
         hash_val_type bucketIdArray[2 * hash_batch_size];
 		memset(bucketIdArray, 0, 2 * hash_batch_size * sizeof(hash_val_type));
-		int32_t hash_mask = 2 * hash_batch_size - 1;
+		size_t hash_mask = 2 * hash_batch_size - 1;
 
-		int32_t hash_count = std::min(numKeys, hash_batch_size);
+		size_t hash_count = std::min(numKeys, hash_batch_size);
         hash_mod2(keyArray, hash_count, bucketIdArray);
 
 //        for(i = 0; i < PFD_INFO; i++)
@@ -1122,29 +1425,29 @@ public:
         for(i = 0; i < numKeys; i += hash_batch_size)
         {
             //startTick = __rdtsc();
-			int32_t hash_first = i + hash_batch_size;
+			size_t hash_first = i + hash_batch_size;
 			if(hash_first > numKeys) hash_first = numKeys;
-			int32_t hash_last = i + 2 * hash_batch_size;
+			size_t hash_last = i + 2 * hash_batch_size;
 			if(hash_last > numKeys) hash_last = numKeys;
-			int32_t hash_count = hash_last - hash_first;
+			size_t hash_count = hash_last - hash_first;
 			hash_mod2(keyArray + hash_first, hash_count, bucketIdArray + ((hash_first) & hash_mask));
             //endTick = __rdtsc();
             //hashTicks += (endTick - startTick);
-			int32_t last = i + hash_batch_size;
+			size_t last = i + hash_batch_size;
 			if(last > numKeys) last = numKeys;
-			int32_t j;
+			size_t j;
 
 			for(j = i; j < last; j++)
 			{
 #if ENABLE_PREFETCH
-				int32_t f_info_bucketId = bucketIdArray[(j + PFD_INFO) & hash_mask];
+				uint32_t f_info_bucketId = bucketIdArray[(j + PFD_INFO) & hash_mask];
 				_mm_prefetch((const char *)(info_container + f_info_bucketId), _MM_HINT_T0);
-				int32_t f_bucketId = bucketIdArray[(j + PFD_HASH) & hash_mask];
-				int32_t f_binId = f_bucketId >> binShift;
-				int32_t f_start = f_binId * binSize + info_container[f_bucketId];
+				uint32_t f_bucketId = bucketIdArray[(j + PFD_HASH) & hash_mask];
+				int64_t f_binId = f_bucketId >> binShift;
+				int64_t f_start = f_binId * binSize + info_container[f_bucketId];
 				_mm_prefetch((const char *)(hashTable + f_start), _MM_HINT_T0);
 #endif
-				int32_t bucketId = bucketIdArray[j & hash_mask];
+				uint32_t bucketId = bucketIdArray[j & hash_mask];
 				HashElement *he = find_internal(keyArray[j], bucketId);
 				if(he != NULL)
 				{
@@ -1159,7 +1462,7 @@ public:
         return foundCount;
     }
 
-    size_t count(Key *keyArray, int32_t numKeys, uint8_t *countResult) const
+    size_t count(Key *keyArray, size_t numKeys, uint8_t *countResult) const
     {
         if(coherence != COHERENT)
         {
@@ -1168,16 +1471,16 @@ public:
         }
         size_t foundCount = 0;
 #if ENABLE_PREFETCH
-        int32_t PFD_INFO = PFD;
-        int32_t PFD_HASH = PFD >> 1;
+        size_t PFD_INFO = PFD;
+        size_t PFD_HASH = PFD >> 1;
 #endif
-        int32_t i;
-		int32_t hash_batch_size = 1024;
+        size_t i;
+		size_t hash_batch_size = 1024;
         hash_val_type bucketIdArray[2 * hash_batch_size];
 		memset(bucketIdArray, 0, 2 * hash_batch_size * sizeof(hash_val_type));
-		int32_t hash_mask = 2 * hash_batch_size - 1;
+		size_t hash_mask = 2 * hash_batch_size - 1;
 
-		int32_t hash_count = std::min(numKeys, hash_batch_size);
+		size_t hash_count = std::min(numKeys, hash_batch_size);
         hash_mod2(keyArray, hash_count, bucketIdArray);
 
 //        for(i = 0; i < PFD_INFO; i++)
@@ -1188,30 +1491,30 @@ public:
         for(i = 0; i < numKeys; i += hash_batch_size)
         {
             //startTick = __rdtsc();
-			int32_t hash_first = i + hash_batch_size;
+			size_t hash_first = i + hash_batch_size;
 			if(hash_first > numKeys) hash_first = numKeys;
-			int32_t hash_last = i + 2 * hash_batch_size;
+			size_t hash_last = i + 2 * hash_batch_size;
 			if(hash_last > numKeys) hash_last = numKeys;
-			int32_t hash_count = hash_last - hash_first;
+			size_t hash_count = hash_last - hash_first;
 			hash_mod2(keyArray + hash_first, hash_count, bucketIdArray + ((hash_first) & hash_mask));
             //endTick = __rdtsc();
             //hashTicks += (endTick - startTick);
-			int32_t last = i + hash_batch_size;
+			size_t last = i + hash_batch_size;
 			if(last > numKeys) last = numKeys;
-			int32_t j;
+			size_t j;
 
 
 			for(j = i; j < last; j++)
 			{
 #if ENABLE_PREFETCH
-				int32_t f_info_bucketId = bucketIdArray[(j + PFD_INFO) & hash_mask];
+				uint32_t f_info_bucketId = bucketIdArray[(j + PFD_INFO) & hash_mask];
 				_mm_prefetch((const char *)(info_container + f_info_bucketId), _MM_HINT_T0);
-				int32_t f_bucketId = bucketIdArray[(j + PFD_HASH) & hash_mask];
-				int32_t f_binId = f_bucketId >> binShift;
-				int32_t f_start = f_binId * binSize + info_container[f_bucketId];
+				uint32_t f_bucketId = bucketIdArray[(j + PFD_HASH) & hash_mask];
+				int64_t f_binId = f_bucketId >> binShift;
+				int64_t f_start = f_binId * binSize + info_container[f_bucketId];
 				_mm_prefetch((const char *)(hashTable + f_start), _MM_HINT_T0);
 #endif
-				int32_t bucketId = bucketIdArray[j & hash_mask];
+				uint32_t bucketId = bucketIdArray[j & hash_mask];
 				HashElement *he = find_internal(keyArray[j], bucketId);
 				if(he != NULL)
 				{
@@ -1225,7 +1528,7 @@ public:
         return foundCount;
     }
 
-    void erase(Key *keyArray, int32_t numKeys)
+    void erase(Key *keyArray, size_t numKeys)
     {
         if((coherence != COHERENT) && (coherence != ERASE))
         {
@@ -1234,16 +1537,16 @@ public:
         }
         coherence = ERASE;
 #if ENABLE_PREFETCH
-        int32_t PFD_INFO = PFD;
-        int32_t PFD_HASH = PFD >> 1;
+        size_t PFD_INFO = PFD;
+        size_t PFD_HASH = PFD >> 1;
 #endif
-        int32_t i;
-		int32_t hash_batch_size = 1024;
+        size_t i;
+		size_t hash_batch_size = 1024;
         hash_val_type bucketIdArray[2 * hash_batch_size];
 		memset(bucketIdArray, 0, 2 * hash_batch_size * sizeof(hash_val_type));
-		int32_t hash_mask = 2 * hash_batch_size - 1;
+		size_t hash_mask = 2 * hash_batch_size - 1;
 
-		int32_t hash_count = std::min(numKeys, hash_batch_size);
+		size_t hash_count = std::min(numKeys, hash_batch_size);
         hash_mod2(keyArray, hash_count, bucketIdArray);
 
 //        for(i = 0; i < PFD_INFO; i++)
@@ -1254,33 +1557,33 @@ public:
         for(i = 0; i < numKeys; i += hash_batch_size)
         {
             //startTick = __rdtsc();
-			int32_t hash_first = i + hash_batch_size;
+			size_t hash_first = i + hash_batch_size;
 			if(hash_first > numKeys) hash_first = numKeys;
-			int32_t hash_last = i + 2 * hash_batch_size;
+			size_t hash_last = i + 2 * hash_batch_size;
 			if(hash_last > numKeys) hash_last = numKeys;
-			int32_t hash_count = hash_last - hash_first;
+			size_t hash_count = hash_last - hash_first;
 			hash_mod2(keyArray + hash_first, hash_count, bucketIdArray + ((hash_first) & hash_mask));
             //endTick = __rdtsc();
             //hashTicks += (endTick - startTick);
-			int32_t last = i + hash_batch_size;
+			size_t last = i + hash_batch_size;
 			if(last > numKeys) last = numKeys;
-			int32_t j;
+			size_t j;
 
 
 			for(j = i; j < last; j++)
 			{
 #if ENABLE_PREFETCH
-				int32_t f_info_bucketId = bucketIdArray[(j + PFD_INFO) & hash_mask];
+				uint32_t f_info_bucketId = bucketIdArray[(j + PFD_INFO) & hash_mask];
 				_mm_prefetch((const char *)(info_container + f_info_bucketId), _MM_HINT_T0);
-				int32_t f_bucketId = bucketIdArray[(j + PFD_HASH) & hash_mask];
-				int32_t f_binId = f_bucketId >> binShift;
-				int32_t f_start = f_binId * binSize + info_container[f_bucketId];
+				uint32_t f_bucketId = bucketIdArray[(j + PFD_HASH) & hash_mask];
+				int64_t f_binId = f_bucketId >> binShift;
+				int64_t f_start = f_binId * binSize + info_container[f_bucketId];
 				_mm_prefetch((const char *)(hashTable + f_start), _MM_HINT_T0);
 #endif
-				int32_t bucketId = bucketIdArray[j & hash_mask];
+				uint32_t bucketId = bucketIdArray[j & hash_mask];
 				HashElement *he = find_internal(keyArray[j], bucketId);
 				if(he != NULL)
-					he->bucketId = -1;
+					he->val = noValue;
 			}
         }
     }
@@ -1292,7 +1595,7 @@ public:
 //            printf("ERROR! The hashtable coherence is not set to ERASE at the moment. finalize_erase() can not be serviced\n");
             return 0;
         }
-        int32_t i;
+        int64_t i;
 
         size_t eraseCount = totalKeyCount;
         totalKeyCount = 0;
@@ -1306,7 +1609,7 @@ public:
             for(p2 = 0; p2 < y; p2++)
             {
                 HashElement he = hashTable[i * binSize + p2];
-                if(he.bucketId != -1)
+                if(he.val != noValue)
                 {
                     hashTable[i * binSize + p1] = he;
                     p1++;
@@ -1317,7 +1620,7 @@ public:
             for(; p2 < count; p2++)
             {
                 HashElement he = overflowBuf[overflowBufId * binSize + p2 - (binSize - 1)];
-                if(he.bucketId != -1)
+                if(he.val != noValue)
                 {
                     if(p1 < (binSize - 1))
                     {
@@ -1331,14 +1634,14 @@ public:
                 }
             }
             count = p1;
-            int32_t firstBucketId = i << binShift;
-            int32_t lastBucketId = firstBucketId + sortBufSize - 1;
-            int32_t prevBucketId = firstBucketId - 1;
-            int32_t j, k;
+            uint32_t firstBucketId = i << binShift;
+            uint32_t lastBucketId = firstBucketId + sortBufSize - 1;
+            uint32_t prevBucketId = firstBucketId - 1;
+            uint32_t j, k;
             y = std::min(count, binSize - 1);
             for(j = 0; j < y; j++)
             {
-                int32_t bucketId = hashTable[i * binSize + j].bucketId;
+                uint32_t bucketId = hashTable[i * binSize + j].bucketId;
                 if(bucketId != prevBucketId)
                 {
                     for(k = prevBucketId; k < bucketId; k++)
@@ -1348,7 +1651,7 @@ public:
             }
             for(; j < count; j++)
             {
-                int32_t bucketId = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].bucketId;
+                uint32_t bucketId = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].bucketId;
                 if(bucketId != prevBucketId)
                 {
                     for(k = prevBucketId; k < bucketId; k++)
@@ -1371,10 +1674,10 @@ public:
         int32_t totalCount = 0;
         int32_t maxCount = 0;
         int32_t maxBin = -1;
-        int i;
+        int64_t i;
 
         int64_t kmerCountSum = 0;
-        int32_t prevBucketId = -1;
+        uint32_t prevBucketId = 0;
         for(i = 0; i < numBins; i++)
         {
             int32_t j;
@@ -1389,10 +1692,10 @@ public:
             for(j = 0; j < y; j++)
             {
                 HashElement he = hashTable[i * binSize + j];
-                int32_t bucketId = he.bucketId;
+                uint32_t bucketId = he.bucketId;
                 if(bucketId < prevBucketId)
                 {
-                    printf("ERROR! [%d,%d] prevBucketId = %d, bucketId = %d\n", i, j, prevBucketId, bucketId);
+                    printf("ERROR! [%d,%d] prevBucketId = %u, bucketId = %u\n", i, j, prevBucketId, bucketId);
                     exit(0);
                 }
                 kmerCountSum += (he.val * he.val);
@@ -1403,10 +1706,10 @@ public:
             for(; j < count; j++)
             {
                 HashElement he = overflowBuf[overflowBufId * binSize + j - (binSize - 1)];
-                int32_t bucketId = he.bucketId;
+                uint32_t bucketId = he.bucketId;
                 if(bucketId < prevBucketId)
                 {
-                    printf("ERROR! [%d,%d] prevBucketId = %d, bucketId = %d\n", i, j, prevBucketId, bucketId);
+                    printf("ERROR! [%d,%d] prevBucketId = %u, bucketId = %u\n", i, j, prevBucketId, bucketId);
                     exit(0);
                 }
                 kmerCountSum += (he.val * he.val);
@@ -1417,9 +1720,9 @@ public:
         for(i = 0; i < numBuckets; i++)
         {
             int32_t j;
-            int32_t binId = i >> binShift;
+            int64_t binId = i >> binShift;
             int32_t start = info_container[i];
-            int32_t binId2 = (i + 1) >> binShift;
+            int64_t binId2 = (i + 1) >> binShift;
             int32_t end;
             if(binId == binId2)
                 end = info_container[i + 1];
@@ -1428,12 +1731,12 @@ public:
 
             if(end < start)
             {
-                printf("ERROR! [%d] start = %d, end = %d, binId = %d, binId2 = %d\n", i, start, end, binId, binId2);
+                printf("ERROR! [%d] start = %d, end = %d, binId = %ld, binId2 = %ld\n", i, start, end, binId, binId2);
                 exit(0);
             }
             for(j = start; j < end; j++)
             {
-                int32_t bucketId;
+                uint32_t bucketId;
                 if(j < (binSize - 1))
                 {
                     bucketId = hashTable[binId * binSize + j].bucketId;
@@ -1445,7 +1748,7 @@ public:
                 }
                 if(bucketId != i)
                 {
-                    printf("ERROR! [%d,%d] bucketId = %d\n", i, j, bucketId);
+                    printf("ERROR! [%d,%d] bucketId = %u\n", i, j, bucketId);
                     exit(0);
                 }
             }
@@ -1488,17 +1791,25 @@ public:
 		return this->hll;
 	}
 
-	::std::pair<Key, V> *getData(int32_t *resultCount) const
+	::std::pair<Key, V> *getData(int64_t *resultCount) const
 	{
-        if((coherence != COHERENT))
-        {
-//            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
-            return NULL;
-        }
-		::std::pair<Key, V> *result = (::std::pair<Key, V> *)_mm_malloc(totalKeyCount * sizeof(::std::pair<Key, V>), 64);
+// 		if(coherence == INSERT)
+// 		{
+// //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+// 			finalize_insert();
+// 		} else if (coherence == ERASE) {
+// //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+// 		  finalize_erase();
+// 		}
+        if(coherence != COHERENT)
+		{
+			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+			throw std::logic_error("size() called on incoherent hash table");
+		}
+        ::std::pair<Key, V> *result = (::std::pair<Key, V> *)_mm_malloc(totalKeyCount * sizeof(::std::pair<Key, V>), 64);
 
-	    int32_t i, j;
-		int32_t elemCount = 0;
+	    int64_t i, j;
+		int64_t elemCount = 0;
 		for(i = 0; i < numBins; i++)
 		{
 			int count = countArray[i];
@@ -1523,16 +1834,23 @@ public:
 	}
 
     /// Fill data into an array.  array should be preallocated to be big enough.
-	int32_t getData(::std::pair<Key, V> *result) const
+	int64_t getData(::std::pair<Key, V> *result) const
 	{
-        if((coherence != COHERENT))
-        {
-//            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
-            return 0;
-        }
-
-	    int32_t i, j;
-		int32_t elemCount = 0;
+// 		if(coherence == INSERT)
+// 		{
+// //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+// 			finalize_insert();
+// 		} else if (coherence == ERASE) {
+// //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+// 		  finalize_erase();
+// 		}
+        if(coherence != COHERENT)
+		{
+			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+			throw std::logic_error("size() called on incoherent hash table");
+		}
+	    int64_t i, j;
+		int64_t elemCount = 0;
 		for(i = 0; i < numBins; i++)
 		{
 			int count = countArray[i];
@@ -1555,17 +1873,88 @@ public:
 		return elemCount;
 	}
 
+
+	::std::vector<::std::pair<Key, V> > to_vector() const {
+// 		if(coherence == INSERT)
+// 		{
+// //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+// 			finalize_insert();
+// 		} else if (coherence == ERASE) {
+// //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+// 		  finalize_erase();
+// 		}
+        if(coherence != COHERENT)
+		{
+			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+			throw std::logic_error("size() called on incoherent hash table");
+		}
+
+        ::std::vector<::std::pair<Key, V> > result(totalKeyCount);
+        getData(result.data());
+		return result;
+	}
+
+	::std::vector<Key> keys() const {
+// 		if(coherence == INSERT)
+// 		{
+// //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+// 			finalize_insert();
+// 		} else if (coherence == ERASE) {
+// //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+// 		  finalize_erase();
+// 		}
+        if(coherence != COHERENT)
+		{
+			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+			throw std::logic_error("size() called on incoherent hash table");
+		}
+
+        ::std::vector< Key > result(totalKeyCount);
+
+	    int64_t i, j;
+		int64_t elemCount = 0;
+		for(i = 0; i < numBins; i++)
+		{
+			int count = countArray[i];
+			int y = std::min(count, binSize - 1);
+			for(j = 0; j < y; j++)
+			{
+				HashElement he = hashTable[i * binSize + j];
+				result[elemCount] = he.key;
+				elemCount++;
+			}
+            int32_t overflowBufId;
+            overflowBufId = hashTable[i * binSize + binSize - 1].bucketId;
+            for(; j < count; j++)
+            {
+                HashElement he = overflowBuf[overflowBufId * binSize + j - (binSize - 1)];
+				result[elemCount] = he.key;
+				elemCount++;
+            }
+		}
+		return result;
+	}
+
+
     /// serialize to unsigned char array.  return byte count written.
     template <typename SERIALIZER>
 	size_t serialize(unsigned char *result, SERIALIZER const & ser) const
 	{
-        if((coherence != COHERENT))
-        {
-//            printf("ERROR! The hashtable is not coherent at the moment. getData() can not be serviced\n");
-            return 0;
-        }
+// 		if(coherence == INSERT)
+// 		{
+// //			printf("WARNING! The hashtable is in INSERT mode at the moment. finalize_insert will be called \n");
+// 			finalize_insert();
+// 		} else if (coherence == ERASE) {
+// //		  printf("WARNING! The hashtable is in ERASE mode at the moment. finalize_erase will be called \n");
+// 		  finalize_erase();
+// 		}
+        if(coherence != COHERENT)
+		{
+			printf("ERROR! The hashtable is not coherent at the moment. const version of size() called and cannot continue. \n");
+			throw std::logic_error("size() called on incoherent hash table");
+		}
 
-	    int32_t i, j;
+	    int64_t i, j;
         unsigned char * it = result;
 		for(i = 0; i < numBins; i++)
 		{
@@ -1589,7 +1978,7 @@ public:
 };
 template <class Key, class V, template <typename> class Hash,
           template <typename> class Equal>
-constexpr int32_t hashmap_radixsort<Key, V, Hash, Equal>::PFD;
+constexpr size_t hashmap_radixsort<Key, V, Hash, Equal>::PFD;
 
 
 }  // namespace fsc

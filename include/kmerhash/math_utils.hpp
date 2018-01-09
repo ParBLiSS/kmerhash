@@ -293,6 +293,8 @@ T gcd(T a, T b)
 	}
 	return a;
 }
+
+
 #endif
 
 template <typename T>
@@ -301,6 +303,19 @@ T lcm(T a, T b)
     T temp = gcd(a, b);
 
     return temp ? ((a / temp) * b) : 0;
+}
+
+
+template <typename T>
+constexpr T constexpr_gcd(T a, T b)
+{
+	return b ? constexpr_gcd(b, a % b) : a;
+}
+
+template <typename T>
+constexpr T constexpr_lcm(T a, T b)
+{
+	return constexpr_gcd(a, b) ? (( a / constexpr_gcd(a, b) ) * b ) : 0;
 }
 
 

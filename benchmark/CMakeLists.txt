@@ -232,8 +232,25 @@ if (BUILD_BENCHMARKS)
 			add_dist_hashmap_target(overlapBatch-KmerIndex ${map} ${hash} CRC32C OVERLAPPED_COMM_BATCH ENABLE_PREFETCH overlap_benchmarks)
 	
 	
-		endforeach(hash)	
+		endforeach(hash)
 	endforeach(map)
+
+	# no overlap
+	add_dist_hashmap_target(testKmerIndex MTROBINHOOD MURMUR64avx MURMUR64avx KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(testKmerIndex MTROBINHOOD MURMUR64avx CRC32C KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
+	
+	#overlap comm 1 rank-pair at a time.
+	add_dist_hashmap_target(overlap-KmerIndex MTROBINHOOD MURMUR64avx MURMUR64avx OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(overlap-KmerIndex MTROBINHOOD MURMUR64avx CRC32C OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
+
+	# no overlap
+	add_dist_hashmap_target(testKmerIndex MTRADIXSORT MURMUR64avx MURMUR64avx KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(testKmerIndex MTRADIXSORT MURMUR64avx CRC32C KH_DUMMY1 ENABLE_PREFETCH overlap_benchmarks)
+	
+	#overlap comm 1 rank-pair at a time.
+	add_dist_hashmap_target(overlap-KmerIndex MTRADIXSORT MURMUR64avx MURMUR64avx OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
+	add_dist_hashmap_target(overlap-KmerIndex MTRADIXSORT MURMUR64avx CRC32C OVERLAPPED_COMM ENABLE_PREFETCH overlap_benchmarks)
+
 
 	foreach(map BROBINHOOD RADIXSORT) #  // just Batched Robinhood should get the point across.
 		# lz4 distributed benchmarks.
@@ -288,7 +305,7 @@ endif(ENABLE_VTUNE_PROFILING)
 
 
 # kmer counter builds for shmem benchmark
-foreach(map BROBINHOOD RADIXSORT)
+foreach(map BROBINHOOD RADIXSORT MTROBINHOOD MTRADIXSORT)
 	foreach(hash MURMUR32avx MURMUR64avx) # MURMUR CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
 		add_dist_counter_target(testKmerCounter FASTA 31 ${map} ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
 		add_dist_counter_target(testKmerCounter FASTA 31 ${map} ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
@@ -296,13 +313,13 @@ foreach(map BROBINHOOD RADIXSORT)
 		add_dist_counter_target(testKmerCounter FASTQ 31 ${map} ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
 	endforeach(hash)
 endforeach(map)
-#foreach(hash MURMUR32 MURMUR) # CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
-#	add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
-#	add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
-#	add_dist_counter_target(testKmerCounter FASTQ 31 DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
-#	add_dist_counter_target(testKmerCounter FASTQ 31 DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
-#endforeach(hash)
-
+foreach(hash MURMUR32 MURMUR) # CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
+	add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
+	add_dist_counter_target(testKmerCounter FASTA 31 DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
+	add_dist_counter_target(testKmerCounter FASTQ 31 DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
+	add_dist_counter_target(testKmerCounter FASTQ 31 DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH shmem_benchmarks)
+endforeach(hash)
+	
 
 #k scalability
 foreach(map BROBINHOOD RADIXSORT)
@@ -313,25 +330,25 @@ foreach(map BROBINHOOD RADIXSORT)
 		endforeach(k)
 	endforeach(hash)
 endforeach(map)
-#foreach(hash MURMUR32 MURMUR) # CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
-#	foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
-#		add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH k_benchmarks)
-#		add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH k_benchmarks)
-#	endforeach(k)
-#endforeach(hash)
+foreach(hash MURMUR32 MURMUR) # CLHASH)    this is not using overlapped IO, so can use MURMUR32avx.
+	foreach(k 15 21 23 27 31 39 47 55 63 65 95 127 159 191 223 255)
+		add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH k_benchmarks)
+		add_dist_counter_target(testKmerCounter FASTQ ${k} DENSEHASH ${hash} CRC32C KH_DUMMY ENABLE_PREFETCH k_benchmarks)
+	endforeach(k)
+endforeach(hash)
 
 
 
 # EXECUTABLES
 include_directories("${EXT_PROJECTS_DIR}/martinus/src")
 include_directories("${EXT_PROJECTS_DIR}/martinus/src/3rdparty/google")
-add_executable(benchmark_hashtables_martinus martinus_test_robinhood.cpp)
-SET_TARGET_PROPERTIES(benchmark_hashtables_martinus
+add_executable(martinus_benchmark_hashtables martinus_test_robinhood.cpp)
+SET_TARGET_PROPERTIES(martinus_benchmark_hashtables
 	PROPERTIES COMPILE_FLAGS "-DENABLE_PREFETCH")
-target_link_libraries(benchmark_hashtables_martinus ${EXTRA_LIBS})
-#cotire(benchmark_hashtables_martinus)
+target_link_libraries(martinus_benchmark_hashtables ${EXTRA_LIBS})
+#cotire(martinus_benchmark_hashtables)
 
-add_dependencies(serial_benchmarks benchmark_hashtables_martinus)
+add_dependencies(serial_benchmarks martinus_benchmark_hashtables)
 
 
 

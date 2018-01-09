@@ -107,6 +107,8 @@ static int measure_mode = MEASURE_DISABLED;
 #include "kmerhash/distributed_robinhood_map.hpp"
 #include "kmerhash/distributed_batched_robinhood_map.hpp"
 #include "kmerhash/distributed_batched_radixsort_map.hpp"
+#include "kmerhash/experimental/hybrid_batched_robinhood_map.hpp"
+#include "kmerhash/experimental/hybrid_batched_radixsort_map.hpp"
 #include "kmerhash/math_utils.hpp"  // lcm
 
 #include "index/kmer_index.hpp"
@@ -154,6 +156,8 @@ static int measure_mode = MEASURE_DISABLED;
 #define ROBINHOOD 48
 #define BROBINHOOD 49
 #define RADIXSORT 50
+#define MTROBINHOOD 51
+#define MTRADIXSORT 52
 
 #define SINGLE 61
 #define CANONICAL 62
@@ -362,37 +366,39 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 
 
 #else  // hashmap
-		struct MSBSplitter {
-		    template <typename Kmer>
-		    bool operator()(Kmer const & kmer) const {
-		      return (kmer.getData()[Kmer::nWords - 1] & ~(~(static_cast<typename Kmer::KmerWordType>(0)) >> 2)) > 0;
-		    }
-
-		    template <typename Kmer, typename V>
-		    bool operator()(std::pair<Kmer, V> const & x) const {
-		      return (x.first.getData()[Kmer::nWords - 1] & ~(~(static_cast<typename Kmer::KmerWordType>(0)) >> 2)) > 0;
-		    }
-		};
+//		struct MSBSplitter {
+//		    template <typename Kmer>
+//		    bool operator()(Kmer const & kmer) const {
+//		      return (kmer.getData()[Kmer::nWords - 1] & ~(~(static_cast<typename Kmer::KmerWordType>(0)) >> 2)) > 0;
+//		    }
+//
+//		    template <typename Kmer, typename V>
+//		    bool operator()(std::pair<Kmer, V> const & x) const {
+//		      return (x.first.getData()[Kmer::nWords - 1] & ~(~(static_cast<typename Kmer::KmerWordType>(0)) >> 2)) > 0;
+//		    }
+//		};
+		//	#if (pDNA == 5) || (pKmerStore == CANONICAL)
+		//	using Splitter = ::bliss::filter::TruePredicate;
+		//	#else
+		//	using Splitter = typename ::std::conditional<(KmerType::nBits == (KmerType::nWords * sizeof(typename KmerType::KmerWordType) * 8)),
+		//			MSBSplitter, ::bliss::filter::TruePredicate>::type;
+		//	#endif
 
 
   // choose a MapParam based on type of map and kmer model (canonical, original, bimolecule)
   #if (pKmerStore == SINGLE)  // single stranded
     template <typename Key>
     using MapParams = ::bliss::index::kmer::SingleStrandHashMapParams<Key, DistHash, StoreHash, DistTrans>;
+  using SpecialKeys = ::bliss::kmer::hash::sparsehash::special_keys<KmerType, false>;
   #elif (pKmerStore == CANONICAL)
     template <typename Key>
     using MapParams = ::bliss::index::kmer::CanonicalHashMapParams<Key, DistHash, StoreHash>;
+  using SpecialKeys = ::bliss::kmer::hash::sparsehash::special_keys<KmerType, true>;
   #elif (pKmerStore == BIMOLECULE)  // bimolecule
     template <typename Key>
     using MapParams = ::bliss::index::kmer::BimoleculeHashMapParams<Key, DistHash, StoreHash>;
+  using SpecialKeys = ::bliss::kmer::hash::sparsehash::special_keys<KmerType, false>;
   #endif
-
-	#if (pDNA == 5) || (pKmerStore == CANONICAL)
-	using Splitter = ::bliss::filter::TruePredicate;
-	#else
-	using Splitter = typename ::std::conditional<(KmerType::nBits == (KmerType::nWords * sizeof(typename KmerType::KmerWordType) * 8)),
-			MSBSplitter, ::bliss::filter::TruePredicate>::type;
-	#endif
 
 
   // DEFINE THE MAP TYPE base on the type of data to be stored.
@@ -413,14 +419,20 @@ using KmerType = bliss::common::Kmer<31, Alphabet, uint64_t>;
 	//          KmerType, ValType, MapParams>;
     #elif (pMAP == DENSEHASH)
       using MapType = ::dsc::densehash_multimap<
-          KmerType, ValType, MapParams, Splitter>;
+          KmerType, ValType, MapParams, SpecialKeys>;
     #endif
   #elif (pINDEX == COUNT)  // map
     #if (pMAP == DENSEHASH)
       using MapType = ::dsc::counting_densehash_map<
-        KmerType, ValType, MapParams, Splitter>;
+        KmerType, ValType, MapParams, SpecialKeys>;
 #elif (pMAP == ROBINHOOD)
   using MapType = ::dsc::counting_robinhood_map<
+      KmerType, ValType, MapParams>;
+#elif (pMAP == MTROBINHOOD)
+  using MapType = ::hsc::counting_batched_robinhood_map<
+      KmerType, ValType, MapParams>;
+#elif (pMAP == MTRADIXSORT)
+  using MapType = ::hsc::counting_batched_radixsort_map<
       KmerType, ValType, MapParams>;
 #elif (pMAP == BROBINHOOD)
   using MapType = ::dsc::counting_batched_robinhood_map<
@@ -970,30 +982,32 @@ struct KVSerializer {
 
 // return bytes copied.
 template <typename C>
-size_t copyToByteArray(C const & container, unsigned char * dest) {
+size_t copyToByteArray(C const & map, unsigned char * dest) {
 // assume that dest is large enough...
 	KVSerializer kvs;
 
-	#if (pMAP == RADIXSORT)   // serialize.  since some entries are empty, and we don't have a usable iterator.
-		return container.serialize(dest, kvs);
+	#if (pMAP == RADIXSORT)  // serialize.  since some entries are empty, and we don't have a usable iterator.
+		return map.get_local_container().serialize(dest, kvs);
+	#elif (pMAP == MTRADIXSORT) || (pMAP == MTROBINHOOD)
+		return map.serialize(dest, kvs);
 	#elif (pMAP == SORTED)
 
 		size_t out_elem_size = sizeof(KmerType) + sizeof(CountType);
 		if (out_elem_size == sizeof(typename IndexType::TupleType)) {
 			// same size, so just copy directly.
-			memcpy(dest, container.data(), container.size() * out_elem_type);
+			memcpy(dest, map.get_local_container().data(), map.get_local_container().size() * out_elem_type);
 
 		} else {
 			unsigned char * cdest = dest;
 			// copy into temporary storage.
-			auto it_end = container.cend();
+			auto it_end = map.get_local_container().cend();
 			
-			for (auto it = container.cbegin(); it != it_end; ++it) {
+			for (auto it = map.get_local_container().cbegin(); it != it_end; ++it) {
 				cdest = kvs(it->first, it->second, cdest);
 			}
 			
 		}
-		return container.size() * out_elem_size;
+		return map.get_local_container().size() * out_elem_size;
 
 	#else  // copy one by one because iterator may be filtering or concatenating.
 
@@ -1001,18 +1015,18 @@ size_t copyToByteArray(C const & container, unsigned char * dest) {
 		size_t out_elem_size = sizeof(KmerType) + sizeof(CountType);
 		unsigned char * cdest = dest;
 		// copy into temporary storage.
-		auto it_end = container.cend();
+		auto it_end = map.get_local_container().cend();
 		
-		for (auto it = container.cbegin(); it != it_end; ++it) {
+		for (auto it = map.get_local_container().cbegin(); it != it_end; ++it) {
 			cdest = kvs(*it, cdest);
 		}
-		return container.size() * out_elem_size;
+		return map.get_local_container().size() * out_elem_size;
 	#endif
 }
 
 
 template <bool direct = false, size_t CHUNK_SIZE = (1UL << 30U), typename C>
-size_t writeToPOSIX(C const & container, std::string const & out_filename) {
+size_t writeToPOSIX(C const & map, std::string const & out_filename) {
 
 	static_assert((CHUNK_SIZE <= (1 << 30)), "CHUNK_SIZE is limited to 1GB due to linux limitations.");
 
@@ -1023,13 +1037,13 @@ size_t writeToPOSIX(C const & container, std::string const & out_filename) {
     // std::cout << "rank " << comm.rank() << " out file name " << out_filename << " target size " << target_size << std::endl;
 #if (pMAP == SORTED)   // COPY and compact first to reduce space.
 	if ((sizeof(KmerType) + sizeof(CountType)) == sizeof(typename IndexType::TupleType)) {
-		written = container.size() * sizeof(typename IndexType::TupleType);
+		written = map.get_local_container().size() * sizeof(typename IndexType::TupleType);
 		// may not be able to write directly because of lack of 512 byte alignment.
-		write_posix(out_filename, reinterpret_cast<unsigned char*>(container.data()), written);
+		write_posix(out_filename, reinterpret_cast<unsigned char*>(map.get_local_container().data()), written);
 	} else {  // not same length data types, so copy first.
 		unsigned char * values = 
-			::utils::mem::aligned_alloc<unsigned char>(container.size() * out_elem_size, 512);
-		written = copyToByteArray(container, values);
+			::utils::mem::aligned_alloc<unsigned char>(map.get_local_container().size() * out_elem_size, 512);
+		written = copyToByteArray(map.get_local_container(), values);
 		if (direct)
 			write_posix_direct(out_filename, values, written, 512);
 		else 
@@ -1037,11 +1051,20 @@ size_t writeToPOSIX(C const & container, std::string const & out_filename) {
 	  ::utils::mem::aligned_free(values);
 	}
 
-
-#elif (pMAP == RADIXSORT)  // copy the entire dataset and then write.
+#elif (pMAP == RADIXSORT)   // copy the entire dataset and then write.
 	unsigned char* values = 
-		::utils::mem::aligned_alloc<unsigned char>(container.size() * out_elem_size, 512);
-  written = container.serialize(values, kvs);
+		::utils::mem::aligned_alloc<unsigned char>(map.get_local_container().size() * out_elem_size, 512);
+  written = map.get_local_container().serialize(values, kvs);
+	if (direct)
+	  write_posix_direct(out_filename, values, written , 512);
+	else
+	  write_posix(out_filename, values, written);
+  ::utils::mem::aligned_free(values);
+
+#elif (pMAP == MTRADIXSORT) || (pMAP == MTROBINHOOD)  // copy the entire dataset and then write.
+	unsigned char* values = 
+		::utils::mem::aligned_alloc<unsigned char>(map.local_size() * out_elem_size, 512);
+  written = map.serialize(values, kvs);
 	if (direct)
 	  write_posix_direct(out_filename, values, written , 512);
 	else
@@ -1053,7 +1076,8 @@ size_t writeToPOSIX(C const & container, std::string const & out_filename) {
 	// assume 32KB, 8 way set-associative cache.
 	// there are 64 sets of 8x64byte cachelines.
 	// use 1/4 of it. = 2x64x64 bytes = 8KB.
-
+	typename MapType::local_container_type const & container = map.get_local_container();
+  //auto container = map.get_local_container();
 
 	// compute some step sizes.  then 8192 - (8192 % lcm)
 		// get lowest common multiple of 512 and tuple type size
@@ -1277,7 +1301,7 @@ int main(int argc, char** argv) {
 //		TCLAP::SwitchArg benchmarkArg("B", "benchmark", "on/off for benchmarking (no file output)", cmd, false);
 
 	    TCLAP::ValueArg<int> algoArg("A",
-	                                 "algo", "Reader Algorithm id. Fileloader w/o preload = 2, mmap = 5, posix=7, mpiio = 10. default is 7.",
+	                                 "algo", "Reader Algorithm id. mmap = 5, posix=7, mpiio = 10. default is 7.",
 	                                 false, 7, "int", cmd);
 
 	    // output algo 7 and 8 are not working.
@@ -1321,21 +1345,21 @@ int main(int argc, char** argv) {
   IndexType idx(comm);
 
 #if (pMAP == DENSEHASH)
-  KmerType empty_key = ::bliss::kmer::hash::sparsehash::empty_key<KmerType>::generate();
-  KmerType deleted_key = ::bliss::kmer::hash::sparsehash::deleted_key<KmerType>::generate();
-
-  	idx.get_map().reserve_keys(empty_key, deleted_key);
-
-  	// upper key is negation of lower keys
-  	KmerType upper_empty_key = empty_key;
-  	KmerType upper_deleted_key = deleted_key;
-  	for (size_t i = 0; i < KmerType::nWords; ++i) {
-  		upper_empty_key.getDataRef()[i] = ~(upper_empty_key.getDataRef()[i]);
-  		upper_deleted_key.getDataRef()[i] = ~(upper_deleted_key.getDataRef()[i]);
-  	}
-
-  	idx.get_map().reserve_upper_keys(upper_empty_key, upper_deleted_key, Splitter());
-
+//  KmerType empty_key = ::bliss::kmer::hash::sparsehash::empty_key<KmerType>::generate();
+//  KmerType deleted_key = ::bliss::kmer::hash::sparsehash::deleted_key<KmerType>::generate();
+//
+//  	idx.get_map().reserve_keys(empty_key, deleted_key);
+//
+//  	// upper key is negation of lower keys
+//  	KmerType upper_empty_key = empty_key;
+//  	KmerType upper_deleted_key = deleted_key;
+//  	for (size_t i = 0; i < KmerType::nWords; ++i) {
+//  		upper_empty_key.getDataRef()[i] = ~(upper_empty_key.getDataRef()[i]);
+//  		upper_deleted_key.getDataRef()[i] = ~(upper_deleted_key.getDataRef()[i]);
+//  	}
+//
+//  	idx.get_map().reserve_upper_keys(upper_empty_key, upper_deleted_key, Splitter());
+//
 
 #endif
 
@@ -1418,11 +1442,15 @@ int main(int argc, char** argv) {
 
 
       // =========== update the parameters
-#if (pMAP == SORTED) || (pMAP == RADIXSORT)
-    buckets = idx.get_map().get_local_container().capacity();
+#if (pMAP == SORTED) || (pMAP == RADIXSORT) || (pMAP == MTRADIXSORT) 
+    buckets = idx.get_map().local_capacity();
       max_load = buckets;
-#else
-	    buckets = idx.get_map().get_local_container().capacity();
+#elif (pMAP == MTROBINHOOD)
+	    buckets = idx.get_map().local_capacity();
+	    orig_buckets = buckets;
+      max_load = idx.get_map().get_max_load_factor() * buckets;
+#else 
+	    buckets = idx.get_map().local_capacity();
 	    orig_buckets = buckets;
       max_load = idx.get_map().get_local_container().get_max_load_factor() * buckets;
 #endif
@@ -1537,19 +1565,19 @@ int main(int argc, char** argv) {
     if (comm.rank() == 0) std::cout << (delta_distinct + avg_distinct_count);
 
 #if (pMAP == SORTED)
-	    idx.get_map().get_local_container().reserve(idx.local_size() + kmer_est);
-	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
-#elif (pMAP == RADIXSORT)
-//	    if (idx.get_map().get_local_container().capacity() < (avg_distinct_count + delta_distinct))
-//	    	idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
+	    idx.get_map().local_reserve(idx.local_size() + kmer_est);
+	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().local_capacity() << std::endl;
+#elif (pMAP == RADIXSORT) || (pMAP == MTRADIXSORT)
+//	    if (idx.get_map().local_capacity() < (avg_distinct_count + delta_distinct))
+//	    	idx.get_map().local_reserve(avg_distinct_count + delta_distinct);
 	    // do nothing, since on insertion we reserve.
-	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
-#elif (pMAP == BROBINHOOD)
+	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().local_capacity() << std::endl;
+#elif (pMAP == BROBINHOOD) || (pMAP == MTROBINHOOD)
 
 #else
-	    if ((idx.get_map().get_local_container().capacity() * idx.get_map().get_local_container().get_max_load_factor()) < (avg_distinct_count + delta_distinct))
-	    	idx.get_map().get_local_container().reserve(avg_distinct_count + delta_distinct);
-	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().get_local_container().capacity() << std::endl;
+	    if ((idx.get_map().local_capacity() * idx.get_map().get_local_container().get_max_load_factor()) < (avg_distinct_count + delta_distinct))
+	    	idx.get_map().local_reserve(avg_distinct_count + delta_distinct);
+	    if (comm.rank() == 0) std::cout << " buckets " << idx.get_map().local_capacity() << std::endl;
 #endif
     BL_BENCH_LOOP_PAUSE(test, 3);
 
@@ -1629,11 +1657,11 @@ int main(int argc, char** argv) {
 
 	    // now insert.
       BL_BENCH_LOOP_RESUME(test, 4);
-#if (pMAP == RADIXSORT)
+#if (pMAP == RADIXSORT) || (pMAP == MTRADIXSORT)
       // don't estimate...
       //idx.get_map().insert_no_finalize<false>(temp);  // should be insert_no_finalize but just to be safe don't do it right now...
       idx.get_map().insert_no_finalize<true>(temp);  // should be insert_no_finalize but just to be safe don't do it right now...
-#elif (pMAP == BROBINHOOD)
+#elif (pMAP == BROBINHOOD)  || (pMAP == MTROBINHOOD)
       // don't estimate...
 	    //idx.get_map().insert<false>(temp);
 	    idx.get_map().insert<true>(temp);
@@ -1687,20 +1715,25 @@ int main(int argc, char** argv) {
             " prev distinct " << avg_distinct_before <<
             " distinct " << avg_distinct_count <<
             " max load before " << max_load << " after " <<
-#if (pMAP == SORTED) || (pMAP == RADIXSORT)
-            static_cast<size_t>(idx.get_map().get_local_container().capacity()) <<
-            " buckets " << buckets << " after " << idx.get_map().get_local_container().capacity() <<
+#if (pMAP == SORTED) || (pMAP == RADIXSORT) || (pMAP == MTRADIXSORT)
+            static_cast<size_t>(idx.get_map().local_capacity()) <<
+            " buckets " << buckets << " after " << idx.get_map().local_capacity() <<
+#elif (pMAP == MTROBINHOOD)
+            static_cast<size_t>(idx.get_map().local_capacity() * idx.get_map().get_max_load_factor()) <<
+            " buckets " << buckets << " after " << idx.get_map().local_capacity() <<
 #else
-            static_cast<size_t>(idx.get_map().get_local_container().capacity() * idx.get_map().get_local_container().get_max_load_factor()) <<
-            " buckets " << buckets << " after " << idx.get_map().get_local_container().capacity() <<
+            static_cast<size_t>(idx.get_map().local_capacity() * idx.get_map().get_local_container().get_max_load_factor()) <<
+            " buckets " << buckets << " after " << idx.get_map().local_capacity() <<
 #endif
             std::endl;
       }
 
     } // filename loop.
 
-#if (pMAP == RADIXSORT)
+#if (pMAP == RADIXSORT) 
 	idx.get_map().get_local_container().finalize_insert();
+#elif (pMAP == MTRADIXSORT)
+	idx.get_map().finalize_insert();
 #endif
   } // scoped to clear temp.
 
@@ -1711,8 +1744,8 @@ int main(int argc, char** argv) {
   BL_BENCH_LOOP_END(test, 0, "estimate", total_file_size);
   BL_BENCH_LOOP_END(test, 1, "reserve", iters );
   BL_BENCH_LOOP_END(test, 2, "read", kmer_total);
-  BL_BENCH_LOOP_END(test, 3, "resize", idx.get_map().get_local_container().capacity() );
-  BL_BENCH_LOOP_END(test, 4, "insert", idx.local_size() );
+  BL_BENCH_LOOP_END(test, 3, "resize", idx.get_map().local_capacity() );
+  BL_BENCH_LOOP_END(test, 4, "insert", idx.get_map().local_size() );
   BL_BENCH_LOOP_END(test, 5, "measure", chars_per_kmer);
 
 
@@ -1763,7 +1796,7 @@ int main(int argc, char** argv) {
 			} else {  // not same length data types, so copy first.
 				values = 
 					::utils::mem::aligned_alloc<unsigned char>(target_size, 512);
-				target_size = copyToByteArray(idx.get_map().get_local_container(), values);
+				target_size = copyToByteArray(idx.get_map(), values);
 				write_mpiio(out_filename, values, target_size, comm);
 				::utils::mem::aligned_free(values);
 			}
@@ -1773,8 +1806,10 @@ int main(int argc, char** argv) {
 			values = 
 				::utils::mem::aligned_alloc<unsigned char>(target_size, 512);
 
-			#if (pMAP == RADIXSORT)
+			#if (pMAP == RADIXSORT) 
 				target_size = idx.get_map().get_local_container().serialize(values, kvs);
+			#elif (pMAP == MTRADIXSORT) || (pMAP == MTROBINHOOD)
+				target_size = idx.get_map().serialize(values, kvs);
 
 			#else
 				unsigned char* q = values;
@@ -1820,9 +1855,9 @@ int main(int argc, char** argv) {
       if (i == group.rank()) {
 				// writing
 				if (writer_algo == 5)
-					copied = writeToPOSIX<false, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
+					copied = writeToPOSIX<false, (1UL << 30U)>(idx.get_map(), out_filename);
 				else
-					copied = writeToPOSIX<true, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
+					copied = writeToPOSIX<true, (1UL << 30U)>(idx.get_map(), out_filename);
       }
 			group.barrier();  // use barrier to force one from a node at a time.
 
@@ -1845,9 +1880,9 @@ int main(int argc, char** argv) {
 
 		size_t copied = 0;
 		if (writer_algo == 6)
-			copied = writeToPOSIX<false, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
+			copied = writeToPOSIX<false, (1UL << 30U)>(idx.get_map(), out_filename);
 		else {
-			copied = writeToPOSIX<true, (1UL << 30U)>(idx.get_map().get_local_container(), out_filename);
+			copied = writeToPOSIX<true, (1UL << 30U)>(idx.get_map(), out_filename);
 		}
     BL_BENCH_COLLECTIVE_END(test, ((writer_algo == 6) ? "write_6" : "write_8"), copied, comm);
 
@@ -1880,8 +1915,7 @@ int main(int argc, char** argv) {
 
       if (i == group.rank()) {
 				// copy data into array (writing)
-				copied = copyToByteArray(idx.get_map().get_local_container(), q);
-
+				copied = copyToByteArray(idx.get_map(), q);
       }
 			group.barrier();  // use barrier to force one from a node at a time.
     }
@@ -1909,7 +1943,7 @@ int main(int argc, char** argv) {
     unsigned char *q = p + (offset - pa_offset);
 
 		// copy data into array
-		size_t copied = copyToByteArray(idx.get_map().get_local_container(), q);
+		size_t copied = copyToByteArray(idx.get_map(), q);
 
 		// unmap the file
     unmap_out_file(p, target_size, offset, comm);
@@ -1930,7 +1964,7 @@ int main(int argc, char** argv) {
     unsigned char *q = map_out_file(out_filename, target_size, 0);
 
 		// copy data into array
-		size_t copied = copyToByteArray(idx.get_map().get_local_container(), q);
+		size_t copied = copyToByteArray(idx.get_map(), q);
 
 		// unmap the file
     unmap_out_file(q, target_size, 0);
@@ -1960,7 +1994,7 @@ int main(int argc, char** argv) {
 
       if (i == group.rank()) {
 				// copy data into array (writing)
-				copied = copyToByteArray(idx.get_map().get_local_container(), q);
+				copied = copyToByteArray(idx.get_map(), q);
 
 		}
 			group.barrier();
