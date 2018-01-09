@@ -208,10 +208,8 @@ using CountType = uint32_t;
 #endif
 
 // distribution hash
-#if (pDistHash == STD)
-	template <typename KM>
-	using DistHash = bliss::kmer::hash::cpp_std<KM, true>;
-#elif (pDistHash == IDEN)
+#if (pMAP == MTRADIXSORT) || (pMAP == RADIXSORT) || (pMAP == MTROBINHOOD) || (pMAP == BROBINHOOD)
+#if (pDistHash == IDEN)
 	template <typename KM>
 //	using DistHash = bliss::kmer::hash::identity<KM, true>;
 	using DistHash = ::fsc::hash::identity<KM>;
@@ -244,14 +242,31 @@ using CountType = uint32_t;
   template <typename KM>
   //using DistHash = bliss::kmer::hash::farm<KM, true>;
   using DistHash = ::fsc::hash::farm<KM>;
+#else
+  static_assert(false, "RADIXSORT and BROBINHOOD do not support the specified distr hash function");
+#endif
+#else
+#if (pDistHash == STD)
+	template <typename KM>
+	using DistHash = bliss::kmer::hash::cpp_std<KM, true>;
+#elif (pDistHash == IDEN)
+	template <typename KM>
+	using DistHash = bliss::kmer::hash::identity<KM, true>;
+#elif (pDistHash == MURMUR)
+	template <typename KM>
+	using DistHash = bliss::kmer::hash::murmur<KM, true>;
+#elif (pDistHash == FARM)
+  template <typename KM>
+  	using DistHash = bliss::kmer::hash::farm<KM, true>;
+#else
+  static_assert(false, "DENSEHASH, unordered map, sorted, ordered, and ROBINHOOD do not support the specified distr hash function");
 #endif
 
+#endif
 
 // storage hash type
-#if (pStoreHash == STD)
-	template <typename KM>
-	using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
-#elif (pStoreHash == IDEN)
+#if (pMAP == MTRADIXSORT) || (pMAP == RADIXSORT) || (pMAP == MTROBINHOOD) || (pMAP == BROBINHOOD)
+#if (pStoreHash == IDEN)
 	template <typename KM>
 //	using StoreHash = bliss::kmer::hash::identity<KM, false>;
 	using StoreHash = ::fsc::hash::identity<KM>;
@@ -284,8 +299,29 @@ using CountType = uint32_t;
   template <typename KM>
 //  using StoreHash = bliss::kmer::hash::farm<KM, false>;
   using StoreHash = ::fsc::hash::farm<KM>;
+#else
+  static_assert(false, "RADIXSORT and BROBINHOOD do not support the specified store hash function");
 #endif
-
+#else
+#if (pStoreHash == STD)
+	template <typename KM>
+	using StoreHash = bliss::kmer::hash::cpp_std<KM, false>;
+#elif (pStoreHash == IDEN)
+	template <typename KM>
+	using StoreHash = bliss::kmer::hash::identity<KM, false>;
+#elif (pStoreHash == MURMUR)
+	template <typename KM>
+	using StoreHash = bliss::kmer::hash::murmur<KM, false>;
+#elif (pStoreHash == FARM)
+  template <typename KM>
+  using StoreHash = bliss::kmer::hash::farm<KM, false>;
+#elif (pStoreHash == CRC32C)
+  template <typename KM>
+  using StoreHash = ::fsc::hash::crc32c<KM>;
+#else
+  static_assert(false, "DENSEHASH, unordered map, sorted, ordered, and ROBINHOOD do not support the specified store hash function");
+#endif
+#endif
 
 
 // ==== define Map parameter
@@ -552,7 +588,7 @@ int main(int argc, char** argv) {
   double max_load = 0.8;
   double min_load = 0.35;
   uint8_t insert_prefetch = 8;
-  uint8_t query_prefetch = 16;
+  uint8_t query_prefetch = 8;
 
   bool balance_input = false;
 
@@ -587,8 +623,8 @@ int main(int argc, char** argv) {
 
 	  TCLAP::ValueArg<double> maxLoadArg("","max_load","maximum load factor", false, max_load, "double", cmd);
 	  TCLAP::ValueArg<double> minLoadArg("","min_load","minimum load factor", false, min_load, "double", cmd);
-	  TCLAP::ValueArg<unsigned char> insertPrefetchArg("","insert_prefetch","number of elements to prefetch during insert", false, insert_prefetch, "unsigned char", cmd);
-	  TCLAP::ValueArg<unsigned char> queryPrefetchArg("","query_prefetch","number of elements to prefetch during queries", false, query_prefetch, "unsigned char", cmd);
+	  TCLAP::ValueArg<uint32_t> insertPrefetchArg("","insert_prefetch","number of elements to prefetch during insert", false, insert_prefetch, "uint32_t", cmd);
+	  TCLAP::ValueArg<uint32_t> queryPrefetchArg("","query_prefetch","number of elements to prefetch during queries", false, query_prefetch, "uint32_t", cmd);
 
 #ifdef VTUNE_ANALYSIS
     std::vector<std::string> measure_modes;
@@ -698,7 +734,7 @@ int main(int argc, char** argv) {
     idx.get_map().get_local_container().set_min_load_factor(min_load);
     idx.get_map().get_local_container().set_insert_lookahead(insert_prefetch);
     idx.get_map().get_local_container().set_query_lookahead(query_prefetch);
-  #elif (pMAP == TROBINHOOD)
+  #elif (pMAP == MTROBINHOOD)
     idx.get_map().set_max_load_factor(max_load);
     idx.get_map().set_min_load_factor(min_load);
     idx.get_map().set_insert_lookahead(insert_prefetch);
@@ -771,7 +807,7 @@ int main(int argc, char** argv) {
 
 	  {
 		  auto lquery = query;
-#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT)
+#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT) || (pMAP == BROBINHOOD) || (pMAP == RADIXSORT)
 		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
 		  uint8_t * count_res = ::utils::mem::aligned_alloc<uint8_t>(lquery.size(), 64);
 		  size_t count_res_size = idx.get_map().count(lquery, count_res);
@@ -787,13 +823,13 @@ int main(int argc, char** argv) {
 
 	  {
 		  auto lquery = query;
-#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT)
-		  BL_BENCH_COLLECTIVE_START(test, "count", comm);
+#if (pMAP == MTROBINHOOD) || (pMAP == MTRADIXSORT) || (pMAP == BROBINHOOD) || (pMAP == RADIXSORT)
+		  BL_BENCH_COLLECTIVE_START(test, "find", comm);
 		  CountType * find_res = ::utils::mem::aligned_alloc<CountType>(lquery.size(), 64);
 		  size_t find_res_size = idx.get_map().find(lquery, find_res);
 
 		  ::utils::mem::aligned_free(find_res);
-		  BL_BENCH_END(test, "count", find_res_size);
+		  BL_BENCH_END(test, "find", find_res_size);
 #else
 		  BL_BENCH_COLLECTIVE_START(test, "find", comm);
 		  auto found = idx.find(lquery);

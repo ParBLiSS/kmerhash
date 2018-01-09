@@ -418,11 +418,9 @@ namespace dsc  // distributed std container
         }
 
 
-        constexpr size_t batch_size = InternalHash::batch_size;
-
         // do a few cachelines at a time.  probably a good compromise is to do batch_size number of cachelines
         // 64 / sizeof(ASSIGN_TYPE)...
-        constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) * batch_size;
+        constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) * InternalHash::batch_size;
 
 //        BL_BENCH_START(permute_est);
 
@@ -440,7 +438,7 @@ namespace dsc  // distributed std container
 
           // and compute the hll.
     	  IT it = _begin;
-          if (batch_size > 1) {
+          if (InternalHash::batch_size > 1) {
         	  transhash_val_type hashvals[block_size];
 
         	  // do blocks
@@ -491,7 +489,7 @@ namespace dsc  // distributed std container
         
 //        BL_BENCH_START(permute_est);
 
-        ASSIGN_TYPE* bucketIds = ::utils::mem::aligned_alloc<ASSIGN_TYPE>(input_size);
+        ASSIGN_TYPE* bucketIds = ::utils::mem::aligned_alloc<ASSIGN_TYPE>(input_size + InternalHash::batch_size);
 //        BL_BENCH_END(permute_est, "alloc", input_size);
 
 
@@ -507,7 +505,7 @@ namespace dsc  // distributed std container
           ASSIGN_TYPE rank;
 
           // and compute the hll.
-          if (batch_size > 1) {
+          if (InternalHash::batch_size > 1) {
         	  transhash_val_type hashvals[block_size];
 
         	  size_t max = (input_size / block_size) * block_size;
@@ -654,12 +652,10 @@ namespace dsc  // distributed std container
         InternalHashMod key_to_rank2(DistHash<trans_val_type>(9876543), DistTrans<Key>(), modulus<transhash_val_type, ASSIGN_TYPE>(num_buckets));
 
 
-
-        constexpr size_t batch_size = InternalHashMod::batch_size;
 //        		decltype(declval<decltype(declval<KeyToRank>().proc_trans_hash)>().h)::batch_size;
         // do a few cachelines at a time.  probably a good compromise is to do batch_size number of cachelines
         // 64 / sizeof(ASSIGN_TYPE)...
-        constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) * batch_size;
+        constexpr size_t block_size = (64 / sizeof(ASSIGN_TYPE)) * InternalHash::batch_size;
 
 //        BL_BENCH_START(permute_est);
         // initialize number of elements per bucket
@@ -686,7 +682,7 @@ namespace dsc  // distributed std container
 
 //        BL_BENCH_START(permute_est);
 
-        ASSIGN_TYPE* bucketIds = ::utils::mem::aligned_alloc<ASSIGN_TYPE>(input_size);
+        ASSIGN_TYPE* bucketIds = ::utils::mem::aligned_alloc<ASSIGN_TYPE>(input_size + InternalHash::batch_size);
 //        BL_BENCH_END(permute_est, "alloc", input_size);
 
 
@@ -702,7 +698,7 @@ namespace dsc  // distributed std container
     	  ASSIGN_TYPE* i2o_eit;
 
           // and compute the hll.
-          if (batch_size > 1) {
+          if (InternalHash::batch_size > 1) {
         	  size_t max = (input_size / block_size) * block_size;
 
 			  for (; i < max; i += block_size, it += block_size) {
@@ -946,7 +942,7 @@ namespace dsc  // distributed std container
 
   	  	  	int comm_size = this->comm.size();
 
-            ::std::pair<Key, T>* buffer = ::utils::mem::aligned_alloc<::std::pair<Key, T> >(input.size());
+            ::std::pair<Key, T>* buffer = ::utils::mem::aligned_alloc<::std::pair<Key, T> >(input.size() + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1107,7 +1103,7 @@ namespace dsc  // distributed std container
 #endif
   	  	  	  size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
 
-  	          ::std::pair<Key, T>* distributed = ::utils::mem::aligned_alloc<::std::pair<Key, T> >(recv_total);
+  	          ::std::pair<Key, T>* distributed = ::utils::mem::aligned_alloc<::std::pair<Key, T> >(recv_total + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1204,15 +1200,15 @@ namespace dsc  // distributed std container
        * @param input  vector.  will be permuted.
        */
       template <typename Predicate = ::bliss::filter::TruePredicate>
-      std::vector<count_result_type> count_1(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) const {
+      size_t count_1(std::vector<Key >& input,
+    		  count_result_type * results,
+    		  bool sorted_input = false, Predicate const & pred = Predicate()) const {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(count);
 
-        ::std::vector<count_result_type > results;
-
         if (::dsc::empty(input, this->comm)) {
           BL_BENCH_REPORT_MPI_NAMED(count, "base_batched_robinhood_map:count", this->comm);
-          return results;
+          return 0;
         }
 
         // transform once.  bucketing and distribute will read it multiple times.
@@ -1232,17 +1228,6 @@ namespace dsc  // distributed std container
 
           // local count. memory utilization a potential problem.
           // do for each src proc one at a time.
-        BL_BENCH_COLLECTIVE_START(count, "reserve", this->comm);
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_resume();
-#endif
-          results.reserve(input.size() );
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_pause();
-#endif
-          BL_BENCH_END(count, "reserve", results.capacity());
 
           BL_BENCH_COLLECTIVE_START(count, "local_count", this->comm);
           {
@@ -1250,18 +1235,18 @@ if (measure_mode == MEASURE_RESERVE)
   if (measure_mode == MEASURE_COUNT)
       __itt_resume();
 #endif
-	::fsc::back_emplace_iterator<::std::vector< count_result_type > > emplace_iter(results);
-          	this->c.count(emplace_iter, input.data(), input.data() + input.size(), pred, pred);
+
+          	this->c.count(results, input.data(), input.data() + input.size(), pred, pred);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_COUNT)
       __itt_pause();
 #endif
           }
-          BL_BENCH_END(count, "local_count", results.size());
+          BL_BENCH_END(count, "local_count", input.size());
 
         BL_BENCH_REPORT_MPI_NAMED(count, "base_hashmap:count", this->comm);
 
-        return results;
+        return input.size();
       }
 
 
@@ -1270,16 +1255,16 @@ if (measure_mode == MEASURE_RESERVE)
        * @param input  vector.  will be permuted.
        */
       template <typename Predicate = ::bliss::filter::TruePredicate>
-      std::vector<count_result_type> count_p(std::vector<Key >& input, bool sorted_input = false,
+      size_t count_p(std::vector<Key >& input,
+    		  count_result_type * results,
+    		  bool sorted_input = false,
     		  Predicate const & pred = Predicate()) const {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(count);
 
-        std::vector<count_result_type> results;
-
         if (::dsc::empty(input, this->comm)) {
           BL_BENCH_REPORT_MPI_NAMED(count, "hashmap:count", this->comm);
-          return results;
+          return 0;
         }
 
         // alloc buffer
@@ -1309,7 +1294,7 @@ if (measure_mode == MEASURE_RESERVE)
 
   	  	  	int comm_size = this->comm.size();
 
-  	  	  	Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size());
+  	  	  	Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size() + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1384,25 +1369,6 @@ if (measure_mode == MEASURE_RESERVE)
 
 #if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_BATCH)
 
-              BL_BENCH_COLLECTIVE_START(count, "alloc out", this->comm);
-            // get mapping to proc
-            // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
-  //          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
-  //          BLISS_UNUSED(recv_counts);
-  #ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_RESERVE)
-        __itt_resume();
-  #endif
-
-    		results.resize(input.size(), 0);
-
-  #ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_RESERVE)
-        __itt_pause();
-  #endif
-    	  	  	  BL_BENCH_END(count, "alloc out", input.size());
-
-
   	      BL_BENCH_COLLECTIVE_START(count, "a2av_count", this->comm);
 
   	      ::khmxx::incremental::ialltoallv_and_query_one_to_one(
@@ -1410,31 +1376,12 @@ if (measure_mode == MEASURE_RESERVE)
   	                                                  [this, &pred](int rank, Key* b, Key* e, count_result_type * out){
   	                                                     this->c.count(out, b, e, pred, pred);
   	                                                  },
-													  results.data(),
+													  results,
   	                                                  this->comm);
 
   	      BL_BENCH_END(count, "a2av_count", this->c.size());
 
 #elif defined(OVERLAPPED_COMM_FULLBUFFER)
-
-          BL_BENCH_COLLECTIVE_START(count, "alloc out", this->comm);
-        // get mapping to proc
-        // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
-//          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
-//          BLISS_UNUSED(recv_counts);
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_resume();
-#endif
-
-		results.resize(input.size(), 0);
-
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_pause();
-#endif
-	  	  	  BL_BENCH_END(count, "alloc out ", input.size());
-
 
 	      BL_BENCH_COLLECTIVE_START(count, "a2av_count_fullbuf", this->comm);
 
@@ -1443,31 +1390,12 @@ if (measure_mode == MEASURE_RESERVE)
 	                                                  [this, &pred](int rank, Key* b, Key* e, count_result_type * out){
 	                                                     this->c.count(out, b, e, pred, pred);
 	                                                  },
-												  results.data(),
+												  results,
 	                                                  this->comm);
 
 	      BL_BENCH_END(count, "a2av_count_fullbuf", this->c.size());
 
 #elif defined(OVERLAPPED_COMM_2P)
-
-          BL_BENCH_COLLECTIVE_START(count, "alloc out", this->comm);
-        // get mapping to proc
-        // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
-//          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
-//          BLISS_UNUSED(recv_counts);
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_resume();
-#endif
-
-		results.resize(input.size(), 0);
-
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_pause();
-#endif
-	  	  	  BL_BENCH_END(count, "alloc out", input.size());
-
 
 	      BL_BENCH_COLLECTIVE_START(count, "a2av_count", this->comm);
 
@@ -1476,7 +1404,7 @@ if (measure_mode == MEASURE_RESERVE)
 	                                                  [this, &pred](int rank, Key* b, Key* e, count_result_type * out){
 	                                                     this->c.count(out, b, e, pred, pred);
 	                                                  },
-												  results.data(),
+												  results,
 	                                                  this->comm);
 
 	      BL_BENCH_END(count, "a2av_count", this->c.size());
@@ -1491,8 +1419,8 @@ if (measure_mode == MEASURE_RESERVE)
 #endif
   	  	  	  size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
 
-  	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
-  	          count_result_type* dist_results = ::utils::mem::aligned_alloc<count_result_type>(recv_total);
+  	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total + InternalHash::batch_size);
+  	          count_result_type* dist_results = ::utils::mem::aligned_alloc<count_result_type>(recv_total + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1550,19 +1478,6 @@ if (measure_mode == MEASURE_RESERVE)
         BL_BENCH_END(count, "clean up", recv_total);
 
     // local count. memory utilization a potential problem.
-    // do for each src proc one at a time.
-  BL_BENCH_COLLECTIVE_START(count, "reserve", this->comm);
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-__itt_resume();
-#endif
-    results.resize(input.size() );                   // TODO:  should estimate coverage.
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-__itt_pause();
-#endif
-    BL_BENCH_END(count, "reserve", results.capacity());
-
 
         // send back using the constructed recv count
         BL_BENCH_COLLECTIVE_START(count, "a2a2", this->comm);
@@ -1575,10 +1490,10 @@ if (measure_mode == MEASURE_A2A)
 // this needs to be done.
 #ifdef ENABLE_LZ4_RESULT
   	  	  	  ::khmxx::lz4::distribute_permuted(dist_results, dist_results + recv_total,
-  	  	  			  recv_counts, results.data(), send_counts, this->comm);
+  	  	  			  recv_counts, results, send_counts, this->comm);
 #else
   	  	  	  ::khmxx::distribute_permuted(dist_results, dist_results + recv_total,
-  	  	  			  recv_counts, results.data(), send_counts, this->comm);
+  	  	  			  recv_counts, results, send_counts, this->comm);
 #endif
 
 
@@ -1590,28 +1505,48 @@ if (measure_mode == MEASURE_A2A)
 
 		::utils::mem::aligned_free(dist_results);
 
-        BL_BENCH_END(count, "a2a2", results.size());
+        BL_BENCH_END(count, "a2a2", input.size());
 
 
 #endif // non overlap
 
         BL_BENCH_REPORT_MPI_NAMED(count, "hashmap:count_p", this->comm);
 
-        return results;
+        return input.size();
       }
 
 
     public:
+
       template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
       ::std::vector<count_result_type > count(::std::vector<Key>& keys, bool sorted_input = false,
                                                         Predicate const& pred = Predicate() ) const {
-    	  if (this->comm.size() == 1) {
-    		  return count_1(keys, sorted_input, pred);
-    	  } else {
-    		  return count_p(keys, sorted_input, pred);
-    	  }
 
+    	  ::std::vector<count_result_type > results(keys.size(), 0);
+    	  size_t res = 0;
+        if (this->comm.size() == 1) {
+          res = count_1(keys, results.data(), sorted_input, pred);
+        } else {
+          res = count_p(keys, results.data(), sorted_input, pred);
+        }
+        return results;
       }
+
+      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
+      size_t count(::std::vector<Key>& keys,
+    		  count_result_type * results,
+    		  bool sorted_input = false,
+			Predicate const& pred = Predicate() ) const {
+
+    	  size_t res = 0;
+        if (this->comm.size() == 1) {
+          res = count_1(keys, results, sorted_input, pred);
+        } else {
+          res = count_p(keys, results, sorted_input, pred);
+        }
+        return res;
+      }
+
 
 //      template <typename Predicate = ::bliss::filter::TruePredicate>
 //      ::std::vector<::std::pair<Key, size_type> > count(Predicate const & pred = Predicate()) const {
@@ -1629,18 +1564,16 @@ if (measure_mode == MEASURE_A2A)
        * @param input  vector.  will be permuted.
        */
       template <typename Predicate = ::bliss::filter::TruePredicate>
-      std::vector<mapped_type> find_1(std::vector<Key >& input,
+      size_t find_1(std::vector<Key >& input, mapped_type * results,
     		  mapped_type const & nonexistent = mapped_type(),
     		  bool sorted_input = false,
 			  Predicate const & pred = Predicate()) const {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(find);
 
-        ::std::vector<mapped_type > results;
-
         if (::dsc::empty(input, this->comm)) {
           BL_BENCH_REPORT_MPI_NAMED(find, "base_batched_robinhood_map:find", this->comm);
-          return results;
+          return 0;
         }
 
         // transform once.  bucketing and distribute will read it multiple times.
@@ -1659,37 +1592,23 @@ if (measure_mode == MEASURE_A2A)
 
 
           // local find. memory utilization a potential problem.
-          // do for each src proc one at a time.
-        BL_BENCH_COLLECTIVE_START(find, "reserve", this->comm);
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_resume();
-#endif
-          results.reserve(input.size() );
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_pause();
-#endif
-          BL_BENCH_END(find, "reserve", results.capacity());
-
           BL_BENCH_COLLECTIVE_START(find, "local_find", this->comm);
           {
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_COUNT)
       __itt_resume();
 #endif
-	::fsc::back_emplace_iterator<::std::vector<mapped_type > > emplace_iter(results);
-          	this->c.find(emplace_iter, input.data(), input.data() + input.size(), nonexistent, pred, pred);
+		this->c.find(results, input.data(), input.data() + input.size(), nonexistent, pred, pred);
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_COUNT)
       __itt_pause();
 #endif
           }
-          BL_BENCH_END(find, "local_find", results.size());
+          BL_BENCH_END(find, "local_find", input.size());
 
         BL_BENCH_REPORT_MPI_NAMED(find, "base_hashmap:find", this->comm);
 
-        return results;
+        return input.size();
       }
 
 
@@ -1698,18 +1617,16 @@ if (measure_mode == MEASURE_RESERVE)
        * @param input  vector.  will be permuted.
        */
       template <typename Predicate = ::bliss::filter::TruePredicate>
-      std::vector<mapped_type> find_p(std::vector<Key >& input,
+      size_t find_p(std::vector<Key >& input, mapped_type* results,
     		  mapped_type const & nonexistent = mapped_type(),
     		  bool sorted_input = false,
     		  Predicate const & pred = Predicate()) const {
         // even if count is 0, still need to participate in mpi calls.  if (input.size() == 0) return;
         BL_BENCH_INIT(find);
 
-        std::vector<mapped_type> results;
-
         if (::dsc::empty(input, this->comm)) {
           BL_BENCH_REPORT_MPI_NAMED(find, "hashmap:find", this->comm);
-          return results;
+          return 0;
         }
 
         // alloc buffer
@@ -1739,7 +1656,7 @@ if (measure_mode == MEASURE_RESERVE)
 
   	  	  	int comm_size = this->comm.size();
 
-  	  	  	Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size());
+  	  	  	Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size() + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1814,25 +1731,6 @@ if (measure_mode == MEASURE_RESERVE)
 
 #if defined(OVERLAPPED_COMM) || defined(OVERLAPPED_COMM_BATCH)
 
-              BL_BENCH_COLLECTIVE_START(find, "alloc out", this->comm);
-            // get mapping to proc
-            // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
-  //          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
-  //          BLISS_UNUSED(recv_counts);
-  #ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_RESERVE)
-        __itt_resume();
-  #endif
-
-    		results.resize(input.size());
-
-  #ifdef VTUNE_ANALYSIS
-    if (measure_mode == MEASURE_RESERVE)
-        __itt_pause();
-  #endif
-    	  	  	  BL_BENCH_END(find, "alloc out", input.size());
-
-
   	      BL_BENCH_COLLECTIVE_START(find, "a2av_find", this->comm);
 
   	      ::khmxx::incremental::ialltoallv_and_query_one_to_one(
@@ -1840,32 +1738,13 @@ if (measure_mode == MEASURE_RESERVE)
   	                                                  [this, &pred, &nonexistent](int rank, Key* b, Key* e, mapped_type * out){
   	                                                     this->c.find(out, b, e, nonexistent, pred, pred);
   	                                                  },
-													  results.data(),
+													  results,
   	                                                  this->comm);
 
   	      BL_BENCH_END(find, "a2av_find", this->c.size());
 
 
 #elif defined(OVERLAPPED_COMM_FULLBUFFER)
-
-          BL_BENCH_COLLECTIVE_START(find, "alloc out", this->comm);
-        // get mapping to proc
-        // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
-//          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
-//          BLISS_UNUSED(recv_counts);
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_resume();
-#endif
-
-		results.resize(input.size());
-
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_pause();
-#endif
-	  	  	  BL_BENCH_END(find, "alloc out", input.size());
-
 
 	      BL_BENCH_COLLECTIVE_START(find, "a2av_find_fullbuf", this->comm);
 
@@ -1874,31 +1753,12 @@ if (measure_mode == MEASURE_RESERVE)
 	                                                  [this, &pred, &nonexistent](int rank, Key* b, Key* e, mapped_type * out){
 	                                                     this->c.find(out, b, e, nonexistent, pred, pred);
 	                                                  },
-												  results.data(),
+												  results,
 	                                                  this->comm);
 
 	      BL_BENCH_END(find, "a2av_find_fullbuf", this->c.size());
 
 #elif defined(OVERLAPPED_COMM_2P)
-
-          BL_BENCH_COLLECTIVE_START(find, "alloc out", this->comm);
-        // get mapping to proc
-        // TODO: keep unique only may not be needed - comm speed may be faster than we can compute unique.
-//          auto recv_counts(::dsc::distribute(input, this->key_to_rank, sorted_input, this->comm));
-//          BLISS_UNUSED(recv_counts);
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_resume();
-#endif
-
-		results.resize(input.size());
-
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-    __itt_pause();
-#endif
-	  	  	  BL_BENCH_END(find, "alloc out", input.size());
-
 
 	      BL_BENCH_COLLECTIVE_START(find, "a2av_find_2p", this->comm);
 
@@ -1907,7 +1767,7 @@ if (measure_mode == MEASURE_RESERVE)
 	                                                  [this, &pred, &nonexistent](int rank, Key* b, Key* e, mapped_type * out){
 	                                                     this->c.find(out, b, e, nonexistent, pred, pred);
 	                                                  },
-												  results.data(),
+												  results,
 	                                                  this->comm);
 
 	      BL_BENCH_END(find, "a2av_find_2p", this->c.size());
@@ -1922,8 +1782,8 @@ if (measure_mode == MEASURE_RESERVE)
 #endif
   	  	  	  size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
 
-  	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
-  	          mapped_type* dist_results = ::utils::mem::aligned_alloc<mapped_type>(recv_total);
+  	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total + InternalHash::batch_size);
+  	          mapped_type* dist_results = ::utils::mem::aligned_alloc<mapped_type>(recv_total + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -1981,19 +1841,6 @@ if (measure_mode == MEASURE_RESERVE)
         BL_BENCH_END(find, "clean up", recv_total);
 
     // local find. memory utilization a potential problem.
-    // do for each src proc one at a time.
-  BL_BENCH_COLLECTIVE_START(find, "reserve", this->comm);
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-__itt_resume();
-#endif
-    results.resize(input.size() );                   // TODO:  should estimate coverage.
-#ifdef VTUNE_ANALYSIS
-if (measure_mode == MEASURE_RESERVE)
-__itt_pause();
-#endif
-    BL_BENCH_END(find, "reserve", results.capacity());
-
 
         // send back using the constructed recv count
         BL_BENCH_COLLECTIVE_START(find, "a2a2", this->comm);
@@ -2006,10 +1853,10 @@ if (measure_mode == MEASURE_A2A)
 // this needs to be done.
 #ifdef ENABLE_LZ4_RESULT
   	  	  	  ::khmxx::lz4::distribute_permuted(dist_results, dist_results + recv_total,
-  	  	  			  recv_counts, results.data(), send_counts, this->comm);
+  	  	  			  recv_counts, results, send_counts, this->comm);
 #else
   	  	  	  ::khmxx::distribute_permuted(dist_results, dist_results + recv_total,
-  	  	  			  recv_counts, results.data(), send_counts, this->comm);
+  	  	  			  recv_counts, results, send_counts, this->comm);
 #endif
 
 
@@ -2021,30 +1868,53 @@ if (measure_mode == MEASURE_A2A)
 
 		::utils::mem::aligned_free(dist_results);
 
-        BL_BENCH_END(find, "a2a2", results.size());
+        BL_BENCH_END(find, "a2a2", input.size());
 
 
 #endif // non overlap
 
         BL_BENCH_REPORT_MPI_NAMED(find, "hashmap:find_p", this->comm);
 
-        return results;
+        return input.size();
       }
 
 
 
     public:
+
       template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
       ::std::vector<mapped_type > find(::std::vector<Key>& keys,
     		  mapped_type const & nonexistent = mapped_type(),
     		  bool sorted_input = false,
 			  Predicate const& pred = Predicate() ) const {
+
+    	  ::std::vector<mapped_type > results(keys.size(), 0);
+    	  size_t res = 0;
+
     	  if (this->comm.size() == 1) {
-    		  return find_1(keys, nonexistent, sorted_input, pred);
+    		  res = find_1(keys, results.data(), nonexistent, sorted_input, pred);
     	  } else {
-    		  return find_p(keys, nonexistent, sorted_input, pred);
+    		  res = find_p(keys, results.data(), nonexistent, sorted_input, pred);
     	  }
+
+    	  return results;
       }
+
+      template <bool remove_duplicate = false, class Predicate = ::bliss::filter::TruePredicate>
+      size_t find(::std::vector<Key>& keys, mapped_type * results,
+    		  mapped_type const & nonexistent = mapped_type(),
+    		  bool sorted_input = false,
+			Predicate const& pred = Predicate() ) const {
+
+    	  size_t res = 0;
+        if (this->comm.size() == 1) {
+          res = find_1(keys, results, nonexistent, sorted_input, pred);
+        } else {
+          res = find_p(keys, results, nonexistent, sorted_input, pred);
+        }
+        return res;
+      }
+
 
 #if 0  // TODO: temporarily retired.
       /**
@@ -2338,7 +2208,7 @@ if (measure_mode == MEASURE_A2A)
 
   	  	  	int comm_size = this->comm.size();
 
-  	  	  	Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size());
+  	  	  	Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size() + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -2428,7 +2298,7 @@ if (measure_mode == MEASURE_A2A)
 #elif defined(OVERLAPPED_COMM_BATCH)
 
 
-          BL_BENCH_COLLECTIVE_START(erase, "a2av_erase", this->comm);
+          BL_BENCH_COLLECTIVE_START(erase, "a2av_erase_batch", this->comm);
 
           ::khmxx::incremental::ialltoallv_and_modify_batch(
               input.data(), input.data() + input.size(), send_counts,
@@ -2437,7 +2307,7 @@ if (measure_mode == MEASURE_A2A)
                                                       },
                                                       this->comm);
 
-          BL_BENCH_END(erase, "a2av_erase", this->c.size());
+          BL_BENCH_END(erase, "a2av_erase_batch", this->c.size());
 
 
 
@@ -2481,7 +2351,7 @@ if (measure_mode == MEASURE_A2A)
 #endif
   	  	  	  size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
 
-  	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
+  	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total + InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
   if (measure_mode == MEASURE_RESERVE)
@@ -2815,7 +2685,7 @@ if (measure_mode == MEASURE_RESERVE)
 
 	  	  	int comm_size = this->comm.size();
 
-        Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size());
+        Key* buffer = ::utils::mem::aligned_alloc<Key>(input.size() + Base::InternalHash::batch_size);
 
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_RESERVE)
@@ -2977,7 +2847,7 @@ if (measure_mode == MEASURE_RESERVE)
 #endif
 	  	  	  size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), static_cast<size_t>(0));
 
-	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total);
+	          Key* distributed = ::utils::mem::aligned_alloc<Key>(recv_total + Base::InternalHash::batch_size);
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_RESERVE)
   __itt_pause();

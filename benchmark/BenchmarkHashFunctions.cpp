@@ -275,20 +275,20 @@ BL_BENCH_END(benchmark, "clhash", count);
   }
   BL_BENCH_END(benchmark, "CRC32C1", count);
 
-  BL_BENCH_START(benchmark);
-  {
-#ifdef VTUNE_ANALYSIS
-  if (measure_mode == MEASURE_CRC32C)
-      __itt_resume();
-#endif
-    ::fsc::hash::crc32c<DataStruct<N> > h;
-     benchmark_hash_batch(h, data, out, count);
-#ifdef VTUNE_ANALYSIS
-  if (measure_mode == MEASURE_CRC32C)
-      __itt_pause();
-#endif
-  }
-  BL_BENCH_END(benchmark, "CRC32Cbatch", count);
+//  BL_BENCH_START(benchmark);
+//  {
+//#ifdef VTUNE_ANALYSIS
+//  if (measure_mode == MEASURE_CRC32C)
+//      __itt_resume();
+//#endif
+//    ::fsc::hash::crc32c<DataStruct<N> > h;
+//     benchmark_hash_batch(h, data, out, count);
+//#ifdef VTUNE_ANALYSIS
+//  if (measure_mode == MEASURE_CRC32C)
+//      __itt_pause();
+//#endif
+//  }
+//  BL_BENCH_END(benchmark, "CRC32Cbatch", count);
 #endif
 
 

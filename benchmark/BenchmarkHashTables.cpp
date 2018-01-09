@@ -35,6 +35,8 @@
 #include <exception>
 #include <functional>
 
+#include "robinhood.h"   // from martinus
+
 #if 0
 #include <tommyds/tommyalloc.h>
 #include <tommyds/tommyalloc.c>
@@ -311,6 +313,63 @@ void benchmark_unordered_map(std::string name, std::vector<::std::pair<Kmer, Val
   }
   BL_BENCH_END(map, "count2", result);
 
+
+  BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
+}
+
+
+// the number of bits should be 64
+template <typename Kmer, typename Value>
+void benchmark_classicRH(std::string name, std::vector<::std::pair<Kmer, Value> > const & input,
+		size_t const query_frac,
+		::mxx::comm const & comm) {
+  BL_BENCH_INIT(map);
+
+  std::vector<Kmer> query;
+
+  BL_BENCH_START(map);
+  // no transform involved.
+#if (pStoreHash == STD)
+  RobinHoodHashMap<Value, std::hash<size_t> > map;
+#else
+  RobinHoodHashMap<Value, StoreHash<size_t> > map;
+#endif
+  BL_BENCH_END(map, "reserve", input.size());
+
+  {
+    BL_BENCH_START(map);
+    query.resize(input.size() / query_frac);
+    std::transform(input.begin(), input.begin() + input.size() / query_frac, query.begin(),
+                   [](::std::pair<Kmer, Value> const & x){
+      return x.first;
+    });
+    BL_BENCH_END(map, "generate query", input.size());
+
+    BL_BENCH_START(map);
+    for (size_t i = 0; i < input.size(); ++i) {
+    	map.insert(*(reinterpret_cast<size_t const *>(input[i].first.getData())), input[i].second);
+    }
+    BL_BENCH_END(map, "insert", map.size());
+  }
+
+  BL_BENCH_START(map);
+  size_t result = 0;
+  bool success = false;
+  for (auto q : query) {
+	  map.find(*(reinterpret_cast<size_t const *>(q.getData())), success);
+    if (success)
+      ++result;
+  }
+  BL_BENCH_END(map, "find", result);
+
+  BL_BENCH_START(map);
+  BL_BENCH_END(map, "count", 0);
+
+  BL_BENCH_START(map);
+  BL_BENCH_END(map, "erase", 0);
+
+  BL_BENCH_START(map);
+  BL_BENCH_END(map, "count2", 0);
 
   BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
 }
@@ -1384,6 +1443,7 @@ void benchmark_hashmap(std::string name, std::vector<::std::pair<Kmer, Value> > 
 #define ROBINHOOD_OFFSET2_TYPE 9
 #define ROBINHOOD_PREFETCH_TYPE 8
 #define RADIXSORT_TYPE 10
+#define CLASSIC_ROBINHOOD_TYPE 11
 #define ALL_TYPE 0
 
 #define DNA_TYPE 1
@@ -1413,7 +1473,7 @@ parse_cmdline(int argc, char** argv) {
 	  double max_load = 0.8;
 	  double min_load = 0.35;
 	  uint8_t insert_prefetch = 8;
-	  uint8_t query_prefetch = 16;
+	  uint8_t query_prefetch = 8;
 
 	  std::string filename;
 
@@ -1435,6 +1495,7 @@ parse_cmdline(int argc, char** argv) {
 	  allowed.push_back("google_densehash");
 	  allowed.push_back("kmerind");
 	  allowed.push_back("linearprobe");
+	  allowed.push_back("classic_robinhood");
 	  allowed.push_back("robinhood");
     allowed.push_back("robinhood_prefetch");
 //	  allowed.push_back("robinhood_noncirc");
@@ -1477,8 +1538,8 @@ parse_cmdline(int argc, char** argv) {
 
 	  TCLAP::ValueArg<double> maxLoadArg("","max_load","maximum load factor", false, max_load, "double", cmd);
 	  TCLAP::ValueArg<double> minLoadArg("","min_load","minimum load factor", false, min_load, "double", cmd);
-	  TCLAP::ValueArg<unsigned char> insertPrefetchArg("","insert_prefetch","number of elements to prefetch during insert", false, insert_prefetch, "unsigned char", cmd);
-	  TCLAP::ValueArg<unsigned char> queryPrefetchArg("","query_prefetch","number of elements to prefetch during queries", false, query_prefetch, "unsigned char", cmd);
+	  TCLAP::ValueArg<uint32_t> insertPrefetchArg("","insert_prefetch","number of elements to prefetch during insert", false, insert_prefetch, "uint32_t", cmd);
+	  TCLAP::ValueArg<uint32_t> queryPrefetchArg("","query_prefetch","number of elements to prefetch during queries", false, query_prefetch, "uint32_t", cmd);
 
 	  std::vector<std::string> measure_modes;
 	  measure_modes.push_back("estimate");
@@ -1505,6 +1566,8 @@ parse_cmdline(int argc, char** argv) {
 		  map = KMERIND_TYPE;
 	  } else if (map_type == "linearprobe") {
 		  map = LINEARPROBE_TYPE;
+	  } else if (map_type == "classic_robinhood") {
+		  map = CLASSIC_ROBINHOOD_TYPE;
 	  } else if (map_type == "robinhood") {
 		  map = ROBINHOOD_TYPE;
 	  } else if (map_type == "robinhood_noncirc") {
@@ -1611,7 +1674,7 @@ int main(int argc, char** argv) {
 	  double max_load = 0.8;
 	  double min_load = 0.35;
 	  uint8_t insert_prefetch = 8;
-	  uint8_t query_prefetch = 16;
+	  uint8_t query_prefetch = 8;
 
 	  std::string fname;
 
@@ -1819,6 +1882,45 @@ int main(int argc, char** argv) {
   // --------------- my new hashmap.
   }
 
+  if ((map == CLASSIC_ROBINHOOD_TYPE) || (map == ALL_TYPE))  {
+  //================ my new hashmap Robin hood
+    BL_BENCH_INIT(test);
+
+	  if (dna == DNA_TYPE) {
+		  if (full) {
+			  BL_BENCH_START(test);
+			  benchmark_classicRH("classic_robinhood_Full",
+				  get_input<Kmer, CountType>(fname, count, repeat_rate, canonical),
+				  query_frac, comm);
+			  BL_BENCH_COLLECTIVE_END(test, "classic_robinhood_Full", count, comm);
+		  } else {
+			  BL_BENCH_START(test);
+			  benchmark_classicRH("classic_robinhood_DNA",
+				  get_input<Kmer, CountType>(fname, count, repeat_rate, canonical),
+				  query_frac, comm);
+			  BL_BENCH_COLLECTIVE_END(test, "classic_robinhood_DNA", count, comm);
+		  }
+	  } else if (dna == DNA5_TYPE) {
+		  BL_BENCH_START(test);
+		  benchmark_classicRH("classic_robinhood_DNA5",
+			  get_input<Kmer, CountType>(fname, count, repeat_rate, canonical),
+			  query_frac, comm);
+		  BL_BENCH_COLLECTIVE_END(test, "classic_robinhood_DNA5", count, comm);
+	  } else if (dna == DNA16_TYPE) {
+		  BL_BENCH_START(test);
+		  benchmark_classicRH("classic_robinhood_DNA16",
+			  get_input<Kmer, CountType>(fname, count, repeat_rate, canonical),
+			  query_frac, comm);
+		  BL_BENCH_COLLECTIVE_END(test, "classic_robinhood_DNA16", count, comm);
+	  } else {
+
+		  throw std::invalid_argument("UNSUPPORTED ALPHABET TYPE");
+	  }
+	  BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
+
+  }
+
+
   if ((map == ROBINHOOD_TYPE) || (map == ALL_TYPE))  {
   //================ my new hashmap Robin hood
     BL_BENCH_INIT(test);
@@ -1905,7 +2007,7 @@ int main(int argc, char** argv) {
    }
 
 
-  if ((map == ROBINHOOD_OFFSET_TYPE) || (map == ALL_TYPE))  {
+  if (map == ROBINHOOD_OFFSET_TYPE)  {
     BL_BENCH_INIT(test);
 
 	  //================ my new hashmap offsets

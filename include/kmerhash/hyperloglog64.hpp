@@ -324,7 +324,7 @@ public:
 	}
 
 
-	void swap(hyperloglog64 & other) {
+	void swap(hyperloglog64 && other) {
 		std::swap(registers, other.registers);
 		std::swap(amm, other.amm);
 		std::swap(ignored_msb, other.ignored_msb);
@@ -364,16 +364,17 @@ public:
   template <typename H = Hash, typename TT>
   inline auto update_impl(TT const * vals, size_t const & count, long)
   -> decltype(::std::declval<H>()(::std::declval<TT>()), void()) {
+//	  printf("UPDATE_IMPL:  discard hash val, singleton\n");
     for (size_t i = 0; i < count; ++i) {
       internal_update(this->registers, h(vals[i]) << ignored_msb);
     }
   }
 
   // int as last parameter preferred.  batch mode avaialble
-  template <typename H = Hash, typename HTT = HVT, typename TT>
+  template <typename H = Hash, typename TT>
   inline auto update_impl(TT const * vals, size_t const & count, int)
-  -> decltype(::std::declval<H>()(vals, count, ::std::declval<HTT*>()), void()) {
-
+  -> decltype(::std::declval<H>()(::std::declval<TT const *>(), ::std::declval<size_t>(), ::std::declval<HVT*>()), void()) {
+//	  printf("UPDATE_IMPL:  discard hash val, vector\n");
     assert(((h.batch_size & (h.batch_size - 1)) == 0) && "batch size should be power of 2.");
 
     size_t max = count - (count & (h.batch_size - 1) );
@@ -389,26 +390,28 @@ public:
       }
     }
     // last part, do linearly.
-    for (; i < count; ++i) {
-      internal_update(this->registers, h(vals[i]) << ignored_msb);
+    if (count > max) {
+		h(vals + i, count - max, buf);
+		for (j = 0; j < (count - max); ++j) {
+		  internal_update(this->registers, buf[j] << ignored_msb);
+		}
     }
-
     free(buf);
   }
 
   template <typename TT>
-  inline auto update(TT const * vals, size_t const & count)
-  -> decltype(this->update_impl(vals, count, 0), void()) {
+  inline void update(TT const * vals, size_t const & count) {
     update_impl(vals, count, 0);   // prefer integer as 0 defaults to int.
   }
 
   // ======== update from value, saving the hash values for later use also.
 
 	// if batch mode not present.
-  template <typename H = Hash, typename HTT = HVT, typename TT>
-  inline auto update_impl(TT const * vals, size_t const & count, HTT* hvals, long)
+  template <typename H = Hash, typename TT>
+  inline auto update_impl(TT const * vals, size_t const & count, HVT* hvals, long)
   -> decltype(::std::declval<H>()(::std::declval<TT>()), void()) {
-    HTT hv;
+//	  printf("UPDATE_IMPL:  return hash val, singleton\n");
+    HVT hv;
     for (size_t i = 0; i < count; ++i) {
       hv = h(vals[i]); 
       internal_update(this->registers, hv << ignored_msb);
@@ -417,10 +420,10 @@ public:
   }
 
   // int as last parameter preferred.  batch mode avaialble
-  template <typename H = Hash, typename HTT = HVT, typename TT, typename HT>
-  inline auto update_impl(TT const * vals, size_t const & count, HTT* hvals, int)
-  -> decltype(::std::declval<H>()(vals, count, ::std::declval<HTT*>()), void()) {
-
+  template <typename H = Hash, typename TT>
+  inline auto update_impl(TT const * vals, size_t const & count, HVT* hvals, int)
+  -> decltype(::std::declval<H>()(::std::declval<TT const *>(), ::std::declval<size_t>(), ::std::declval<HVT*>()), void()) {
+//	  printf("UPDATE_IMPL:  return hash val, vector\n");
     assert(((h.batch_size & (h.batch_size - 1)) == 0) && "batch size should be power of 2.");
 
     size_t max = count - (count & (h.batch_size - 1) );
@@ -434,18 +437,15 @@ public:
       }
     }
     // last part, do linearly.
+    h(vals + i, count - max, hvals + i);
     for (; i < count; ++i) {
-      HTT hv = h(vals[i]);
-      internal_update(this->registers, hv << ignored_msb);
-      hvals[i] = hv;
+      internal_update(this->registers, hvals[i] << ignored_msb);
     }
   }
 
 
-  template <typename HTT = HVT, typename TT>
-  inline auto update(TT const * vals, size_t const & count,
-    HVT* hvals)
-  -> decltype(this->update_impl(vals, count, hvals, 0), void()) {
+  template <typename TT>
+  inline void update(TT const * vals, size_t const & count, HVT* hvals) {
     update_impl(vals, count, hvals, 0);   // prefer integer as 0 defaults to int.
   }
 

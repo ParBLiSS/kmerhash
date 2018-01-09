@@ -36,6 +36,8 @@
  *
  *          signature of predicate is bool pred(T&).  if predicate needs to access the local map, it should be done via its constructor.
  *
+ * general: specify OMP_NUM_THREADS,  OMP_PROC_BIND=true, OMP_PLACES=cores
+ * OpenMPI: specify for mpirun --map-by ppr:1:node:pe=64 or ppr:4:socket:pe=16
  */
 
 #ifndef HYBRID_BATCHED_ROBINHOOD_MAP_HPP
@@ -196,7 +198,7 @@ namespace hsc  // hybrid std container
 //      using TransHash = typename MapParams<K>::template StoreTransFuncTemplate<K>;
 
     // own hyperloglog definition.  separate from the local container's.  this estimates using the transformed distribute hash.
-    hyperloglog64<Key, InternalHash, 12> * hlls;
+    std::vector<hyperloglog64<Key, InternalHash, 12> > hlls;
 
 
 	template <typename K>
@@ -234,7 +236,7 @@ namespace hsc  // hybrid std container
                                                                                            ::std::declval<::bliss::filter::TruePredicate>()));
 
     protected:
-      local_container_type * c;
+      std::vector<local_container_type> c;
 
 
       /// local reduction via a copy of local container type (i.e. batched_robinhood_map).
@@ -761,20 +763,26 @@ namespace hsc  // hybrid std container
 
     	  if (_comm.rank() == 0)
     		  printf("rank %d initializing for %d threads\n", _comm.rank(), omp_get_max_threads());
-		c = new local_container_type[omp_get_max_threads()];
-		hlls = new hyperloglog64<Key, InternalHash, 12>[omp_get_max_threads()]; 
+//		c = new local_container_type[omp_get_max_threads()];
+//		hlls = new hyperloglog64<Key, InternalHash, 12>[omp_get_max_threads()];
+  	  c.resize(omp_get_max_threads());
+  	  hlls.resize(omp_get_max_threads());
+
  //   	  this->c.set_ignored_msb(ceilLog2(_comm.size()));   // NOTE THAT THIS SHOULD MATCH KEY_TO_RANK use of bits in hash table.
 
 	#pragma omp parallel
 	{
+			int tid = omp_get_thread_num();
+			c[tid].swap(local_container_type());  // get thread local allocation
+			hlls[tid].swap(hyperloglog64<Key, InternalHash, 12>());
 	}
       }
 
 
 
       virtual ~batched_robinhood_map_base() {
-	delete [] c;
-	delete [] hlls;
+//	delete [] c;
+//	delete [] hlls;
 	};
 
 
@@ -3249,8 +3257,9 @@ public:
       size_t insert(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
 
         auto insert_key_functor = [this](int tid, Key * it, Key * et, bool est = true){
+#ifdef MT_DEBUG
            size_t before = this->c[tid].size();
-
+#endif
             if (estimate)
                 this->c[tid].insert(it, et, T(1));
             else
@@ -3260,8 +3269,9 @@ public:
 #endif
         };
         auto insert_key_no_est_functor = [this](int tid, Key * it, Key * et){
+#ifdef MT_DEBUG
           size_t before = this->c[tid].size();
-
+#endif
             this->c[tid].insert_no_estimate(it, et, T(1));
 #ifdef MT_DEBUG
             printf("rank %d of %d thread %d inserting %ld, before %ld, after %ld\n", this->comm.rank(), this->comm.size(), tid, std::distance(it, et), before, this->c[tid].size());

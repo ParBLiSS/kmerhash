@@ -2524,7 +2524,7 @@ public:
 //        insert_with_hint_no_resize(input.data(), hash_vals.data(), input.size());
 //        insert_with_hint_no_resize(sh_input.data(), sh_hash_val.data(), sh_input.size());
         // finally, update the hyperloglog estimator.  just swap.
-        hll.swap(hll_local);
+        hll.swap(std::move(hll_local));
         free(hash_vals);
 
     #if defined(REPROBE_STAT)

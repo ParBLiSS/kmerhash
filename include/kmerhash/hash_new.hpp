@@ -715,16 +715,18 @@ public:
 
 
   TransformedHash & operator=(TransformedHash const & other) {
-h = other.h;
-trans = other.trans;
-posttrans = other.posttrans;	
+	h = other.h;
+	trans = other.trans;
+	posttrans = other.posttrans;
+	return *this;
   }
   
 
   TransformedHash & operator=(TransformedHash && other) {
-h = std::move(other.h);
-trans = std::move(other.trans);
-posttrans = std::move(other.posttrans);	
+	h = std::move(other.h);
+	trans = std::move(other.trans);
+	posttrans = std::move(other.posttrans);
+	return *this;
   }
   
 
