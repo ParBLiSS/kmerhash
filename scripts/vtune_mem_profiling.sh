@@ -26,3 +26,7 @@ OFFCORE_RESPONSE:request=ALL_REQUESTS:response=LLC_MISS.LOCAL_DRAM \
 amplxe-cl -report summary -r ${1}.vtune -report-output ${1}.sum.log
 amplxe-cl -report hw-events -r ${1}.vtune -report-output ${1}.hw.log
 amplxe-cl -report top-down -r ${1}.vtune -report-output ${1}.top.log
+
+amplxe-cl -collect general-exploration -knob collect-memory-bandwidth=true -r ${1}.bw.vtune -- ${@:2} > ${1}.bw.raw.log
+
+amplxe-cl -report summary -r ${1}.bw.vtune -report-output ${1}.bw.log
