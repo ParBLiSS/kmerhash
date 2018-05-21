@@ -138,6 +138,9 @@ public:
   using result_type = uint64_t;
   using argument_type = T;
 
+
+  identity (uint32_t const &_seed = 43) {};
+
   /// operator to compute hash value
   inline uint64_t operator()(const T &key) const
   {

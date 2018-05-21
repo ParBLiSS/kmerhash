@@ -1051,7 +1051,7 @@ public:
 //				<< " prev capacity=" << capacity()
 //				<< " new capacity=" << _newNumBuckets << std::endl;
 		//::std::cout << "key count " << totalKeyCount << " elem size " << sizeof(HashElement) << std::endl;
-        Key *keyArray = (Key *)_mm_malloc((totalKeyCount + PFD) * sizeof(Key), 64);
+        std::pair<Key, V> *keyArray = (std::pair<Key, V> *)_mm_malloc((totalKeyCount + PFD) * sizeof(std::pair<Key, V>), 64);
 		//printf("CURR numBuckets = %u, numBins = %d, binSize = %d, overflowBufSize = %d, sortBufSize = %d, binShift = %d\n",
 		//        numBuckets, numBins, binSize, overflowBufSize, sortBufSize, binShift);
 
@@ -1063,13 +1063,15 @@ public:
 			int y = std::min(count, binSize - 1);
 			for(j = 0; j < y; j++)
 			{
-				keyArray[elemCount++] = hashTable[i * binSize + j].key;
+				keyArray[elemCount++].first = hashTable[i * binSize + j].key;
+				keyArray[elemCount++].second = hashTable[i * binSize + j].val;
 			}
             int32_t overflowBufId;
             overflowBufId = hashTable[i * binSize + binSize - 1].bucketId;
             for(; j < count; j++)
             {
-                keyArray[elemCount++] = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].key;
+                keyArray[elemCount++].first = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].key;
+                keyArray[elemCount++].second = overflowBuf[overflowBufId * binSize + j - (binSize - 1)].val;
             }
 		}
 #ifndef NDEBUG
@@ -1180,7 +1182,8 @@ public:
 	  }
 
         // return fail or success
-        bool resize_insert(Key * keyArray, int32_t numKeys)
+        template <typename T>
+        bool resize_insert(T * keyArray, int32_t numKeys)
         {
               int32_t i;
     // insert the elements again
@@ -1209,9 +1212,10 @@ public:
 			for(j = i; j < last; j++)
 			{
 				HashElement he;
-				he.key = keyArray[j];
-				he.val = 1;
-				he.bucketId = bucketIdArray[j & hash_mask];
+				// he.key = keyArray[j];
+				// he.val = 1;
+                init_hash_element(he, keyArray[j]);
+                he.bucketId = bucketIdArray[j & hash_mask];
 				int64_t binId = he.bucketId >> binShift;
 				int count = countArray[binId];
 				if(count < binSize)
@@ -1302,6 +1306,20 @@ public:
         }
         coherence = COHERENT;
     }
+
+    inline void init_hash_element(HashElement & he, Key const & x) {
+        he.key = x;
+        he.val = 1;
+    }
+    inline void init_hash_element(HashElement & he, std::pair<Key, V> const & x) {
+        he.key = x.first;
+        he.val = x.second;
+    }
+    inline void init_hash_element(HashElement & he, std::pair<const Key, V> const & x) {
+        he.key = x.first;
+        he.val = x.second;
+    }
+
     //uint64_t hash(uint64_t x)
     //{
     //    uint64_t y[2];
@@ -1309,7 +1327,8 @@ public:
     //    return y[0];
     //}
 	/// return number of successful inserts
-    size_t insert_impl(Key *keyArray, size_t numKeys)
+    template < typename T > 
+    size_t insert_impl(T *keyArray, size_t numKeys)
     {
         if((coherence != COHERENT) && (coherence != INSERT))
         {
@@ -1352,8 +1371,9 @@ public:
 			for(j = i; j < last; j++)
 			{
 				HashElement he;
-				he.key = keyArray[j];
-				he.val = 1;
+				// he.key = keyArray[j];
+				// he.val = 1;
+                init_hash_element(he, keyArray[j]);
 				he.bucketId = bucketIdArray[j & hash_mask];
 				int64_t binId = he.bucketId >> binShift;
 				int count = countArray[binId];
@@ -1424,8 +1444,9 @@ public:
         return numKeys;
     }
 
-
-    size_t insert(Key *keyArray, size_t numKeys) {
+    // T may be a key-value pair
+    template <typename T>
+    size_t insert(T *keyArray, size_t numKeys) {
       size_t inserted = 0;
       bool resize_succeeded = true;
 
@@ -1453,8 +1474,8 @@ public:
       return inserted;
     }
 
-
-    size_t estimate_and_insert(Key *keyArray, size_t numKeys) {
+    template <typename T>
+    size_t estimate_and_insert(T *keyArray, size_t numKeys) {
 
       // local hash computation and hll update.
         hash_val_type* hvals = (hash_val_type *)_mm_malloc((numKeys + PFD) * sizeof(hash_val_type), 64);
@@ -1475,8 +1496,8 @@ public:
     }
 
      // return number of successful inserts.
-	template <class HashType>
-    size_t insert_impl(Key *keyArray, HashType *hashArray, size_t numKeys)
+	template <typename T, class HashType>
+    size_t insert_impl(T *keyArray, HashType *hashArray, size_t numKeys)
     {
         if((coherence != COHERENT) && (coherence != INSERT))
         {
@@ -1498,8 +1519,9 @@ public:
         for(i = 0; i < (numKeys); i++)
         {
             HashElement he;
-            he.key = keyArray[i];
-            he.val = 1;
+            // he.key = keyArray[i];
+            // he.val = 1;
+            init_hash_element(he, keyArray[i]);
             he.bucketId = bucketIdArray[i & 31];
             int64_t binId = he.bucketId >> binShift;
             int count = countArray[binId];
@@ -1572,8 +1594,8 @@ public:
         return numKeys;
     }
 
-  template <class HashType>
-    size_t insert(Key *keyArray, HashType *hashArray, size_t numKeys) {
+  template <class T, class HashType>
+    size_t insert(T *keyArray, HashType *hashArray, size_t numKeys) {
       size_t inserted = 0;
       bool resize_succeeded = true;
 
