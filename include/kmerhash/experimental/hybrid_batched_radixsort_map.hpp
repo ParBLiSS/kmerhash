@@ -145,7 +145,7 @@ namespace hsc  // hybrid std container
    * @tparam Alloc  default to ::std::allocator< ::std::pair<const Key, T> >    allocator for local storage.
    */
   template<typename Key, typename T,
-  template <typename, typename, template <typename> class, template <typename> class...> class Container,
+  template <typename, typename, template <typename> class, template <typename> class, typename> class Container,
   template <typename> class MapParams,
   class Alloc = ::std::allocator< ::std::pair<const Key, T> >,
 	typename Reducer = ::fsc::DiscardReducer
@@ -218,7 +218,7 @@ namespace hsc  // hybrid std container
     	// NOTE: if there is a hyperloglog estimator in local container, it is usign the transformed storage hash.
       using local_container_type = Container<Key, T,
     		  StoreTransHash,
-    		  StoreTransEqual>;
+    		  StoreTransEqual, Reducer>;
 
       // std::batched_radixsort_multimap public members.
       using key_type              = typename local_container_type::key_type;

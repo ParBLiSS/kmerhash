@@ -43,7 +43,8 @@ namespace fsc {
 */
 
 template <class Key, class V, template <typename> class Hash = ::std::hash,
-          template <typename> class Equal = ::std::equal_to
+          template <typename> class Equal = ::std::equal_to,
+          	typename Reducer = ::std::plus<V>
          >
 class hashmap_radixsort {
 
@@ -308,7 +309,137 @@ public:
 	using hash_val_type = typename InternalHash::HASH_VAL_TYPE;
     InternalHash hash_mod2; 
 
+    Reducer reduc;
 
+    template <typename R = Reducer, typename VV = V,
+        typename std::enable_if<!::std::is_same<R, std::plus<VV> >::value, int>::type = 0>
+    int32_t radixSort(HashElement *A,
+                  int32_t size)
+    {
+        HashElement *sortBuf = this->sortBuf;
+        uint16_t *countBuf = this->countSortBuf;
+        //int32_t shift = this->binShift;
+        int32_t bufSize = this->sortBufSize;
+        //int32_t binSize = this->binSize;
+#if 1
+        if(size <= 1) return size;
+        int32_t mask = bufSize - 1;
+        memset(countBuf, 0, bufSize * sizeof(uint16_t));
+        int i;
+        for(i = 0; i < size; i++)
+        {
+            HashElement he = A[i];
+            uint32_t id = he.bucketId & mask;
+            //printf("%d] bucketId = %d, id = %d\n", i, he.bucketId, id);
+            countBuf[id]++;
+        }
+        int cumulSum = 0;
+        for(i = 0; i < bufSize; i++)
+        {
+            int32_t c = countBuf[i];
+            countBuf[i] = cumulSum;
+            //printf("%d] count = %d, cumulSum = %d\n", i, c, cumulSum);
+            cumulSum += c;
+        }
+
+        for(i = 0; i < size; i++)
+        {
+            HashElement he = A[i];
+            uint32_t id = he.bucketId & mask;
+            int32_t pos = countBuf[id];
+            // printf("%d] bucketId = %u, id = %d, pos = %d, sortBuf size = %d, numBuckets %u, numBins %d, binSize %d\n", i, he.bucketId, id, pos, bufSize, numBuckets, numBins, binSize);
+            sortBuf[pos] = he;
+            countBuf[id]++;
+        }
+
+#ifndef NDEBUG
+        for(i = 1; i < size; i++)
+        {
+            if(sortBuf[i].bucketId < sortBuf[i - 1].bucketId)
+            {
+                printf("ERROR! %d] %u, %u\n", i, sortBuf[i - 1].bucketId, sortBuf[i].bucketId);
+                exit(0);
+            }
+        }
+#endif
+
+        uint32_t curBid = sortBuf[0].bucketId;
+        uint32_t curStart = 0;
+        A[0] = sortBuf[0];
+        int32_t count = 1;
+        for(i = 1; i < size; i++)
+        {
+            uint32_t bid = sortBuf[i].bucketId;
+            Key key = sortBuf[i].key;
+            if(bid == curBid)
+            {
+                int32_t j;
+                for(j = curStart; j < count; j++)
+                {
+                    if(eq(key, A[j].key))
+                    {
+//                        A[j].val++;
+                        A[j].val = reduc(A[j].val, sortBuf[i].val);
+                        break;
+                    }
+                }
+                if(j == count)
+                {
+                    A[count] = sortBuf[i];
+                    count++;
+                }
+            }
+            else
+            {
+                A[count] = sortBuf[i];
+                curBid = bid;
+                curStart = count;
+                count++;
+            }
+
+        }
+        return count;
+#else
+        if(size <= 1) return size;
+        int32_t mask = bufSize - 1;
+
+        memset(countBuf, 0, bufSize * sizeof(uint8_t));
+        int i, j;
+        for(i = 0; i < size; i++)
+        {
+            HashElement he = A[i];
+            uint32_t id = he.bucketId & mask;
+            int32_t count = countBuf[id];
+            for(j = 0; j < count; j++)
+            {
+                HashElement he2 = sortBuf[id * bucketSize + j];
+                if(he2.key == he.key)
+                {
+                    sortBuf[id * bucketSize + j].val++;
+                    break;
+                }
+            }
+            if(j == count)
+            {
+                sortBuf[id * bucketSize + count] = he;
+                countBuf[id]++;
+            }
+        }
+
+        int count = 0;
+        for(i = 0; i < bufSize; i++)
+        {
+            int c = countBuf[i];
+            for(j = 0; j < c; j++)
+                A[count++] = sortBuf[i * bucketSize + j];
+        }
+        return count;
+#endif
+    }
+
+
+    template <typename R = Reducer, typename VV = V,
+        typename std::enable_if<::std::is_same<R, std::plus<VV> >::value, int>::type = 0>
     int32_t radixSort(HashElement *A,
                   int32_t size)
     {
@@ -432,6 +563,109 @@ public:
 #endif
     }
 
+    template <typename R = Reducer, typename VV = V,
+       typename std::enable_if<!::std::is_same<R, std::plus<VV> >::value, int>::type = 0>
+    int32_t merge(HashElement *A, int32_t sizeA, HashElement *B, int32_t sizeB)
+    {
+        //printf("sizeA = %d, sizeB = %d\n", sizeA, sizeB);
+        int32_t pA, pB;
+
+        pA = pB = 0;
+
+        int32_t count = 0;
+
+        while((pA < sizeA) && (pB < sizeB))
+        {
+            uint32_t bidA = A[pA].bucketId;
+            uint32_t bidB = B[pB].bucketId;
+            //printf("pA = %d, pB = %d, bidA = %d, bidB = %d\n", pA, pB, bidA, bidB);
+            if(bidA <= bidB)
+            {
+                sortBuf[count] = A[pA];
+                pA++;
+                count++;
+            }
+            else
+            {
+                sortBuf[count] = B[pB];
+                pB++;
+                count++;
+            }
+        }
+        while(pA < sizeA)
+        {
+            sortBuf[count] = A[pA];
+            pA++;
+            count++;
+        }
+        while(pB < sizeB)
+        {
+            sortBuf[count] = B[pB];
+            pB++;
+            count++;
+        }
+
+        //printf("count = %d, pA = %d, pB = %d\n", count, pA, pB);
+        int32_t i;
+        uint32_t curBid = sortBuf[0].bucketId;
+        uint32_t curStart = 0;
+        int32_t size = count;
+        count = 1;
+        HashElement *newBuf = (HashElement *)_mm_malloc(size * sizeof(HashElement), 64);
+        newBuf[0] = sortBuf[0];
+        for(i = 1; i < size; i++)
+        {
+            uint32_t bid = sortBuf[i].bucketId;
+            Key key = sortBuf[i].key;
+            if(bid == curBid)
+            {
+                int32_t j;
+                for(j = curStart; j < count; j++)
+                {
+                    if(eq(key, newBuf[j].key))
+                    {
+//                        newBuf[j].val++;
+                        newBuf[j].val = reduc(newBuf[j].val, sortBuf[i].val);
+                        break;
+                    }
+                }
+                if(j == count)
+                {
+                    newBuf[count] = sortBuf[i];
+                    count++;
+                }
+            }
+            else
+            {
+                newBuf[count] = sortBuf[i];
+                curBid = bid;
+                curStart = count;
+                count++;
+            }
+
+        }
+#ifndef NDEBUG
+        for(i = 1; i < count; i++)
+        {
+            if(newBuf[i].bucketId < newBuf[i - 1].bucketId)
+            {
+                printf("ERROR! %d] %u, %u\n", i, newBuf[i - 1].bucketId, newBuf[i].bucketId);
+                exit(0);
+            }
+        }
+#endif
+        for(i = 0; i < sizeA; i++)
+            A[i] = newBuf[i];
+
+        for(; i < count; i++)
+            B[i - sizeA] = newBuf[i];
+
+		_mm_free(newBuf);
+        return count;
+    }
+
+    template <typename R = Reducer, typename VV = V,
+        typename std::enable_if<::std::is_same<R, std::plus<VV> >::value, int>::type = 0>
     int32_t merge(HashElement *A, int32_t sizeA, HashElement *B, int32_t sizeB)
     {
         //printf("sizeA = %d, sizeB = %d\n", sizeA, sizeB);
@@ -2010,8 +2244,8 @@ public:
 	}
 };
 template <class Key, class V, template <typename> class Hash,
-          template <typename> class Equal>
-constexpr size_t hashmap_radixsort<Key, V, Hash, Equal>::PFD;
+          template <typename> class Equal, typename Reduc>
+constexpr size_t hashmap_radixsort<Key, V, Hash, Equal, Reduc>::PFD;
 
 
 }  // namespace fsc
