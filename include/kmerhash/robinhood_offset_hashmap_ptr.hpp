@@ -1671,7 +1671,7 @@ protected:
 #endif
 		if (input_size == 0) return 0;
 
-		bucket_id_type bid1, bid;
+		bucket_id_type bid; //bid1,
 
 		size_t ii;
 
