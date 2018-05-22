@@ -100,6 +100,7 @@ static int measure_mode = MEASURE_DISABLED;
 #define MURMUR32 25
 #define MURMUR32sse 26
 #define MURMUR32avx 27
+#define MURMUR32FINALIZERavx 20
 #define MURMUR64avx 28
 #define CRC32C 29
 #define CLHASH 30
@@ -118,8 +119,13 @@ static int measure_mode = MEASURE_DISABLED;
 
 //================= define types - changeable here...
 
-using KeyType = uint32_t;
-using ValType = uint32_t;
+#if (pBits == 64)
+    using KeyType = uint64_t;
+    using ValType = uint32_t;
+#else
+    using KeyType = uint32_t;
+    using ValType = uint32_t;
+#endif
 
 //============== MAP properties
 template <typename KM>
@@ -158,6 +164,9 @@ using DistHash = ::fsc::hash::murmur3sse32<KM>;
 #elif (pDistHash == MURMUR32avx)
 template <typename KM>
 using DistHash = ::fsc::hash::murmur3avx32<KM>;
+#elif (pDistHash == MURMUR32FINALIZERavx)
+template <typename KM>
+using DistHash = ::fsc::hash::murmur3finalizer_avx32<KM>;
 #elif (pDistHash == MURMUR64avx)
 template <typename KM>
 using DistHash = ::fsc::hash::murmur3avx64<KM>;
@@ -196,6 +205,9 @@ using StoreHash = ::fsc::hash::murmur3sse32<KM>;
 #elif (pStoreHash == MURMUR32avx)
 template <typename KM>
 using StoreHash = ::fsc::hash::murmur3avx32<KM>;
+#elif (pStoreHash == MURMUR32FINALIZERavx)
+template <typename KM>
+using StoreHash = ::fsc::hash::murmur3finalizer_avx32<KM>;
 #elif (pStoreHash == MURMUR64avx)
 template <typename KM>
 using StoreHash = ::fsc::hash::murmur3avx64<KM>;
@@ -973,9 +985,9 @@ if (hybrid) {
     static_assert(false, "UNSUPPORTED REDUCTION TYPE");
 #endif // pINDEX
 
-} else {
+} else {  // not hybrid
     // now run the experiments.
-#if (pDistHash != MURMUR32sse) && (pDistHash != MURMUR32avx) && (pDistHash != MURMUR64avx) && (pStoreHash != MURMUR32sse) && (pStoreHash != MURMUR32avx) && (pStoreHash != MURMUR64avx)
+#if (pDistHash != MURMUR32sse) && (pDistHash != MURMUR32avx) && (pDistHash != MURMUR32FINALIZERavx) && (pDistHash != MURMUR64avx) && (pStoreHash != MURMUR32sse) && (pStoreHash != MURMUR32avx) && (pStoreHash != MURMUR32FINALIZERavx) && (pStoreHash != MURMUR64avx)
 #if (pINDEX == COUNT) // map
     benchmark<::dsc::counting_unordered_map<KeyType, ValType, MapParams>, UNORDERED>(input, query, "std::unordered_map_count", max_load, min_load, insert_prefetch, query_prefetch, comm);
     benchmark<::dsc::counting_densehash_map<KeyType, ValType, MapParams, special_keys<KeyType>>, DENSEHASH>(input, query, "google::densehash_count", max_load, min_load, insert_prefetch, query_prefetch, comm);
@@ -1007,7 +1019,7 @@ if (hybrid) {
     static_assert(false, "UNSUPPORTED REDUCTION TYPE");
 #endif // pINDEX
 
-}
+} // done hybrid
 
     // mpi cleanup is automatic
     comm.barrier();

@@ -97,6 +97,9 @@
 #if defined(__AVX2__)
 #include "murmurhash3_32_avx.hpp"
 #include "murmurhash3_64_avx.hpp"
+#include "murmurhash3finalizer_32_avx.hpp"
+// no 64 bit finalizer because no mullo for 64 bit.
+
 
 #ifndef INCLUDE_CLHASH_H_
 #include <clhash/src/clhash.c>
