@@ -132,25 +132,24 @@ function(add_dist_counter_target prefix format k map disthash storehash extra ex
 endfunction(add_dist_counter_target)
 
 
-function(add_distht_target prefix map disthash storehash reducer extra extra2 group)
+function(add_distht_target prefix reducer disthash storehash extra extra2 group)
 
-	if (NOT TARGET ${prefix}-${map}-${reducer}-dtIDEN-dh${disthash}-sh${storehash})
-      add_executable(${prefix}-${map}-${reducer}-dtIDEN-dh${disthash}-sh${storehash} BenchmarkDistHashTables.cpp)      
-      SET_TARGET_PROPERTIES(${prefix}-${map}-${reducer}-dtIDEN-dh${disthash}-sh${storehash}
+	if (NOT TARGET ${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash})
+      add_executable(${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash} BenchmarkDistHashTables.cpp)      
+      SET_TARGET_PROPERTIES(${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash}
          PROPERTIES COMPILE_FLAGS 
-         "-DpMAP=${map} -DpINDEX=${reducer} -DpDistTrans=IDEN -DpDistHash=${disthash} -DpStoreHash=${storehash} -D${extra2} -D${extra2}")
-      target_link_libraries(${prefix}-${map}-${reducer}-dtIDEN-dh${disthash}-sh${storehash}
+         "-DpINDEX=${reducer} -DpDistTrans=IDEN -DpDistHash=${disthash} -DpStoreHash=${storehash} -D${extra} -D${extra2}")
+      target_link_libraries(${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash}
        ${EXTRA_LIBS})
        
 		if (ENABLE_VTUNE_PROFILING)
-			target_link_libraries(${prefix}-${map}-${reducer}-dtIDEN-dh${disthash}-sh${storehash} ittnotify dl)
+			target_link_libraries(${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash} ittnotify dl)
 		endif (ENABLE_VTUNE_PROFILING)
 		
-		#cotire(${prefix}-${map}-${reducer}-dtIDEN-dh${disthash}-sh${storehash})
-	endif(NOT TARGET ${prefix}-${map}-${reducer}-dtIDEN-dh${disthash}-sh${storehash})
+		#cotire(${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash})
+	endif(NOT TARGET ${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash})
 	
-	
-	add_dependencies(${group} ${prefix}-${map}-${reducer}-dtIDEN-dh${disthash}-sh${storehash})
+	add_dependencies(${group} ${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash})
 	
 endfunction(add_distht_target)
 
@@ -367,38 +366,12 @@ endforeach(hash)
 
 # primitive type performance
 #k scalability
-foreach(map UNORDERED DENSEHASH ROBINHOOD BROBINHOOD MTROBINHOOD)
-	foreach(index COUNT FIRST LAST)
-		foreach(hash IDEN MURMUR32 CRC32C)  #  this is not using overlapped IO, so can use MURMUR32avx.
-			add_distht_target(benchmarkHT ${map} ${hash} ${hash} ${index} KH_DUMMY ENABLE_PREFETCH distht_benchmarks)
-			add_distht_target(overlapHT ${map} ${hash} ${hash} ${index} OVERLAPPED_COMM ENABLE_PREFETCH distht_benchmarks)
-		endforeach(hash)
-	endforeach(index)
-endforeach(map)
-foreach(map BROBINHOOD MTROBINHOOD)
-	foreach(index COUNT FIRST LAST)
-		foreach(hash MURMUR32avx)  #  this is not using overlapped IO, so can use MURMUR32avx.
-			add_distht_target(benchmarkHT ${map} ${hash} ${hash} ${index} KH_DUMMY ENABLE_PREFETCH distht_benchmarks)
-			add_distht_target(overlapHT ${map} ${hash} ${hash} ${index} OVERLAPPED_COMM ENABLE_PREFETCH distht_benchmarks)
-		endforeach(hash)
-	endforeach(index)
-endforeach(map)
-foreach(map RADIXSORT MTRADIXSORT)
-	foreach(index COUNT FIRST)
-		foreach(hash IDEN MURMUR32 CRC32C)  #  this is not using overlapped IO, so can use MURMUR32avx.
-			add_distht_target(benchmarkHT ${map} ${hash} ${hash} ${index} KH_DUMMY ENABLE_PREFETCH distht_benchmarks)
-			add_distht_target(overlapHT ${map} ${hash} ${hash} ${index} OVERLAPPED_COMM ENABLE_PREFETCH distht_benchmarks)
-		endforeach(hash)
-	endforeach(index)
-endforeach(map)
-foreach(map RADIXSORT MTRADIXSORT)
-	foreach(index COUNT FIRST)
-		foreach(hash MURMUR32avx)  #  this is not using overlapped IO, so can use MURMUR32avx.
-			add_distht_target(benchmarkHT ${map} ${hash} ${hash} ${index} KH_DUMMY ENABLE_PREFETCH distht_benchmarks)
-			add_distht_target(overlapHT ${map} ${hash} ${hash} ${index} OVERLAPPED_COMM ENABLE_PREFETCH distht_benchmarks)
-		endforeach(hash)
-	endforeach(index)
-endforeach(map)
+foreach(index COUNT FIRST LAST)
+	foreach(hash IDEN MURMUR32 CRC32C MURMUR32avx)  #  this is not using overlapped IO, so can use MURMUR32avx.
+		add_distht_target(benchmarkHT ${index} ${hash} ${hash} KH_DUMMY ENABLE_PREFETCH distht_benchmarks)
+		add_distht_target(overlapHT ${index} ${hash} ${hash} OVERLAPPED_COMM ENABLE_PREFETCH distht_benchmarks)
+	endforeach(hash)
+endforeach(index)
 
 # EXECUTABLES
 include_directories("${EXT_PROJECTS_DIR}/martinus/src")
