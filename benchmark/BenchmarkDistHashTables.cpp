@@ -754,6 +754,8 @@ int main(int argc, char **argv)
     float repeats = 8.0;
     float missing_frac = 0.0;
 
+    bool hybrid = false;
+
     // Wrap everything in a try block.  Do this every time,
     // because exceptions will be thrown for problems.
     try
@@ -777,7 +779,7 @@ int main(int argc, char **argv)
         //    TCLAP::ValueArg<std::string> queryArg("Q", "query", "FASTQ file path for query. default to same file as index file", false, "", "string", cmd);
 
         // TCLAP::SwitchArg balanceArg("b", "balance-input", "balance the input", cmd, balance_input);
-
+        TCLAP::SwitchArg hybridArg("", "hybrid", "OMP MPI hybrid hash tables", cmd, hybrid);
         TCLAP::ValueArg<float> missingArg("",
                                           "missing-frac", "fraction of query keys not in table. default=0.0 (all in)",
                                           false, missing_frac, "float", cmd);
@@ -813,6 +815,7 @@ int main(int argc, char **argv)
         repeats = repeatArg.getValue();
 
         // balance_input = balanceArg.getValue();
+        hybrid = hybridArg.getValue();
 
         missing_frac = missingArg.getValue();
 
@@ -954,7 +957,25 @@ int main(int argc, char **argv)
 
     BL_BENCH_REPORT_MPI_NAMED(data, "gen_data", comm);
 
+if (hybrid) {
+#if (pINDEX == COUNT) // map
+    benchmark<::hsc::counting_batched_robinhood_map<KeyType, ValType, MapParams>, MTROBINHOOD>(input, query, "hybrid_robinhood_count", max_load, min_load, insert_prefetch, query_prefetch, comm);
+    benchmark<::hsc::counting_batched_radixsort_map<KeyType, ValType, MapParams>, MTRADIXSORT>(input, query, "hybrid_radixsort_count", max_load, min_load, insert_prefetch, query_prefetch, comm);
+#elif (pINDEX == FIRST)
+    using REDUC = ::fsc::DiscardReducer;
+    benchmark<::hsc::reduction_batched_robinhood_map<KeyType, ValType, MapParams, REDUC>, MTROBINHOOD>(input, query, "hybrid_robinhood_first", max_load, min_load, insert_prefetch, query_prefetch, comm);
+    benchmark<::hsc::reduction_batched_radixsort_map<KeyType, ValType, MapParams, REDUC>, MTRADIXSORT>(input, query, "hybrid_radixsort_first", max_load, min_load, insert_prefetch, query_prefetch, comm);
+#elif (pINDEX == LAST)
+    using REDUC = ::fsc::ReplaceReducer;
+    benchmark<::hsc::reduction_batched_robinhood_map<KeyType, ValType, MapParams, REDUC>, MTROBINHOOD>(input, query, "hybrid_robinhood_last", max_load, min_load, insert_prefetch, query_prefetch, comm);
+    benchmark<::hsc::reduction_batched_radixsort_map<KeyType, ValType, MapParams, REDUC>, MTRADIXSORT>(input, query, "hybrid_radixsort_last", max_load, min_load, insert_prefetch, query_prefetch, comm);
+#else
+    static_assert(false, "UNSUPPORTED REDUCTION TYPE");
+#endif // pINDEX
+
+} else {
     // now run the experiments.
+#if (pDistHash != MURMUR32sse) && (pDistHash != MURMUR32avx) && (pDistHash != MURMUR64avx) && (pStoreHash != MURMUR32sse) && (pStoreHash != MURMUR32avx) && (pStoreHash != MURMUR64avx)
 #if (pINDEX == COUNT) // map
     benchmark<::dsc::counting_unordered_map<KeyType, ValType, MapParams>, UNORDERED>(input, query, "std::unordered_map_count", max_load, min_load, insert_prefetch, query_prefetch, comm);
     benchmark<::dsc::counting_densehash_map<KeyType, ValType, MapParams, special_keys<KeyType>>, DENSEHASH>(input, query, "google::densehash_count", max_load, min_load, insert_prefetch, query_prefetch, comm);
@@ -969,29 +990,24 @@ int main(int argc, char **argv)
 #else
     static_assert(false, "UNSUPPORTED REDUCTION TYPE");
 #endif // pINDEX
+#endif // pDistHash and pStoreHash
 
-#if (pDistHash == MURMUR32sse) || (pDistHash == MURMUR32avx) || (pDistHash == MURMUR64avx) || (pStoreHash == MURMUR32sse) || (pStoreHash == MURMUR32avx) || (pStoreHash == MURMUR64avx)
 #if (pINDEX == COUNT) // map
     benchmark<::dsc::counting_batched_robinhood_map<KeyType, ValType, MapParams>, BROBINHOOD>(input, query, "robinhood_count", max_load, min_load, insert_prefetch, query_prefetch, comm);
     benchmark<::dsc::counting_batched_radixsort_map<KeyType, ValType, MapParams>, RADIXSORT>(input, query, "radixsort_count", max_load, min_load, insert_prefetch, query_prefetch, comm);
-    benchmark<::hsc::counting_batched_robinhood_map<KeyType, ValType, MapParams>, MTROBINHOOD>(input, query, "hybrid_robinhood_count", max_load, min_load, insert_prefetch, query_prefetch, comm);
-    benchmark<::hsc::counting_batched_radixsort_map<KeyType, ValType, MapParams>, MTRADIXSORT>(input, query, "hybrid_radixsort_count", max_load, min_load, insert_prefetch, query_prefetch, comm);
 #elif (pINDEX == FIRST)
     using REDUC = ::fsc::DiscardReducer;
     benchmark<::dsc::reduction_batched_robinhood_map<KeyType, ValType, MapParams, REDUC>, BROBINHOOD>(input, query, "robinhood_first", max_load, min_load, insert_prefetch, query_prefetch, comm);
     benchmark<::dsc::reduction_batched_radixsort_map<KeyType, ValType, MapParams, REDUC>, RADIXSORT>(input, query, "radixsort_first", max_load, min_load, insert_prefetch, query_prefetch, comm);
-    benchmark<::hsc::reduction_batched_robinhood_map<KeyType, ValType, MapParams, REDUC>, MTROBINHOOD>(input, query, "hybrid_robinhood_first", max_load, min_load, insert_prefetch, query_prefetch, comm);
-    benchmark<::hsc::reduction_batched_radixsort_map<KeyType, ValType, MapParams, REDUC>, MTRADIXSORT>(input, query, "hybrid_radixsort_first", max_load, min_load, insert_prefetch, query_prefetch, comm);
 #elif (pINDEX == LAST)
     using REDUC = ::fsc::ReplaceReducer;
     benchmark<::dsc::reduction_batched_robinhood_map<KeyType, ValType, MapParams, REDUC>, BROBINHOOD>(input, query, "robinhood_last", max_load, min_load, insert_prefetch, query_prefetch, comm);
     benchmark<::dsc::reduction_batched_radixsort_map<KeyType, ValType, MapParams, REDUC>, RADIXSORT>(input, query, "radixsort_last", max_load, min_load, insert_prefetch, query_prefetch, comm);
-    benchmark<::hsc::reduction_batched_robinhood_map<KeyType, ValType, MapParams, REDUC>, MTROBINHOOD>(input, query, "hybrid_robinhood_last", max_load, min_load, insert_prefetch, query_prefetch, comm);
-    benchmark<::hsc::reduction_batched_radixsort_map<KeyType, ValType, MapParams, REDUC>, MTRADIXSORT>(input, query, "hybrid_radixsort_last", max_load, min_load, insert_prefetch, query_prefetch, comm);
 #else
     static_assert(false, "UNSUPPORTED REDUCTION TYPE");
 #endif // pINDEX
-#endif // pDistHash
+
+}
 
     // mpi cleanup is automatic
     comm.barrier();
