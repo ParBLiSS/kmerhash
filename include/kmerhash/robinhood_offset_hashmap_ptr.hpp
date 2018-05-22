@@ -196,8 +196,8 @@ struct ReplaceReducer {
 template <typename Key, typename T,
 		template <typename> class Hash = ::std::hash,
 		template <typename> class Equal = ::std::equal_to,
-		typename Allocator = ::std::allocator<std::pair<const Key, T> >,
-		typename Reducer = ::fsc::DiscardReducer
+		typename Reducer = ::fsc::DiscardReducer,
+		typename Allocator = ::std::allocator<std::pair<const Key, T> >
 		>
 class hashmap_robinhood_offsets_reduction {
 
@@ -4063,27 +4063,27 @@ public:
 
 };
 
-template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Allocator, typename Reducer >
-constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::info_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::info_empty;
-template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Allocator, typename Reducer >
-constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::info_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::info_mask;
-template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Allocator, typename Reducer >
-constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::info_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::info_normal;
+template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Reducer, typename Allocator >
+constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::info_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::info_empty;
+template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Reducer, typename Allocator >
+constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::info_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::info_mask;
+template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Reducer, typename Allocator >
+constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::info_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::info_normal;
 
-template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Allocator, typename Reducer >
-constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bid_pos_mask;
-template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Allocator, typename Reducer >
-constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bid_pos_exists;
-template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Allocator, typename Reducer >
-constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::insert_failed;
-template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Allocator, typename Reducer >
-constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::find_failed;
-template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Allocator, typename Reducer >
-constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::cache_align_mask;
-template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Allocator, typename Reducer >
-constexpr uint32_t hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::info_per_cacheline;
-template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Allocator, typename Reducer >
-constexpr uint32_t hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, Reducer>::value_per_cacheline;
+template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Reducer, typename Allocator >
+constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::bid_pos_mask;
+template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Reducer, typename Allocator >
+constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::bid_pos_exists;
+template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Reducer, typename Allocator >
+constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::insert_failed;
+template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Reducer, typename Allocator >
+constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::find_failed;
+template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Reducer, typename Allocator >
+constexpr typename hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::bucket_id_type hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::cache_align_mask;
+template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Reducer, typename Allocator >
+constexpr uint32_t hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::info_per_cacheline;
+template <typename Key, typename T, template <typename> class Hash, template <typename> class Equal, typename Reducer, typename Allocator >
+constexpr uint32_t hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Reducer, Allocator>::value_per_cacheline;
 
 
 //========== ALIASED TYPES

@@ -141,8 +141,8 @@ namespace dsc  // distributed std container
   template<typename Key, typename T,
     template <typename, typename, template <typename> class, template <typename> class, typename> class Container,
     template <typename> class MapParams,
-    class Alloc = ::std::allocator< ::std::pair<const Key, T> >,
-	typename Reducer = ::fsc::DiscardReducer
+	typename Reducer = ::fsc::DiscardReducer,
+    class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
   class batched_radixsort_map_base : public ::dsc::map_base<Key, T, MapParams, Alloc> {
 
@@ -1575,11 +1575,10 @@ if (measure_mode == MEASURE_A2A)
                                                         Predicate const& pred = Predicate() ) const {
 
     	  ::std::vector<count_result_type > results(keys.size(), 0);
-    	  size_t res = 0;
         if (this->comm.size() == 1) {
-          res = count_1(keys, results.data(), sorted_input, pred);
+          count_1(keys, results.data(), sorted_input, pred);
         } else {
-          res = count_p(keys, results.data(), sorted_input, pred);
+          count_p(keys, results.data(), sorted_input, pred);
         }
         return results;
       }
@@ -1938,12 +1937,11 @@ if (measure_mode == MEASURE_A2A)
 			  Predicate const& pred = Predicate() ) const {
 
     	  ::std::vector<mapped_type > results(keys.size(), 0);
-    	  size_t res = 0;
 
     	  if (this->comm.size() == 1) {
-    		  res = find_1(keys, results.data(), nonexistent, sorted_input, pred);
+    		  find_1(keys, results.data(), nonexistent, sorted_input, pred);
     	  } else {
-    		  res = find_p(keys, results.data(), nonexistent, sorted_input, pred);
+    		  find_p(keys, results.data(), nonexistent, sorted_input, pred);
     	  }
 
     	  return results;
@@ -2545,7 +2543,7 @@ if (measure_mode == MEASURE_A2A)
   	  template <typename> class MapParams,
   class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
-  using batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort, MapParams, Alloc, ::fsc::DiscardReducer>;
+  using batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort, MapParams, ::fsc::DiscardReducer, Alloc>;
 
 
   /**
@@ -2578,10 +2576,10 @@ if (measure_mode == MEASURE_A2A)
    */
   template<typename Key, typename T,
   	  template <typename> class MapParams,
-  class Alloc = ::std::allocator< ::std::pair<const Key, T> >,
-  typename Reduc = ::std::plus<T>
+  typename Reduc = ::std::plus<T>,
+  class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
-  using reduction_batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort, MapParams, Alloc, Reduc>;
+  using reduction_batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort, MapParams, Reduc, Alloc>;
 
 
 
@@ -2618,11 +2616,11 @@ if (measure_mode == MEASURE_A2A)
   class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
   class counting_batched_radixsort_map : public reduction_batched_radixsort_map<Key, T,
-  	  MapParams, Alloc, ::std::plus<T> > {
+  	  MapParams, ::std::plus<T>, Alloc > {
       static_assert(::std::is_integral<T>::value, "count type has to be integral");
 
     protected:
-      using Base = reduction_batched_radixsort_map<Key, T, MapParams, Alloc, ::std::plus<T>>;
+      using Base = reduction_batched_radixsort_map<Key, T, MapParams, ::std::plus<T>, Alloc>;
 
     public:
       using local_container_type = typename Base::local_container_type;

@@ -145,8 +145,8 @@ namespace hsc  // hybrid std container
   template<typename Key, typename T,
   template <typename, typename, template <typename> class, template <typename> class, typename...> class Container,
   template <typename> class MapParams,
-  class Alloc = ::std::allocator< ::std::pair<const Key, T> >,
-	typename Reducer = ::fsc::DiscardReducer
+	typename Reducer = ::fsc::DiscardReducer,
+  class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
   class batched_robinhood_map_base :
 		  public ::dsc::map_base<Key, T, MapParams, Alloc> {
@@ -216,8 +216,9 @@ namespace hsc  // hybrid std container
     	// NOTE: if there is a hyperloglog estimator in local container, it is usign the transformed storage hash.
       using local_container_type = Container<Key, T,
     		  StoreTransHash,
-    		  StoreTransEqual,
-    		  Alloc, Reducer>;
+    		  StoreTransEqual, 
+              Reducer,
+    		  Alloc>;
 
       // std::batched_robinhood_multimap public members.
       using key_type              = typename local_container_type::key_type;
@@ -3129,7 +3130,7 @@ namespace hsc  // hybrid std container
   	  template <typename> class MapParams,
   class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
-  using batched_robinhood_map = batched_robinhood_map_base<Key, T, ::fsc::hashmap_robinhood_offsets_reduction, MapParams, Alloc, ::fsc::DiscardReducer>;
+  using batched_robinhood_map = batched_robinhood_map_base<Key, T, ::fsc::hashmap_robinhood_offsets_reduction, MapParams, ::fsc::DiscardReducer, Alloc>;
 
 
   /**
@@ -3162,10 +3163,10 @@ namespace hsc  // hybrid std container
    */
   template<typename Key, typename T,
   	  template <typename> class MapParams,
-  class Alloc = ::std::allocator< ::std::pair<const Key, T> >,
-  typename Reduc = ::std::plus<T>
+        typename Reduc = ::std::plus<T>,
+  class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
-  using reduction_batched_robinhood_map = batched_robinhood_map_base<Key, T, ::fsc::hashmap_robinhood_offsets_reduction, MapParams, Alloc, Reduc>;
+  using reduction_batched_robinhood_map = batched_robinhood_map_base<Key, T, ::fsc::hashmap_robinhood_offsets_reduction, MapParams, Reduc, Alloc>;
 
 
 
@@ -3202,11 +3203,11 @@ namespace hsc  // hybrid std container
   class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
   class counting_batched_robinhood_map : public reduction_batched_robinhood_map<Key, T,
-  	  MapParams, Alloc, ::std::plus<T> > {
+  	  MapParams, ::std::plus<T>, Alloc> {
       static_assert(::std::is_integral<T>::value, "count type has to be integral");
 
     protected:
-      using Base = reduction_batched_robinhood_map<Key, T, MapParams, Alloc, ::std::plus<T>>;
+      using Base = reduction_batched_robinhood_map<Key, T, MapParams, ::std::plus<T>, Alloc>;
 
     public:
       using local_container_type = typename Base::local_container_type;
