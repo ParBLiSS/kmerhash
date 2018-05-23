@@ -4091,12 +4091,12 @@ constexpr uint32_t hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Redu
 template <typename Key, typename T, template <typename> class Hash = ::std::hash,
 		template <typename> class Equal = ::std::equal_to,
 		typename Allocator = ::std::allocator<std::pair<const Key, T> > >
-using hashmap_robinhood_offsets = hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, ::fsc::DiscardReducer>;
+using hashmap_robinhood_offsets = hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, ::fsc::DiscardReducer, Allocator>;
 
 template <typename Key, typename T, template <typename> class Hash = ::std::hash,
 		template <typename> class Equal = ::std::equal_to,
 		typename Allocator = ::std::allocator<std::pair<const Key, T> > >
-using hashmap_robinhood_offsets_count = hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, ::std::plus<T> >;
+using hashmap_robinhood_offsets_count = hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, ::std::plus<T>, Allocator >;
 
 }  // namespace fsc
 #endif /* KMERHASH_ROBINHOOD_OFFSET_HASHMAP_HPP_ */
