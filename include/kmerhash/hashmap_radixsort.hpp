@@ -152,7 +152,7 @@ public:
             }
 
             IndexedRangesIterator& operator+=(Distance const & n) {
-                if (n < 0) return this->operator-=(n);
+                if (n < 0) return this->operator-=(-n);
 
                 int32_t dist;
                 Distance nn = n;
@@ -176,7 +176,7 @@ public:
             }
 
             IndexedRangesIterator& operator-=(Distance const & n) {
-                if (n < 0) return this->operator+=(n);
+                if (n < 0) return this->operator+=(-n);
 
                 int32_t dist;
                 Distance nn = n;
