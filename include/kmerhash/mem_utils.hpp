@@ -63,6 +63,19 @@ namespace utils {
 			free(ptr);
 		}
 
+
+		// for generating padding https://stackoverflow.com/questions/1239855/pad-a-c-structure-to-a-power-of-two
+		template <int N>
+		struct P
+		{
+			enum { val = P<N/2>::val * 2 };
+		};
+		template <>
+		struct P<0>
+		{
+			enum { val = 1 };
+		};
+
 	}  // mem ns
 }  // utils ns
 

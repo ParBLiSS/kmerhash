@@ -50,12 +50,41 @@ public:
     using size_type             = size_t;
     using difference_type       = ptrdiff_t;
 
-    typedef struct elem
+
+    // for generating padding https://stackoverflow.com/questions/1239855/pad-a-c-structure-to-a-power-of-two
+    // template <class T1, class T2, class T3>
+    // struct PadSize
+    // {
+    //     enum { val = ::utils::mem::P<sizeof(T1) + sizeof(T2) + sizeof(T3) - 1>::val - sizeof(T1) - sizeof(T2) - sizeof(T3) }; 
+    // };
+    template <typename KK = Key, typename VV = V, typename ID = t_bucket_count,
+     int N = ::utils::mem::P<sizeof(KK) + sizeof(VV) + sizeof(ID) - 1>::val - sizeof(KK) - sizeof(VV) - sizeof(ID)>
+    struct PossiblyPadded
     {
-        t_bucket_count bucketId;
-        Key key;
-        V val;
-    } HashElement;
+        KK key;
+        VV val;
+        ID bucketId;
+        char    pad[N]; 
+    };
+    template <typename KK, typename VV, typename ID>
+    struct PossiblyPadded<KK, VV, ID, 0>
+    {
+        KK key;
+        VV val;
+        ID bucketId;
+    };
+
+    //using HashElement = PossiblyPadded<PadSize<Key, V, t_bucket_count>::val>;
+    using HashElement = 
+    PossiblyPadded<Key, V, t_bucket_count, 
+        ::utils::mem::P<sizeof(Key) + sizeof(V) + sizeof(t_bucket_count) - 1>::val - sizeof(Key) - sizeof(V) - sizeof(t_bucket_count)>;
+
+    // struct HashElement
+    // {
+    //     Key key;
+    //     V val;
+    //     t_bucket_count bucketId;
+    // } 
 
     template <typename KV>
     class IndexedRangesIterator :
