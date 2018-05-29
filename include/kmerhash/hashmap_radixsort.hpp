@@ -805,14 +805,14 @@ public:
 				totalKeyCount(0),
 				hash_mod2(hash, ::bliss::transform::identity<Key>(), modulus2<hash_val_type>(bucketMask, 0))
     {
-	if (numBuckets >= (1 << 30)) 
-		throw std::invalid_argument("number of buckets cannot exceed 2^30");
+	if (numBuckets > (1 << 30)) 
+		printf("WARNING Constructor: number of buckets exceeds 2^30: %d\n", numBuckets);
 	// this would cause numBuckets * 2 to overflow, and numBins to become 0 here, and 1 in the resize_alloc function, and numBins * binSize to overflow as well.
 	
         binSize = next_power_of_2(_binSize);
-        numBins = numBuckets * 2 / binSize;
+        numBins = std::max(static_cast<uint32_t>(1), numBuckets / std::max(static_cast<int32_t>(1),  binSize >> 1));
         binMask = numBins - 1;
-        overflowBufSize = numBins / 8;
+        overflowBufSize = std::max(static_cast<int32_t>(1), numBins >> 3);
         noValue = _noValue;
 
         countArray = (uint16_t *)_mm_malloc(numBins * sizeof(uint16_t), 64);
@@ -1140,15 +1140,17 @@ public:
         numBuckets = next_power_of_2(_newNumBuckets);
         bucketMask = numBuckets - 1;
 
-	if (numBuckets >= (1 << 30)) 
-		throw std::invalid_argument("next_power_of_2(_newNumBuckets) number of buckets cannot exceed 2^30");
+	if (numBuckets > (1 << 30)) 
+		printf("WARNING Constructor: number of buckets exceeds 2^30: %d\n", numBuckets);
+//	if (numBuckets >= (1 << 30)) 
+//		throw std::invalid_argument("next_power_of_2(_newNumBuckets) number of buckets cannot exceed 2^30");
 	// this would cause numBuckets * 2 to overflow, and numBins to become 0 here, and 1 in the resize_alloc function, and numBins * binSize to overflow as well.
 	
-        if (_binSize > -1) binSize = _binSize;    // allow bin size resize.  this is for new one...
+        if (_binSize > -1) binSize = next_power_of_2(_binSize);    // allow bin size resize.  this is for new one...
 
-        numBins = std::max((uint32_t)1, (numBuckets << 1) / binSize);   // TCP: at least 1 bin
+        numBins = std::max(static_cast<uint32_t>(1), numBuckets / std::max(static_cast<int32_t>(1),  binSize >> 1));
         binMask = numBins - 1;
-        overflowBufSize = std::max(1, numBins / 8);   // TCP: overflow of at least 1.
+        overflowBufSize = std::max(static_cast<int32_t>(1), numBins >> 3);
 
     _mm_free(countArray);
         countArray = (uint16_t *)_mm_malloc(numBins * sizeof(uint16_t), 64);
@@ -1183,7 +1185,7 @@ public:
 
         // return fail or success
         template <typename T>
-        bool resize_insert(T * keyArray, int32_t numKeys)
+        int resize_insert(T * keyArray, int32_t numKeys)
         {
               int32_t i;
     // insert the elements again
