@@ -490,7 +490,7 @@ std::vector<KmerType> readForQuery_mpiio(const std::string & filename, MPI_Comm 
 
   IndexType idx(comm);
 
-  ::bliss::io::KmerFileHelper::template read_file_mpiio<::bliss::index::kmer::KmerParser<KmerType>, PARSER_TYPE, bliss::io::SequencesIterator >(filename, query, comm);
+  ::bliss::io::KmerFileHelper::template read_file_mpiio<::bliss::index::kmer::KmerParser<KmerType>, PARSER_TYPE, bliss::io::NSplitSequencesIterator >(filename, query, comm);
 
   return query;
 }
@@ -502,7 +502,7 @@ std::vector<KmerType> readForQuery_mmap(const std::string & filename, MPI_Comm c
   IndexType idx(comm);
 
   // default to including quality score iterators.
-  ::bliss::io::KmerFileHelper::template read_file_mmap<::bliss::index::kmer::KmerParser<KmerType>, PARSER_TYPE, bliss::io::SequencesIterator >(filename, query, comm);
+  ::bliss::io::KmerFileHelper::template read_file_mmap<::bliss::index::kmer::KmerParser<KmerType>, PARSER_TYPE, bliss::io::NSplitSequencesIterator >(filename, query, comm);
 
   return query;
 }
@@ -515,7 +515,7 @@ std::vector<KmerType> readForQuery_posix(const std::string & filename, MPI_Comm 
   IndexType idx(comm);
 
   // default to including quality score iterators.
-  ::bliss::io::KmerFileHelper::template read_file_posix<::bliss::index::kmer::KmerParser<KmerType>, PARSER_TYPE, bliss::io::SequencesIterator  >(filename, query, comm);
+  ::bliss::io::KmerFileHelper::template read_file_posix<::bliss::index::kmer::KmerParser<KmerType>, PARSER_TYPE, bliss::io::NSplitSequencesIterator  >(filename, query, comm);
 
   return query;
 }
