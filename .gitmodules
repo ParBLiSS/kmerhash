@@ -13,9 +13,6 @@
 	path = ext/lz4
 	url = https://github.com/tcpan/lz4.git
 	branch = dev
-[submodule "ext/cotire"]
-	path = ext/cotire
-	url = https://github.com/sakra/cotire.git
 [submodule "ext/clhash"]
 	path = ext/clhash
 	url = https://github.com/lemire/clhash.git

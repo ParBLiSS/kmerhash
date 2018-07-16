@@ -54,7 +54,6 @@ function(add_hashmap_target storehash group)
 		if (ENABLE_VTUNE_PROFILING)
 			target_link_libraries(benchmark_hashtables_${storehash} ittnotify dl)
 		endif (ENABLE_VTUNE_PROFILING)
-		#cotire(benchmark_hashtables_${storehash})
 	
 	endif(NOT TARGET benchmark_hashtables_${storehash})
 	
@@ -77,7 +76,6 @@ function(add_dist_hashmap_target prefix map disthash storehash extra extra2 grou
 			target_link_libraries(${prefix}-FASTQ-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash} ittnotify dl)
 		endif (ENABLE_VTUNE_PROFILING)
 		
-		#cotire(${prefix}-FASTQ-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash})
 	endif(NOT TARGET ${prefix}-FASTQ-a4-k31-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash})
 	
 	
@@ -101,7 +99,6 @@ function(add_dist_hashmap_kmer_target prefix k dna map disthash storehash extra 
 			target_link_libraries(${prefix}-FASTQ-a${dna}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash} ittnotify dl)
 		endif (ENABLE_VTUNE_PROFILING)
 	
-		#cotire(${prefix}-FASTQ-a${dna}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash})
 	endif(NOT TARGET ${prefix}-FASTQ-a${dna}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash})
 	
 	add_dependencies(${group} ${prefix}-FASTQ-a${dna}-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash})
@@ -123,7 +120,6 @@ function(add_dist_counter_target prefix format k map disthash storehash extra ex
 			target_link_libraries(${prefix}-${format}-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash} ittnotify dl)
 		endif (ENABLE_VTUNE_PROFILING)
 		
-		#cotire(${prefix}-${format}-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash})
 	endif(NOT TARGET ${prefix}-${format}-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash})
 		
 	add_dependencies(${group} ${prefix}-${format}-a4-k${k}-CANONICAL-${map}-COUNT-dtIDEN-dh${disthash}-sh${storehash})
@@ -146,7 +142,6 @@ function(add_distht_target prefix reducer disthash storehash bits overlap prefet
 			target_link_libraries(${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash}-${bits} ittnotify dl)
 		endif (ENABLE_VTUNE_PROFILING)
 		
-		#cotire(${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash})
 	endif(NOT TARGET ${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash}-${bits})
 	
 	add_dependencies(${group} ${prefix}-${reducer}-dtIDEN-dh${disthash}-sh${storehash}-${bits})
@@ -164,7 +159,6 @@ if (BUILD_BENCHMARKS)
 	if (ENABLE_VTUNE_PROFILING)
 		target_link_libraries(benchmark_hashes ittnotify dl)
 	endif(ENABLE_VTUNE_PROFILING)
-	#cotire(benchmark_hashes)
 	
 	add_dependencies(serial_benchmarks benchmark_hashes)
 	
@@ -302,7 +296,6 @@ if (BUILD_BENCHMARKS)
 if (ENABLE_VTUNE_PROFILING)
 	target_link_libraries(testKmerPairIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR ittnotify dl)
 endif(ENABLE_VTUNE_PROFILING)
-	#cotire(testKmerPairIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR)
 
 # dump k-mers
   add_executable(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
@@ -314,7 +307,6 @@ endif(ENABLE_VTUNE_PROFILING)
 if (ENABLE_VTUNE_PROFILING)
 	target_link_libraries(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR ittnotify dl)
 endif(ENABLE_VTUNE_PROFILING)
-	#cotire(dumpKIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR)
 
 # dump kmer-count pair.
   add_executable(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR BenchmarkKmerIndex.cpp)
@@ -326,7 +318,6 @@ endif(ENABLE_VTUNE_PROFILING)
 if (ENABLE_VTUNE_PROFILING)
 	target_link_libraries(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR ittnotify dl)
 endif(ENABLE_VTUNE_PROFILING)
-	#cotire(dumpKVIndex-FASTQ-a4-k31-CANONICAL-BROBINHOOD-COUNT-dtIDEN-dhMURMUR-shMURMUR)
 
 
 
@@ -384,7 +375,6 @@ add_executable(martinus_benchmark_hashtables martinus_test_robinhood.cpp)
 SET_TARGET_PROPERTIES(martinus_benchmark_hashtables
 	PROPERTIES COMPILE_FLAGS "-DENABLE_PREFETCH")
 target_link_libraries(martinus_benchmark_hashtables ${EXTRA_LIBS})
-#cotire(martinus_benchmark_hashtables)
 
 add_dependencies(serial_benchmarks martinus_benchmark_hashtables)
 
