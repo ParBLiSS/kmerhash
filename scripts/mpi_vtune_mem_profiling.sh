@@ -31,9 +31,17 @@ MEM_TRANS_RETIRED.LOAD_LATENCY_GT_512,\
 OFFCORE_RESPONSE:request=ALL_REQUESTS:response=LLC_MISS.LOCAL_DRAM \
 -r ${2}.vtune -- \
 mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.core \
-${@:3}
+${@:3} > ${2}.raw.log
 
 amplxe-cl -report summary -r ${2}.vtune -report-output ${2}.sum.log
 amplxe-cl -report hw-events -r ${2}.vtune -report-output ${2}.hw.log
 amplxe-cl -report top-down -r ${2}.vtune -report-output ${2}.top.log
+
+
+
+amplxe-cl -collect general-exploration -knob collect-memory-bandwidth=true -r ${2}.bw.vtune -- \
+mpirun -np $1 --map-by ppr:${cores_per_socket}:socket --bind-to core --rank-by core --output-filename ${2}.core \
+${@:3} > ${2}.bw.raw.log
+
+amplxe-cl -report summary -r ${2}.bw.vtune -report-output ${2}.bw.log
 

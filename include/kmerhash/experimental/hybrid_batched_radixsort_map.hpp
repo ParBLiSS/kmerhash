@@ -145,10 +145,10 @@ namespace hsc  // hybrid std container
    * @tparam Alloc  default to ::std::allocator< ::std::pair<const Key, T> >    allocator for local storage.
    */
   template<typename Key, typename T,
-  template <typename, typename, template <typename> class, template <typename> class...> class Container,
+  template <typename, typename, template <typename> class, template <typename> class, typename> class Container,
   template <typename> class MapParams,
-  class Alloc = ::std::allocator< ::std::pair<const Key, T> >,
-	typename Reducer = ::fsc::DiscardReducer
+	typename Reducer = ::fsc::DiscardReducer,
+  class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
   class batched_radixsort_map_base :
 		  public ::dsc::map_base<Key, T, MapParams, Alloc> {
@@ -218,7 +218,7 @@ namespace hsc  // hybrid std container
     	// NOTE: if there is a hyperloglog estimator in local container, it is usign the transformed storage hash.
       using local_container_type = Container<Key, T,
     		  StoreTransHash,
-    		  StoreTransEqual>;
+    		  StoreTransEqual, Reducer>;
 
       // std::batched_radixsort_multimap public members.
       using key_type              = typename local_container_type::key_type;
@@ -1574,17 +1574,24 @@ namespace hsc  // hybrid std container
        * @param input  vector.  will be permuted.
        */
       template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>
-      size_t insert(std::vector<::std::pair<Key, T> >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
+      size_t insert_no_finalize(std::vector<::std::pair<Key, T> >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
 
             auto insert_functor = [this](int tid, ::std::pair<Key, T> * it, ::std::pair<Key, T> * et, bool est = true) {
+                size_t cnt = std::distance(it, et);
                 if (est)
-                    this->c[tid].insert(it, et);
+                    this->c[tid].estimate_and_insert(it, cnt);
                 else
-                    this->c[tid].insert_no_estimate(it, et);
+                    this->c[tid].insert(it, cnt);
+#ifdef MT_DEBUG
+                printf("rank %d thread %d inserting %ld, inserted %ld\n", this->comm.rank(), tid, cnt, this->c[tid].size());
+#endif
             };
             auto insert_no_est_functor = [this](int tid, ::std::pair<Key, T> * it, ::std::pair<Key, T> * et) {
                 // don't call the estimate
-                this->c[tid].insert_no_estimate(it, et);
+                this->c[tid].insert(it, std::distance(it, et));
+#ifdef MT_DEBUG
+            printf("rank %d thread %d inserting %ld, inserted %ld\n", this->comm.rank(), tid, std::distance(it, et), this->c[tid].size());
+#endif
             };
 
 
@@ -1593,6 +1600,30 @@ namespace hsc  // hybrid std container
     	  } else {
     		  return this->template modify_p<estimate>(input, insert_functor, insert_no_est_functor);
     	  }
+      }
+
+      /**
+       * @brief insert new elements in the hybrid batched_radixsort_multimap.
+       * @param input  vector.  will be permuted.
+       */
+      template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>
+      size_t insert(std::vector<::std::pair<Key, T> >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
+        
+        size_t result = this->insert_no_finalize(input, sorted_input, pred);
+
+    	  this->finalize_insert();
+
+    	  return result;
+      }
+
+
+      void finalize_insert() {
+
+        #pragma omp parallel
+        {
+          int tid = omp_get_thread_num();
+          this->c[tid].finalize_insert();
+        }
       }
 
     protected:
@@ -2492,7 +2523,7 @@ namespace hsc  // hybrid std container
   	  template <typename> class MapParams,
   class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
-  using batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort, MapParams, Alloc, ::fsc::DiscardReducer>;
+  using batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort, MapParams, ::fsc::DiscardReducer, Alloc>;
 
 
   /**
@@ -2525,10 +2556,10 @@ namespace hsc  // hybrid std container
    */
   template<typename Key, typename T,
   	  template <typename> class MapParams,
-  class Alloc = ::std::allocator< ::std::pair<const Key, T> >,
-  typename Reduc = ::std::plus<T>
+    typename Reduc = ::std::plus<T>,
+  class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
-  using reduction_batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort, MapParams, Alloc, Reduc>;
+  using reduction_batched_radixsort_map = batched_radixsort_map_base<Key, T, ::fsc::hashmap_radixsort, MapParams, Reduc, Alloc>;
 
 
 
@@ -2565,11 +2596,11 @@ namespace hsc  // hybrid std container
   class Alloc = ::std::allocator< ::std::pair<const Key, T> >
   >
   class counting_batched_radixsort_map : public reduction_batched_radixsort_map<Key, T,
-  	  MapParams, Alloc, ::std::plus<T> > {
+  	  MapParams, ::std::plus<T>, Alloc > {
       static_assert(::std::is_integral<T>::value, "count type has to be integral");
 
     protected:
-      using Base = reduction_batched_radixsort_map<Key, T, MapParams, Alloc, ::std::plus<T>>;
+      using Base = reduction_batched_radixsort_map<Key, T, MapParams, ::std::plus<T>, Alloc>;
 
     public:
       using local_container_type = typename Base::local_container_type;
@@ -2612,6 +2643,11 @@ protected:
 
 public:
 
+        using Base::insert_no_finalize;
+        using Base::insert;
+        using Base::finalize_insert;
+
+
       /**
        * @brief insert new elements in the hybrid batched_radixsort_multimap.
        * @param input  vector.  will be permuted.
@@ -2648,6 +2684,7 @@ public:
         }
       }
 
+
       /**
        * @brief insert new elements in the hybrid batched_radixsort_multimap.
        * @param input  vector.  will be permuted.
@@ -2655,21 +2692,13 @@ public:
       template <bool estimate = true, typename Predicate = ::bliss::filter::TruePredicate>
       size_t insert(std::vector<Key >& input, bool sorted_input = false, Predicate const & pred = Predicate()) {
         
-        size_t result = insert_no_finalize(input, sorted_input, pred);
+        size_t result = this->insert_no_finalize(input, sorted_input, pred);
 
     	  this->finalize_insert();
 
     	  return result;
       }
 
-      void finalize_insert() {
-
-        #pragma omp parallel
-        {
-          int tid = omp_get_thread_num();
-          this->c[tid].finalize_insert();
-        }
-      }
   };
 
 

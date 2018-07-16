@@ -1416,7 +1416,7 @@ int main(int argc, char** argv) {
       chars_per_kmer *= 2.0;
 #endif
 
-  float distinct_ratio = 1.0;
+  float distinct_ratio = 0.125; //1.0;
   size_t delta_distinct = 0;
   size_t max_load = 0;
   size_t buckets = 0;

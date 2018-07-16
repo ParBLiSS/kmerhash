@@ -97,6 +97,9 @@
 #if defined(__AVX2__)
 #include "murmurhash3_32_avx.hpp"
 #include "murmurhash3_64_avx.hpp"
+#include "murmurhash3finalizer_32_avx.hpp"
+// no 64 bit finalizer because no mullo for 64 bit.
+
 
 #ifndef INCLUDE_CLHASH_H_
 #include <clhash/src/clhash.c>
@@ -137,6 +140,9 @@ public:
   static constexpr size_t batch_size = 1;
   using result_type = uint64_t;
   using argument_type = T;
+
+
+  identity (uint32_t const &_seed = 43) {};
 
   /// operator to compute hash value
   inline uint64_t operator()(const T &key) const
