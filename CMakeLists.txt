@@ -915,7 +915,6 @@ configure_file(
 include_directories("${CMAKE_BINARY_DIR}")
 include_directories("${PROJECT_SOURCE_DIR}/include")
 # this below gets the smhasher (murmur hash)
-# below gets flat_hash_map.hpp
 include_directories("${EXT_PROJECTS_DIR}") 
 include_directories("${EXT_PROJECTS_DIR}/kmerind/src")
 include_directories("${EXT_PROJECTS_DIR}/kmerind/ext")

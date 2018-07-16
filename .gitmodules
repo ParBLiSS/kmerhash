@@ -2,9 +2,6 @@
 	path = ext/kmerind
 	url = https://github.com/ParBLiSS/kmerind.git
 	branch = master
-[submodule "ext/flat_hash_map"]
-	path = ext/flat_hash_map
-	url = https://github.com/skarupke/flat_hash_map.git
 [submodule "ext/martinus"]
 	path = ext/martinus
 	url = https://github.com/tcpan/robin-hood-hashing.git

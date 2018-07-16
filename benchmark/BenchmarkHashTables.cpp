@@ -47,8 +47,6 @@
 #include <tommyds/tommytrie.h>
 #include <tommyds/tommytrie.c>
 
-#include "flat_hash_map/flat_hash_map.hpp"
-
 #endif
 
 #include "containers/unordered_vecmap.hpp"
@@ -513,71 +511,6 @@ void benchmark_densehash_full_map(std::string name, std::vector<::std::pair<Kmer
 
 
 
-#if 0
-// cannot get it to compile
-template <typename Kmer, typename Value>
-void benchmark_flat_hash_map(std::string name, std::vector<::std::pair<Kmer, Value> > const & input, size_t const query_frac, ::mxx::comm const & comm) {
-  BL_BENCH_INIT(map);
-
-  std::vector<Kmer> query;
-
-  BL_BENCH_START(map);
-  // no transform involved.
-  ::ska::flat_hash_map<Kmer, Value,
-	StoreHash<Kmer> > map(input.size() * 2 / repeat_rate);
-  BL_BENCH_END(map, "reserve", input.size());
-
-  {
-    BL_BENCH_START(map);
-    query.resize(input.size() / query_frac);
-    std::transform(input.begin(), input.begin() + input.size() / query_frac, query.begin(),
-                   [](::std::pair<Kmer, Value> const & x){
-      return x.first;
-    });
-    BL_BENCH_END(map, "generate query", input.size());
-
-    BL_BENCH_START(map);
-    map.insert(input.begin(), input.end());
-    BL_BENCH_END(map, "insert", map.size());
-  }
-
-  BL_BENCH_START(map);
-  size_t result = 0;
-  size_t i = 0;
-  size_t max = input.size() / query_frac;
-  for (; i < max; ++i) {
-    auto iter = map.find(query[i]);
-    result ^= (*iter).second;
-  }
-  BL_BENCH_END(map, "find", result);
-
-  BL_BENCH_START(map);
-  result = 0;
-  for (size_t i = 0, max = input.size() / query_frac; i < max; ++i) {
-    result += map.count(query[i]);
-  }
-  BL_BENCH_END(map, "count", result);
-
-  BL_BENCH_START(map);
-//  result = map.erase(query.begin(), query.end());
-
-  result = 0;
-  for (size_t i = 0, max = input.size() / query_frac; i < max; ++i) {
-    result += map.erase(query[i]);
-  }
-//  map.resize(0);
-  BL_BENCH_END(map, "erase", result);
-
-  BL_BENCH_START(map);
-  result = 0;
-  for (size_t i = 0, max = input.size() / query_frac; i < max; ++i) {
-    result += map.count(query[i]);
-  }
-  BL_BENCH_END(map, "count2", result);
-
-  BL_BENCH_REPORT_MPI_NAMED(map, name, comm);
-}
-#endif
 
 
 template <typename Kmer, typename Value>
@@ -2128,29 +2061,6 @@ int main(int argc, char** argv) {
 		  BL_BENCH_REPORT_MPI_NAMED(test, "hashmaps", comm);
 
   }
-
-
-#if 0
-  // ============ flat_hash_map  not compiling.
-  // doesn't compile.  it's using initializer lists extensively, and the templated_iterator is having trouble constructing from initializer list.
-  BL_BENCH_START(test);
-  benchmark_flat_hash_map<Kmer, CountType>("flat_hash_map_DNA", count, repeat_rate, query_frac, comm);
-  BL_BENCH_COLLECTIVE_END(test, "flat_hash_map_DNA", count, comm);
-
-  BL_BENCH_START(test);
-  benchmark_flat_hash_map<DNA5Kmer, CountType>("flat_hash_map_DNA5", count, repeat_rate, query_frac, comm);
-  BL_BENCH_COLLECTIVE_END(test, "flat_hash_map_DNA5", count, comm);
-
-  BL_BENCH_START(test);
-  benchmark_flat_hash_map<DNA16Kmer, CountType>("flat_hash_map_DNA16", count, repeat_rate, query_frac, comm);
-  BL_BENCH_COLLECTIVE_END(test, "flat_hash_map_DNA16", count, comm);
-
-  BL_BENCH_START(test);
-  benchmark_flat_hash_map<FullKmer, CountType>("flat_hash_map_Full", count, repeat_rate, query_frac, comm);
-  BL_BENCH_COLLECTIVE_END(test, "flat_hash_map_Full", count, comm);
-
-  // -------------flat hash map end
-#endif
 
 
 
