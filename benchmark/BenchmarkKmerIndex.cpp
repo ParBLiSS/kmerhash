@@ -85,8 +85,8 @@ static int measure_mode = MEASURE_DISABLED;
 #include "kmerhash/distributed_batched_robinhood_map.hpp"
 #include "kmerhash/distributed_batched_radixsort_map.hpp"
 
-#include "kmerhash/experimental/hybrid_batched_robinhood_map.hpp"
-#include "kmerhash/experimental/hybrid_batched_radixsort_map.hpp"
+#include "kmerhash/hybrid_batched_robinhood_map.hpp"
+#include "kmerhash/hybrid_batched_radixsort_map.hpp"
 
 
 #include "index/kmer_index.hpp"
