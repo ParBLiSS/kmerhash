@@ -390,14 +390,6 @@ add_dependencies(serial_benchmarks martinus_benchmark_hashtables)
 
 
 
-add_executable(benchmark_a2a benchmark_mpi_alltoall.cpp)
-target_link_libraries(benchmark_a2a ${EXTRA_LIBS})
-
-add_executable(benchmark_a2av benchmark_mpi_a2av.cpp)
-target_link_libraries(benchmark_a2av ${EXTRA_LIBS})
-add_dependencies(overlap_benchmarks benchmark_a2av)
-
-
 #add_executable(hash_vs_sort hash_vs_sort.cpp)
 #target_link_libraries(hash_vs_sort ${EXTRA_LIBS})
 
@@ -416,7 +408,6 @@ target_link_libraries(test_prealloc ${EXTRA_LIBS})
 
 if(NOT TARGET microbenchmarks)
 	add_custom_target(microbenchmarks)
-	add_dependencies(microbenchmarks benchmark_a2a benchmark_a2av)
 	if (Boost_FOUND)
 		add_dependencies(microbenchmarks cust_alloc)
 	endif(Boost_FOUND)
