@@ -79,8 +79,9 @@
 
 #include "utils/filter_utils.hpp"
 #include "utils/transform_utils.hpp"
-#include "kmerhash/mem_utils.hpp"
 #include "kmerhash/math_utils.hpp"
+
+#ifndef FSC_FORCE_INLINE
 
 #if defined(_MSC_VER)
 
@@ -93,6 +94,8 @@
 #define FSC_FORCE_INLINE inline __attribute__((always_inline))
 
 #endif // !defined(_MSC_VER)
+
+#endif
 
 #include <x86intrin.h>
 
