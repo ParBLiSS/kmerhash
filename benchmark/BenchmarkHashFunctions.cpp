@@ -30,7 +30,6 @@
 #include <exception>
 
 #include "kmerhash/hash_new.hpp"
-#include "kmerhash/mem_utils.hpp"
 #include "utils/benchmark_utils.hpp"
 
 #include "tclap/CmdLine.h"
@@ -138,9 +137,6 @@ void benchmarks(size_t count, unsigned char* in, unsigned int* out) {
 
 
 
-BL_BENCH_START(benchmark);
-{
-
   BL_BENCH_START(benchmark);
   {
 
@@ -161,17 +157,20 @@ BL_BENCH_START(benchmark);
   {
 
 #ifdef VTUNE_ANALYSIS
-  if (measure_mode == MEASURE_MURMUR64AVX)
+  if (measure_mode == MEASURE_MURMUR64AVX_STREAM)
       __itt_resume();
 #endif
     ::fsc::hash::murmur3avx64<DataStruct<N> > h;
      benchmark_hash_batch_stream(h, data, out64, count);
 #ifdef VTUNE_ANALYSIS
-  if (measure_mode == MEASURE_MURMUR64AVX)
+  if (measure_mode == MEASURE_MURMUR64AVX_STREAM)
       __itt_pause();
 #endif
   }
   BL_BENCH_END(benchmark, "murmur64avxStream", count);
+
+BL_BENCH_START(benchmark);
+{
 
 #ifdef VTUNE_ANALYSIS
 if (measure_mode == MEASURE_CLHASH)
@@ -278,13 +277,13 @@ BL_BENCH_END(benchmark, "clhash", count);
   {
 
 #ifdef VTUNE_ANALYSIS
-  if (measure_mode == MEASURE_MURMURAVX)
+  if (measure_mode == MEASURE_MURMURAVX_STREAM)
       __itt_resume();
 #endif
     ::fsc::hash::murmur3avx32<DataStruct<N> > h;
      benchmark_hash_batch_stream(h, data, out, count);
 #ifdef VTUNE_ANALYSIS
-  if (measure_mode == MEASURE_MURMURAVX)
+  if (measure_mode == MEASURE_MURMURAVX_STREAM)
       __itt_pause();
 #endif
   }
@@ -419,8 +418,8 @@ int main(int argc, char** argv) {
     throw std::invalid_argument("Unable to allocate for data.  count is too large, or 0.");
   }
 
-  unsigned int* hashes = ::utils::mem::aligned_alloc<unsigned int>(count * sizeof(size_t));
-  
+//  unsigned int* hashes = ::utils::mem::aligned_alloc<unsigned int>(count * sizeof(size_t));
+unsigned int* hashes = (unsigned int*) malloc(count * sizeof(size_t));  
   if (hashes == nullptr) {
     throw std::invalid_argument("Unable to allocate for hash.  count is too large, or 0.");
   }
