@@ -331,24 +331,26 @@ public:
     }
   }
 
-  explicit Murmur32AVX(Murmur32AVX const &other) : Murmur32AVX(other.seed_arr[0])
+  explicit Murmur32AVX(Murmur32AVX const &other) 
   {
+    memcpy(seed_arr, other.seed_arr, 32);
   }
 
-  explicit Murmur32AVX(Murmur32AVX &&other) : Murmur32AVX(other.seed_arr[0])
+  explicit Murmur32AVX(Murmur32AVX &&other) 
   {
+    memcpy(seed_arr, other.seed_arr, 32);
   }
 
   Murmur32AVX &operator=(Murmur32AVX const &other)
   {
-    memcpy(seed_arr, other.seed_arr, 8);
+    memcpy(seed_arr, other.seed_arr, 32);
 
     return *this;
   }
 
   Murmur32AVX &operator=(Murmur32AVX &&other)
   {
-    memcpy(seed_arr, other.seed_arr, 8);
+    memcpy(seed_arr, other.seed_arr, 32);
     return *this;
   }
 

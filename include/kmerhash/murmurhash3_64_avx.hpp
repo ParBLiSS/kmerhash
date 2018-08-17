@@ -372,24 +372,26 @@ public:
     }
   }
 
-  explicit Murmur64AVX(Murmur64AVX const &other) : Murmur64AVX(other.seed_arr[0])
+  explicit Murmur64AVX(Murmur64AVX const &other) 
   {
+    memcpy(seed_arr, other.seed_arr, 32);
   }
 
-  explicit Murmur64AVX(Murmur64AVX &&other) : Murmur64AVX(other.seed_arr[0])
+  explicit Murmur64AVX(Murmur64AVX &&other) 
   {
+    memcpy(seed_arr, other.seed_arr, 32);
   }
 
   Murmur64AVX &operator=(Murmur64AVX const &other)
   {
-    memcpy(seed_arr, other.seed_arr, 8);
 
+    memcpy(seed_arr, other.seed_arr, 32);
     return *this;
   }
 
   Murmur64AVX &operator=(Murmur64AVX &&other)
   {
-    memcpy(seed_arr, other.seed_arr, 8);
+    memcpy(seed_arr, other.seed_arr, 32);
     return *this;
   }
 
