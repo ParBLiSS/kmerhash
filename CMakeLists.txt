@@ -454,7 +454,7 @@ endif(DOXYGEN_FOUND)
 # Check if the user want to build sample applications
 OPTION(BUILD_APPLICATIONS "whether sample applications should be built" ON)
 OPTION(BUILD_TESTS "whether unit tests should be built" ON)
-OPTION(BUILD_BENCHMARKS "whether benchmarking tests should be built" ON)
+OPTION(BUILD_BENCHMARKS "whether benchmarking tests should be built" OFF)
 
 
 ###### CODE ANALYSIS FLAGS.  TODO: sanitizer flags for icc?  profiling flags for icc?
