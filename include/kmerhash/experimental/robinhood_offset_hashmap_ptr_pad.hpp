@@ -180,7 +180,7 @@ struct ReplaceReducer {
 template <typename Key, typename T,
 		template <typename> class Hash = ::std::hash,
 		template <typename> class Equal = ::std::equal_to,
-		typename Allocator = ::std::allocator<std::pair<const Key, T> >,
+		typename Allocator = ::std::allocator<std::pair<Key, T> >,
 		typename Reducer = ::fsc::DiscardReducer
 		>
 class hashmap_robinhood_offsets_reduction {
@@ -334,7 +334,7 @@ protected:
 
 
 	using container_type		= value_type*;
-	using info_container_type	= ::std::vector<info_type, Allocator>;
+	using info_container_type	= ::std::vector<info_type, typename std::allocator_traits<Allocator>::template rebind_alloc<info_type> >;
 	hyperloglog64<key_type, hasher, 12> hll;  // precision of 12bits  error rate : 1.04/(2^6)
 
 
@@ -4073,12 +4073,12 @@ constexpr uint32_t hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allo
 
 template <typename Key, typename T, template <typename> class Hash = ::std::hash,
 		template <typename> class Equal = ::std::equal_to,
-		typename Allocator = ::std::allocator<std::pair<const Key, T> > >
+		typename Allocator = ::std::allocator<std::pair<Key, T> > >
 using hashmap_robinhood_offsets = hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, ::fsc::DiscardReducer>;
 
 template <typename Key, typename T, template <typename> class Hash = ::std::hash,
 		template <typename> class Equal = ::std::equal_to,
-		typename Allocator = ::std::allocator<std::pair<const Key, T> > >
+		typename Allocator = ::std::allocator<std::pair<Key, T> > >
 using hashmap_robinhood_offsets_count = hashmap_robinhood_offsets_reduction<Key, T, Hash, Equal, Allocator, ::std::plus<T> >;
 
 }  // namespace fsc

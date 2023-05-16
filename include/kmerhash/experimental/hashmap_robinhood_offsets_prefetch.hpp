@@ -121,7 +121,7 @@ namespace fsc {
  *
  */
 template <typename Key, typename T, typename Hash = ::std::hash<Key>,
-		typename Equal = ::std::equal_to<Key>, typename Allocator = ::std::allocator<std::pair<const Key, T> > >
+		typename Equal = ::std::equal_to<Key>, typename Allocator = ::std::allocator<std::pair<Key, T> > >
 class hashmap_robinhood_doubling_offsets {
 
 public:
@@ -182,7 +182,7 @@ protected:
 
 
     using container_type		= ::std::vector<value_type, Allocator>;
-    using info_container_type	= ::std::vector<info_type, Allocator>;
+    using info_container_type	= ::std::vector<info_type, typename std::allocator_traits<Allocator>::template rebind_alloc<info_type> >;
     hyperloglog64<key_type, hasher, 12> hll;  // precision of 6bits  uses 64 bytes, which should fit in a cache line.  sufficient precision.
 
 
